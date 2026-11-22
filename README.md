@@ -1,5 +1,9 @@
 # Gublan
 
+<p align="center">
+  <img src="logo.png" width="100" alt="Gublan logo">
+</p>
+
 Gublan is a small programming language and creative studio for making games and programs. Write readable,
 English-like commands, then run them in the built-in editor. Gublan Studio includes code and block editing,
 2D and 3D graphics, debugging tools, and a converter for Python, JavaScript, and Lua.

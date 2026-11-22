@@ -7,6 +7,7 @@ import os
 import sys
 import tkinter as tk
 
+from .assets import logo_image, set_window_icon
 from . import theme
 
 
@@ -27,9 +28,12 @@ def _splash(root):
                            (width - pad, height - pad, -1, -1)):
         canvas.create_line(cx, cy, cx + dx * arm, cy, fill=theme.MOSS_LIGHT, width=line)
         canvas.create_line(cx, cy, cx, cy + dy * arm, fill=theme.MOSS_LIGHT, width=line)
-    canvas.create_text(width / 2, height / 2 - theme.px(12), text="gublan studio", fill=theme.TEXT,
+    logo = logo_image(window, theme.px(44))
+    canvas.create_image(width / 2, height / 2 - theme.px(20), image=logo)
+    window.logo_image = logo
+    canvas.create_text(width / 2, height / 2 + theme.px(24), text="gublan studio", fill=theme.TEXT,
                        font=theme.ui_font(18, "bold"))
-    canvas.create_text(width / 2, height / 2 + theme.px(20), text="getting ready...", fill=theme.DIM,
+    canvas.create_text(width / 2, height / 2 + theme.px(48), text="getting ready...", fill=theme.DIM,
                        font=theme.ui_font(9))
     window.update()
     theme.square_window(window)
@@ -41,6 +45,7 @@ def launch(argv=None):
     theme.enable_dpi_awareness()
     root = tk.Tk()
     root.withdraw()
+    root.logo_image = set_window_icon(root)
     theme.pick_fonts(root)
     splash = _splash(root)
     try:

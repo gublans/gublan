@@ -18,6 +18,7 @@ from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_valu
 
 from . import blocks as blocks_module
 from . import config, exporter, theme, updater, version
+from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
 from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, SettingsDialog, SpriteEditor, WelcomePage,
                       ask, confirm, message)
@@ -270,20 +271,7 @@ class GublanStudio:
         self.show_bottom_panel(self.bottom_name, visible=self.settings.get("show_bottom", True))
 
     def _set_icon(self):
-        size = 32
-        image = tk.PhotoImage(width=size, height=size)
-        image.put(BG, to=(0, 0, size, size))
-        for x0, y0, x1, y1 in ((3, 3, 13, 6), (3, 3, 6, 13), (19, 3, 29, 6), (26, 3, 29, 13), (3, 26, 13, 29),
-                               (3, 19, 6, 29), (19, 26, 29, 29), (26, 19, 29, 29)):
-            image.put(MOSS_LIGHT, to=(x0, y0, x1, y1))
-        for x0, y0, x1, y1 in ((10, 10, 22, 13), (10, 10, 13, 22), (10, 19, 22, 22), (19, 15, 22, 22),
-                               (16, 15, 22, 18)):
-            image.put(TEXT, to=(x0, y0, x1, y1))
-        self.icon_image = image
-        try:
-            self.root.iconphoto(True, image)
-        except tk.TclError:
-            pass
+        self.icon_image = set_window_icon(self.root)
 
     def _build_topbar(self):
         bar = tk.Frame(self.root, bg=BG)
@@ -291,12 +279,8 @@ class GublanStudio:
         self.topbar = bar
         mark = tk.Frame(bar, bg=BG)
         mark.pack(side="left", padx=(px(12), px(10)), pady=px(6))
-        logo = tk.Canvas(mark, width=px(18), height=px(18), bg=BG, highlightthickness=0)
-        logo.pack(side="left")
-        size, arm, line = px(18), px(6), px(2)
-        for x, y, dx, dy in ((1, 1, 1, 1), (size - 1, 1, -1, 1), (1, size - 1, 1, -1), (size - 1, size - 1, -1, -1)):
-            logo.create_line(x, y, x + dx * arm, y, fill=MOSS_LIGHT, width=line)
-            logo.create_line(x, y, x, y + dy * arm, fill=MOSS_LIGHT, width=line)
+        self.brand_image = logo_image(mark, px(18))
+        tk.Label(mark, image=self.brand_image, bg=BG).pack(side="left")
         tk.Label(mark, text="gublan", bg=BG, fg=TEXT, font=ui_font(10, "bold")).pack(side="left", padx=(px(8), 0))
         self.menu_labels = {}
         for name in ("file", "edit", "view", "run", "tools", "help"):

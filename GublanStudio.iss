@@ -14,6 +14,8 @@ DefaultGroupName=Gublan Studio
 UninstallDisplayName=Gublan Studio
 OutputDir=dist
 OutputBaseFilename=GublanStudioSetup
+SetupIconFile=logo.ico
+UninstallDisplayIcon={app}\GublanStudio.exe
 PrivilegesRequired=lowest
 CloseApplications=yes
 Compression=lzma
@@ -27,8 +29,8 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "dist\GublanStudio.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Gublan Studio"; Filename: "{app}\GublanStudio.exe"
-Name: "{autodesktop}\Gublan Studio"; Filename: "{app}\GublanStudio.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Gublan Studio"; Filename: "{app}\GublanStudio.exe"; IconFilename: "{app}\GublanStudio.exe"
+Name: "{autodesktop}\Gublan Studio"; Filename: "{app}\GublanStudio.exe"; IconFilename: "{app}\GublanStudio.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\GublanStudio.exe"; Description: "Launch Gublan Studio"; Flags: postinstall nowait skipifsilent

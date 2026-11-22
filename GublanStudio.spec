@@ -3,7 +3,7 @@
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # gublancore.py also ships as a plain file: exported games are built from it (see studio/exporter.py core_folder)
-datas = [('docs', 'docs'), ('gublancore.py', '.')]
+datas = [('docs', 'docs'), ('gublancore.py', '.'), ('logo.png', '.'), ('logo.ico', '.')]
 binaries = []
 hiddenimports = ['gublancore', 'gublanconvert'] + collect_submodules('studio')
 tmp_ret = collect_all('OpenGL')
@@ -44,4 +44,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='logo.ico',
 )
