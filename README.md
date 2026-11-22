@@ -106,7 +106,7 @@ From the project directory, install the build dependencies and Inno Setup 6. The
 
 ```powershell
 py -m pip install pyinstaller pygame-ce pyopengl
-$version = "1.0.0"
+$version = "1.0.1"
 py -m PyInstaller --noconfirm --distpath dist --workpath build\GublanStudio GublanStudio.spec
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" GublanStudio.iss
 ```
