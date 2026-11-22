@@ -9,6 +9,7 @@ English-like commands, then run them in the built-in editor. Gublan Studio inclu
 2D and 3D graphics, debugging tools, live sessions for coding together, and converters to and from Python,
 JavaScript, and Lua.
 
+[Try it in your browser](https://gublans.github.io/gublan/) ·
 [Download for Windows](https://github.com/gublans/gublan/releases) ·
 [Language reference](docs/COMMANDS.md) · [Examples](examples/)
 
@@ -126,6 +127,30 @@ JavaScript, and Lua.
   You can turn animations off in settings.
 - Opening or importing a file that can't be read now shows a message instead of closing the studio.
 - New guides cover each of these features. Press `F1` to open them.
+
+## Try it online
+
+The [Gublan playground](https://gublans.github.io/gublan/) runs Gublan in a web browser, with nothing to
+install. Write a program or open an example, then press **Run** (or `Ctrl+Enter`). Problems show up while you
+type. **Share** copies a link that contains your program, and the **JavaScript** tab shows what your program
+turns into.
+
+The playground runs 2D games, text programs, keyboard and mouse input, buttons, text boxes, `input`, and
+`save`/`load` (kept in your browser). 3D scenes, files, and pictures or sounds from your computer need Gublan
+Studio.
+
+It uses the same checker and translator as Gublan Studio's JavaScript export, running in the browser through
+[Pyodide](https://pyodide.org), so it always matches the current language. The page lives in `web/`. To try it
+locally:
+
+```powershell
+py web/build_site.py
+py -m http.server -d _site
+```
+
+Then open <http://localhost:8000>. Every push to `main` that changes the language or the page publishes it
+again through `.github/workflows/pages.yml`. To turn this on the first time, open the repository's
+**Settings > Pages** and set **Source** to **GitHub Actions**.
 
 ## Install on Windows
 
@@ -312,5 +337,6 @@ py -m unittest discover -s tests
 | `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
 | `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`), plugins (`plugins.py`), crash protection and recovery (`guard.py`), and file reading (`textfiles.py`) |
 | `gublancli.py` | Command-line interface |
+| `web/` | Online playground, published to GitHub Pages by `.github/workflows/pages.yml` |
 | `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
 | `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |

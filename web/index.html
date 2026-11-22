@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gublan Playground</title>
+<meta name="description" content="Try Gublan, a small programming language for beginners and games, right in your browser.">
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="playground.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="https://github.com/gublans/gublan" title="Gublan on GitHub">
+    <img src="logo.png" alt="" width="28" height="28">
+    <span>Gublan <em>playground</em></span>
+  </a>
+  <div class="actions">
+    <label class="picker">
+      <span class="sr">Example</span>
+      <select id="examples"><option value="">Examples…</option></select>
+    </label>
+    <button id="run" class="primary" disabled title="Run (Ctrl+Enter)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg><span>Run</span>
+    </button>
+    <button id="stop" disabled title="Stop (Esc)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg><span>Stop</span>
+    </button>
+    <button id="share" title="Copy a link to this program">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Share</span>
+    </button>
+    <a class="download" href="https://github.com/gublans/gublan/releases/latest" title="Gublan Studio for Windows">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3.5-3L8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Get the studio</span>
+    </a>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="pane editor-pane" aria-label="Code">
+    <div class="pane-head">
+      <span id="filename">program.gubl</span>
+      <span id="status" class="status" role="status">Loading Gublan…</span>
+    </div>
+    <div class="editor" id="editor">
+      <div class="gutter" id="gutter" aria-hidden="true"></div>
+      <div class="code">
+        <pre class="highlight" id="highlight" aria-hidden="true"></pre>
+        <textarea id="source" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"
+                  aria-label="Gublan program" wrap="off"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane run-pane" aria-label="Program">
+    <div class="stage" id="stage">
+      <p class="stage-note" id="stage-note">Press <kbd>Run</kbd> to start the program. Windows and games show up here.</p>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" class="tab" data-tab="output" aria-selected="true">Output</button>
+      <button role="tab" class="tab" data-tab="problems" aria-selected="false">Problems <span class="count" id="problem-count" hidden></span></button>
+      <button role="tab" class="tab" data-tab="javascript" aria-selected="false">JavaScript</button>
+      <button class="clear" id="clear" title="Clear the output">Clear</button>
+    </div>
+    <div class="panel" id="panel-output" role="tabpanel"><pre id="output"></pre></div>
+    <div class="panel" id="panel-problems" role="tabpanel" hidden><ul id="problems"></ul></div>
+    <div class="panel" id="panel-javascript" role="tabpanel" hidden><pre id="javascript"></pre></div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>Gublan <span id="version"></span> in your browser. 2D, text, input, buttons and saving work here.
+  3D, files, pictures and sounds from your computer need <a href="https://github.com/gublans/gublan/releases/latest">Gublan Studio</a>.</span>
+  <a href="https://github.com/gublans/gublan/blob/main/docs/COMMANDS.md">Language reference</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/pyodide@314.0.7/pyodide.js"></script>
+<script src="playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+# publishes the online playground (web/) to github pages whenever main changes.
+# the windows app and installer are still built locally with build.ps1; this doesn't touch them.
+#
+# one-time setup: repository settings > pages > build and deployment > source: "github actions".
+name: playground
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "gublancore.py"
+      - "gublantranslate.py"
+      - "runtimes/gublan_runtime.js"
+      - "modules/**"
+      - "examples/**"
+      - "hello.gubl"
+      - "studio/version.py"
+      - "logo.png"
+      - "tests/test_web_playground.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Test the playground
+        run: python -m unittest tests.test_web_playground -v
+      - name: Build the playground
+        run: python web/build_site.py _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
