@@ -64,7 +64,8 @@ conditions with `and`, `or` and `not`. `break` leaves a loop and `continue` skip
 
 expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside `{braces}` anywhere.
 
-- maths: `+ - * / // % **` and brackets. text joins with `+`.
+- maths: `+ - * / // % **` and brackets. text joins directly with `+`; comma-separated print values join with spaces.
+- conversions: `string(value)` (also `str(value)`) converts to text; `number(value)` (also `num(value)`) converts numeric text to a number.
 - lists: `[1, 2, 3]`, items with `list[0]`. maps: `{"name": "sam"}`, values with `map.name` or `map["name"]`.
 - vectors: `vec2(x, y)` and `vec3(x, y, z)` can be added, subtracted and multiplied by numbers.
 - `true`, `false`, `none` and `pi`. `dt` is the seconds since the last `frame` (0 before the first one).
@@ -93,7 +94,9 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 | `dist(x1, y1, x2, y2)` | or dist(a, b) distance between points |
 | `len(x)` | number of items or letters |
 | `str(x)` | turn a value into text |
+| `string(x)` | turn a value into text |
 | `num(x)` | turn text into a number |
+| `number(x)` | turn text into a number |
 | `int(x)` | whole-number part |
 | `upper(text)` | uppercase letters |
 | `lower(text)` | lowercase letters |

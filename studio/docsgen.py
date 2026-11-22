@@ -87,7 +87,8 @@ conditions with `and`, `or` and `not`. `break` leaves a loop and `continue` skip
 
 expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside `{braces}` anywhere.
 
-- maths: `+ - * / // % **` and brackets. text joins with `+`.
+- maths: `+ - * / // % **` and brackets. text joins directly with `+`; comma-separated print values join with spaces.
+- conversions: `string(value)` (also `str(value)`) converts to text; `number(value)` (also `num(value)`) converts numeric text to a number.
 - lists: `[1, 2, 3]`, items with `list[0]`. maps: `{"name": "sam"}`, values with `map.name` or `map["name"]`.
 - vectors: `vec2(x, y)` and `vec3(x, y, z)` can be added, subtracted and multiplied by numbers.
 - `true`, `false`, `none` and `pi`. `dt` is the seconds since the last `frame` (0 before the first one).

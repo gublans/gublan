@@ -217,6 +217,29 @@ random roll 4 4
         self.assertEqual(runtime.vars["count"], 2)
         self.assertEqual(runtime.vars["roll"], 4)
 
+    def test_string_number_and_comma_concatenation(self):
+        output = []
+        runtime = GublanRuntime(onlog=output.append)
+        source = """first = "hello"
+second = "world"
+print {first + second}
+print first, second, number("3.5")
+print {string(17)}, {number("21")}
+print max(1, 2), "done, right"
+print {"hello", "world"}
+"""
+
+        self.assertEqual(analyze_source(source), [])
+        runtime.run(source)
+
+        self.assertEqual(output, [
+            "helloworld",
+            "hello world 3.5",
+            "17 21",
+            "2 done, right",
+            "hello world",
+        ])
+
     def test_vectors_maps_and_mixed_dimension_values(self):
         source = """vec2 start 10 20
 vec2 offset 3 4

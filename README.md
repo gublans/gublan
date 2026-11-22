@@ -75,6 +75,18 @@ Each line is a command. Expressions go inside braces, `dt` is elapsed frame time
 loop iteration. See [the language reference](docs/COMMANDS.md) for all commands and [the examples](examples/)
 for complete programs.
 
+### Text and numbers
+
+Use `+` to join text directly, or commas in `print` to put spaces between values. `string()` converts a value
+to text, while `number()` converts numeric text to a number:
+
+```gublan
+name = "sam"
+print "hello", name
+label = "score: " + string(number("12"))
+print label
+```
+
 ## Studio shortcuts
 
 | Shortcut | Action |
@@ -106,7 +118,7 @@ From the project directory, install the build dependencies and Inno Setup 6. The
 
 ```powershell
 py -m pip install pyinstaller pygame-ce pyopengl
-$version = "1.0.1"
+$version = "1.0.3"
 py -m PyInstaller --noconfirm --distpath dist --workpath build\GublanStudio GublanStudio.spec
 & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" GublanStudio.iss
 ```
@@ -114,7 +126,7 @@ py -m PyInstaller --noconfirm --distpath dist --workpath build\GublanStudio Gubl
 This creates **`dist\GublanStudioSetup.exe`**. Keep `$version` in sync with `VERSION` in
 [`studio/version.py`](studio/version.py).
 
-To publish a release, push the source to GitHub, create a public release tagged `v$version`, and attach
+To publish a release, push the source to GitHub, create a public release tagged `$version`, and attach
 `dist\GublanStudioSetup.exe` without renaming it. The release tag, `VERSION`, and installer version must match.
 The updater looks for that exact installer filename in the latest public release. The first release must be
 published before the updater can find an update.

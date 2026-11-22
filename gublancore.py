@@ -256,7 +256,9 @@ EXPRESSION_FUNCTIONS = {
     "dist": "dist(x1, y1, x2, y2) or dist(a, b) distance between points",
     "len": "len(x) number of items or letters",
     "str": "str(x) turn a value into text",
+    "string": "string(x) turn a value into text",
     "num": "num(x) turn text into a number",
+    "number": "number(x) turn text into a number",
     "int": "int(x) whole-number part",
     "upper": "upper(text) uppercase letters",
     "lower": "lower(text) lowercase letters",
@@ -409,6 +411,41 @@ def split_command(line):
     return tokens
 
 
+def _split_top_level_commas(text):
+    """split comma-separated values without splitting inside strings or nested expressions."""
+    parts = []
+    start = 0
+    stack = []
+    quote = None
+    escaped = False
+    pairs = {")": "(", "]": "[", "}": "{"}
+
+    for index, char in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char in "([{":
+            stack.append(char)
+        elif char in ")]}":
+            if stack and stack[-1] == pairs[char]:
+                stack.pop()
+        elif char == "," and not stack:
+            parts.append(text[start:index].strip())
+            start = index + 1
+
+    if not parts:
+        return [text]
+    parts.append(text[start:].strip())
+    return [part for part in parts if part]
+
+
 _ASSIGN_RE = re.compile(
     r"^([A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]]*\])?)\s*(\+=|-=|\*=|/=|=)(?!=)\s*(.*)$"
 )
@@ -508,7 +545,7 @@ def _normalize_condition(text):
 
 _ALLOWED_NODES = (
     ast.Expression, ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.IfExp, ast.Call,
-    ast.Constant, ast.Name, ast.Load, ast.Attribute, ast.Subscript, ast.List, ast.Dict,
+    ast.Constant, ast.Name, ast.Load, ast.Attribute, ast.Subscript, ast.List, ast.Dict, ast.Tuple,
     ast.JoinedStr, ast.FormattedValue, ast.Slice,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd,
     ast.Not, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
@@ -1151,6 +1188,8 @@ class GublanRuntime:
                 format_value(self._eval(key, lenient=True)): self._eval(value, lenient=True)
                 for key, value in zip(node.keys, node.values)
             }
+        if kind is ast.Tuple:
+            return " ".join(format_value(self._eval(item, lenient=lenient)) for item in node.elts)
         if kind is ast.JoinedStr:
             out = []
             for piece in node.values:
@@ -1452,8 +1491,9 @@ class GublanRuntime:
             if not isinstance(args[0], (str, list, dict)):
                 raise ValueError("len() needs text, a list or a map")
             return len(args[0])
-        if name in ("str", "text"):
-            return format_value(args[0]) if args else ""
+        if name in ("str", "string", "text"):
+            need(1)
+            return format_value(args[0])
         if name in ("num", "float", "number"):
             need(1)
             if isinstance(args[0], (int, float)) and not isinstance(args[0], bool):
@@ -2674,6 +2714,11 @@ class GublanRuntime:
 
     # ----- commands --------------------------------------------------------------
     def _c_print(self, statement):
+        arguments = _split_top_level_commas(statement.rest)
+        if len(arguments) > 1:
+            values = [self._eval_value(argument, split_command(argument)) for argument in arguments]
+            self.onlog(" ".join(format_value(value) for value in values))
+            return
         self.onlog(self._text(statement.parts[1:]))
 
     def _c_set(self, statement):
