@@ -6,7 +6,8 @@
 
 Gublan is a small programming language and creative studio for making games and programs. Write readable,
 English-like commands, then run them in the built-in editor. Gublan Studio includes code and block editing,
-2D and 3D graphics, debugging tools, and a converter for Python, JavaScript, and Lua.
+2D and 3D graphics, debugging tools, live sessions for coding together, and converters to and from Python,
+JavaScript, and Lua.
 
 [Download for Windows](https://github.com/gublans/gublan/releases) ·
 [Language reference](docs/COMMANDS.md) · [Examples](examples/)
@@ -18,11 +19,58 @@ English-like commands, then run them in the built-in editor. Gublan Studio inclu
 - **Make games:** build 2D and 3D projects with keyboard and mouse input, sound, images, shapes, and animation.
 - **Learn and debug:** use breakpoints, step-through execution, variable watches, command hints, and a live
   problem checker.
-- **Convert existing code:** translate supported Python, JavaScript, and Lua code into Gublan.
-- **Export projects:** package a Gublan game as a Windows executable.
+- **Buttons, textboxes, sliders, and checkboxes:** build menus and forms that work in both 2D and 3D games.
+- **Convert existing code:** translate Python, JavaScript, and Lua code, including pygame, p5.js, LÖVE, and
+  canvas games, into Gublan.
+- **Export projects:** package a Gublan game as a Windows executable, or export it as Python, JavaScript, or Lua.
+- **Code together:** host a live session on your computer so others on your network can edit with you.
+- **AI helpers:** connect Claude, Copilot, Cursor, or another MCP client to read, write, check, run, test, and
+  screenshot your project.
+- **Make it yours:** choose a theme or write your own, and add commands with plugins and modules.
 - **Save between runs:** `save` and `load` keep high scores and settings after a program closes.
 - **Discord status:** show what you're making on Discord. You can change the wording, pictures and
   button, or turn it off. Programs can set their own status with `presence`.
+
+## What's new in 1.0.5
+
+**Language**
+
+- `x => x * 2` creates a function inside an expression. Function names are values too, so you can store them
+  in variables and pass them to other functions.
+- New list functions: `map`, `filter`, `reduce`, `find`, `sortby`, `zip`, `slice`, `flat`, `any`, `every`,
+  and `call`.
+- New text and maths functions: `lines`, `words`, `capitalize`, `char`, `code`, `tojson`, `fromjson`,
+  `textwidth`, `log`, `exp`, `noise`, and `randint`.
+- `match` / `case`, `until`, `const`, and `try` / `catch` / `throw` handle choices and errors.
+- `test` blocks and `assert` check your code. Run tests with `F7` in the studio or with `py gublancli.py test`.
+- `use` loads a module from a modules folder. Gublan includes the `colors`, `easing`, and `grid` modules.
+- `textbox`, `slider`, `checkbox`, and `focus` join `button` for building interfaces.
+- Buttons, textboxes, sliders, checkboxes, text, and keyboard and mouse input all work in `mode 3d`. The
+  interface is drawn flat on top of the 3D scene.
+
+**Converting code**
+
+- Converted programs need far fewer hand fixes. Key listeners become `keydown` checks,
+  `requestAnimationFrame` and pygame loops become `forever` loops with `frame`, and `clock.tick` becomes `fps`.
+  The converter also handles lambdas, comprehensions, `*args`, keyword arguments, and bitwise operators.
+- **File > Export as another language** (`Ctrl+Shift+L`) turns a Gublan program into Python, JavaScript (a web
+  page), or Lua (LÖVE). Each export includes a small runtime file, so the exported program runs on its own.
+
+**Gublan Studio**
+
+- **Tools > Code together** hosts or joins a live session. Everyone must enter a name before joining. Each
+  person's cursor appears in their own colour with their name, and you can see who's here and send messages.
+  The host shares a join code, and only people with that code can join.
+- **Tools > Connect an AI helper (MCP)** shows how to connect an AI helper to the project folder through
+  `py gublancli.py mcp`. The server can only access files inside that folder.
+- Themes: Moss, Midnight, Ember, Paper (light), and Contrast (high contrast), plus your own JSON themes in the themes
+  folder. Pick one under **Settings > Look**.
+- Plugins are Python files that add commands, functions, and menu items. Plugins are off by default. You can
+  turn them on under **Settings > Plugins**. Install only plugins you trust.
+- Smoother interface: buttons glow on hover, dialogs fade in, and short messages slide in at the bottom.
+  You can turn animations off in settings.
+- Opening or importing a file that can't be read now shows a message instead of closing the studio.
+- New guides cover each of these features. Press `F1` to open them.
 
 ## Install on Windows
 
@@ -100,11 +148,13 @@ print label
 | `F6` | Pause |
 | `F10` | Step through the program |
 | `F9` | Toggle a breakpoint |
+| `F7` | Run the program's tests |
 | `F1` | Open help |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Code / blocks / split view |
 | `Ctrl+Shift+P` | Open the command palette |
 | `Ctrl+Space` | Show suggestions |
 | `Ctrl+Shift+C` | Convert code |
+| `Ctrl+Shift+L` | Export as another language |
 | `Ctrl+Shift+B` | Export a program |
 
 ## Command line
@@ -112,9 +162,39 @@ print label
 ```powershell
 py gublancli.py run game.gubl
 py gublancli.py check game.gubl
+py gublancli.py test game.gubl
 py gublancli.py convert old.py new.gubl
+py gublancli.py translate game.gubl python out
+py gublancli.py mcp my-project
 py gublancli.py docs
 ```
+
+`translate` accepts `python`, `javascript`, or `lua`. `mcp` starts the MCP server for a project folder. To use
+it from an MCP client such as Claude Code, add a server that runs `py gublancli.py mcp <folder>`. The installed
+app can run it with `GublanStudio.exe --mcp <folder>`.
+
+## Live sessions
+
+One person starts a session with **Tools > Code together > Start a live session**. Then **How to join** copies
+the address, port, and join code. Others choose **Join a live session** and enter their name, the address, and
+the code. A session holds up to 16 people, including the host, and every open file is shared.
+
+Live sessions use port 47800 by default. You can change the port when you start a session. Windows may ask
+whether to allow Gublan Studio through the firewall. To join from outside your network, the host must forward
+the port on their router.
+
+## Themes, plugins, and modules
+
+These files live in the Gublan Studio settings folder (`%APPDATA%\GublanStudio`):
+
+| Folder | Contents |
+| --- | --- |
+| `themes\` | JSON themes. Each theme can extend a built-in theme with `base` and override `colors` and `syntax`. |
+| `plugins\` | Python plugins with a `setup(api)` function. `hello.py` is an example. |
+| `modules\` | `.gubl` files that any program can load with `use`. |
+
+A program's own `modules` folder takes priority over your settings folder, and both take priority over the
+built-in modules.
 
 ## Build the Windows installer
 
@@ -135,7 +215,7 @@ To release a new version:
 1. Change `VERSION` in [`studio/version.py`](studio/version.py). This is the only place the version is written.
 2. Run `build.ps1`.
 3. Push the source to GitHub.
-4. Create a public release whose tag is exactly the new version, for example `1.0.4`. Don't add a `v` prefix.
+4. Create a public release whose tag is exactly the new version, for example `1.0.5`. Don't add a `v` prefix.
 5. Attach `dist\GublanStudioSetup.exe` to the release without renaming it.
 
 The installer will not build if its version doesn't match `VERSION`. The updater looks for that exact installer
@@ -159,9 +239,12 @@ py -m unittest discover -s tests
 | Path | Contents |
 | --- | --- |
 | `gublancore.py` | Gublan language parser, analyzer, and runtime |
-| `gublanconvert.py` | Python, JavaScript, and Lua converter |
+| `gublanconvert.py` | Python, JavaScript, and Lua to Gublan converter |
+| `gublantranslate.py`, `runtimes/` | Gublan to Python, JavaScript, and Lua, with each language's runtime |
+| `gublanmcp.py` | MCP server for AI helpers |
+| `modules/` | Built-in modules for `use` |
 | `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
-| `gublanide.py`, `studio/` | Gublan Studio editor |
+| `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`) and plugins (`plugins.py`) |
 | `gublancli.py` | Command-line interface |
 | `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
 | `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |

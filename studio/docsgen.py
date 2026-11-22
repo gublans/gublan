@@ -10,21 +10,30 @@ from gublancore import CATEGORY_ORDER, COLORS, COMMAND_SPECS, EXPRESSION_FUNCTIO
 CATEGORY_TITLES = {
     "basics": "basics: printing, variables and maths",
     "control": "control: choices and loops",
-    "functions": "functions and other files",
+    "functions": "functions, modules and other files",
+    "testing": "testing your code",
     "lists and maps": "lists and maps",
     "display": "the window and colours",
     "2d": "2d shapes, text and pictures",
     "3d": "3d",
+    "ui": "buttons, textboxes, sliders and checkboxes",
     "objects": "moving and changing shapes",
     "input": "keyboard, mouse and questions",
     "sound": "sound and music",
     "web": "the web",
     "saving": "saving values between runs",
     "discord": "your discord status",
+    "plugins": "commands from plugins",
 }
 
 # a few words under a category heading, for ideas that need more than one command's summary
 CATEGORY_NOTES = {
+    "ui": "these work in `mode 2d` and in `mode 3d`, where they are drawn flat on top of the 3d scene. click a "
+          "textbox to type in it; the game's own keys pause while someone is typing. `name.text`, `name.value`, "
+          "`name.checked`, `name.focused` and `name.submitted` read them, and `name.text = \"hi\"` changes them.",
+    "testing": "a `test` block is skipped when the program runs. run tests (f7 in the studio, or "
+               "`py gublancli.py test game.gubl`) runs each test on its own with a fresh start, and lists which "
+               "passed. tests can use every function in the file.",
     "saving": "saved values are kept in a small file for each program (on windows in `%APPDATA%\\Gublan\\saves`), "
               "so a high score or the level someone reached is still there next time. inside expressions, "
               "`load(\"name\", default)` gives a saved value and `saved(\"name\")` checks for one.",
@@ -61,8 +70,8 @@ its values. this file is made from the language itself (`py gublancli.py docs`),
 - lines starting with `//` are notes for people and are skipped.
 - put "quotes" around text or file paths that contain spaces: `sound "assets/jump sound.wav"`.
 - anything inside `{braces}` is worked out first: `print you have {coins * 2} coins`.
-- blocks (`if`, `loop`, `forever`, `while`, `for`, `function`) end with `end`. indenting the lines inside
-  is optional but makes programs much easier to read.
+- blocks (`if`, `loop`, `forever`, `while`, `until`, `for`, `match`, `try`, `test`, `function`) end with
+  `end`. indenting the lines inside is optional but makes programs much easier to read.
 
 ## variables
 
@@ -122,6 +131,24 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 - vectors: `vec2(x, y)` and `vec3(x, y, z)` can be added, subtracted and multiplied by numbers.
 - `true`, `false`, `none` and `pi`. `dt` is the seconds since the last `frame` (0 before the first one).
 - functions you make with `function` can be used in expressions: `{double(21)}`.
+- little functions: `x => x * 2` (or `lambda x: x * 2`) is a value you can keep in a variable and pass to
+  `map`, `filter`, `reduce`, `find`, `sortby`, `any` and `every`: `doubled = map(scores, s => s * 2)`.
+- build lists with a `for` inside brackets: `[x * x for x in numbers if x > 0]`.
+- any function can be written after a value: `name.upper()` is `upper(name)`, `items.sort()` is `sort(items)`.
+- whole numbers also have `&`, `|`, `^`, `<<`, `>>` and `~` for working with bits.
+
+## when things go wrong
+
+```gublan
+try
+    coins = number("lots")
+catch problem
+    print that didn't work: {problem}
+end
+```
+
+lines between `try` and `catch` that fail jump to `catch` instead of stopping the program. `throw` makes your
+own error, and `assert` throws one when a condition is false.
 """
 
 GAME_EXAMPLE = """## a whole small game
@@ -223,6 +250,85 @@ print {double(21)}""",
 end
 call add_up 2 3
 print {result}""",
+    "until": """lives = 3
+until lives == 0
+    print {lives} lives left
+    lives -= 1
+end""",
+    "match": """day = "sat"
+match day
+case "mon", "tue", "wed", "thu", "fri"
+    print school
+case "sat", "sun"
+    print weekend!
+else
+    print that isn't a day
+end""",
+    "case": """roll = 6
+match roll
+case 6
+    print you rolled the top number
+case 1
+    print unlucky
+end""",
+    "try": """try
+    total = 10 / 0
+catch problem
+    print {problem}
+end""",
+    "catch": """try
+    throw the door is locked
+catch reason
+    print could not go in: {reason}
+end""",
+    "throw": """function buy price coins
+    if price > coins
+        throw not enough coins
+    end
+    return coins - price
+end
+print {buy(3, 10)}""",
+    "test": """function add a b
+    return a + b
+end
+
+test adding works
+    assert add(2, 3) == 5
+    assert add(-1, 1) == 0
+end""",
+    "assert": """lives = 3
+assert lives > 0""",
+    "const": """const speed = 4
+x = 0
+x += speed""",
+    "textbox": """mode 2d
+textbox username 20 60 240 your name
+forever
+    if username.submitted
+        print hello {username.text}
+    end
+    frame
+end""",
+    "slider": """mode 2d
+slider loudness 20 120 200 0 100 50
+text shown 20 160 volume
+forever
+    shown.text = "volume " + str(loudness.value)
+    frame
+end""",
+    "checkbox": """mode 2d
+checkbox music 20 160 play music
+forever
+    if music.checked
+        title music on
+    end
+    frame
+end""",
+    "focus": """mode 2d
+textbox answer 20 60 240 type here
+focus answer""",
+    "use": """use easing
+print {easeout(0.5)}""",
     "presence": """presence details exploring the caves
 presence state level 1 of 5
 presence timer

@@ -18,19 +18,19 @@ from tkinter import filedialog
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
 
 from . import blocks as blocks_module
-from . import config, exporter, theme, updater, version
+from . import collab, config, exporter, plugins, theme, updater, version
 from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
-from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, SettingsDialog, SpriteEditor, WelcomePage,
-                      ask, confirm, message)
+from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, McpDialog, SettingsDialog, SpriteEditor,
+                      TranslateDialog, WelcomePage, ask, confirm, message)
 from .editor import CodeEditor
 from .presence import StudioPresence
 from .panels import (AssetsPanel, FilesPanel, HelpPanel, OutlinePanel, OutputPanel, ProblemsPanel,
                      VariablesPanel, reveal)
 from .templates import TEMPLATES, template
 from .theme import (BG, BORDER, DEBUG_LINE, DIM, EDITOR_BG, ERROR, HOVER, MOSS_DARK, MOSS_LIGHT, MUTED, NUMBER, PANEL,
-                    PANEL_ALT, TEXT, BracketButton, PopupMenu, Tooltip, icon, icon_font, lower, px, show_menu,
-                    ui_font)
+                    PANEL_ALT, TEXT, BracketButton, PopupMenu, Tooltip, icon, icon_font, lower, plural, px,
+                    show_menu, ui_font)
 
 APP_NAME = "gublan studio"
 CODE_TYPES = [("gublan programs", "*.gubl *.gub *.txt"), ("all files", "*.*")]
@@ -182,6 +182,7 @@ class GublanStudio:
         self.paused_line = None
         self.pending_answer = None
         self.export_dialog = None
+        self.tests_running = False
         self.settings_dialog = None
         self.side_name = self.settings.get("side_panel", "files")
         self.bottom_name = self.settings.get("bottom_panel", "output")
@@ -192,13 +193,19 @@ class GublanStudio:
         self.update_busy = False
         self.update_failed = False
         self.presence = StudioPresence(self)
+        self.live = None
+        self.live_status = None
+        self.root.report_callback_exception = self.report_error
+        theme.MOTION = bool(self.settings.get("animations", True))
         self._build_window()
+        self.plugins = plugins.load_plugins(self.settings, app=self)
         self._bind_shortcuts()
         self.apply_settings(self.settings, save=False)
         self._restore(paths)
         self.root.after(40, self._poll)
         self.root.after(1200, self._after_update)
         self.root.after(5000, self._check_for_updates)
+        self.root.after(900, self._report_plugins)
         self.presence.refresh()
         self.root.protocol("WM_DELETE_WINDOW", self.exit)
 
@@ -410,6 +417,9 @@ class GublanStudio:
         self.status_problems.bind("<Button-1>", lambda _e: self.show_bottom_panel("problems"))
         self.status_message = tk.Label(bar, text="", bg=PANEL, fg=MUTED, font=ui_font(9), padx=px(8))
         self.status_message.pack(side="left")
+        self.status_live = tk.Label(bar, text="", bg=PANEL, fg=MOSS_LIGHT, font=ui_font(9), padx=px(10),
+                                    cursor="hand2")
+        self.status_live.bind("<Button-1>", lambda _e: self.live_people())
         self.status_right = []
         for key in ("level", "indent", "position"):
             label_widget = tk.Label(bar, text="", bg=PANEL, fg=MUTED, font=ui_font(9), padx=px(10), cursor="hand2")
@@ -419,7 +429,8 @@ class GublanStudio:
         self.status_level.bind("<Button-1>", lambda _e: self._level_menu())
         self.status_indent.bind("<Button-1>", lambda _e: self.open_settings())
         self.status_position.bind("<Button-1>", lambda _e: self.goto_line_prompt())
-        self.status_widgets = [bar, self.status_state, self.status_problems, self.status_message] + self.status_right
+        self.status_widgets = [bar, self.status_state, self.status_problems, self.status_message,
+                               self.status_live] + self.status_right
 
     # ----- menus ---------------------------------------------------------------------------------------------
     def menus(self):
@@ -442,6 +453,8 @@ class GublanStudio:
                 "-",
                 {"label": "export program...", "command": self.open_export, "shortcut": "ctrl+shift+b",
                  "enabled": doc is not None},
+                {"label": "export as another language...", "command": self.open_translate,
+                 "shortcut": "ctrl+shift+l", "enabled": doc is not None},
                 {"label": "show in explorer", "command": lambda: doc and doc.path and reveal(doc.path),
                  "enabled": bool(doc and doc.path)},
                 "-",
@@ -514,16 +527,22 @@ class GublanStudio:
                 ("remove all breakpoints", self.clear_breakpoints, ""),
                 "-",
                 ("check for problems", self.check_now, "f8"),
+                {"label": "run tests", "command": self.run_tests, "shortcut": "f7",
+                 "enabled": doc is not None and not self.tests_running},
                 ("clear output", self.output.clear, ""),
             ],
             "tools": [
                 ("convert python, javascript or lua...", self.open_converter, "ctrl+shift+c"),
+                ("turn this program into python, javascript or lua...", self.open_translate, "ctrl+shift+l"),
+                ("connect an ai helper (mcp)...", self.open_mcp, ""),
+                ("code together (live session)", self._live_menu()),
                 ("sprite painter...", lambda: self.sprite_editor(None), ""),
                 ("find any action...", self.command_palette, "ctrl+shift+p"),
                 "-",
                 ("how much help", [{"label": name, "command": lambda n=name: self.set_level(n),
                                     "checked": self.settings.get("level") == name}
                                    for name in ("beginner", "standard", "expert")]),
+                *([("plugins", self._plugin_menu())] if self.settings.get("plugins") else []),
                 {"label": "show my status on discord", "command": lambda: self.set_option(
                     "discord_presence", not self.settings.get("discord_presence", True)),
                  "checked": bool(self.settings.get("discord_presence", True))},
@@ -595,7 +614,7 @@ class GublanStudio:
     def _bind_shortcuts(self):
         self.shortcuts = {
             "f5": self.run_or_continue, "shift+f5": self.stop, "f6": self.pause, "f10": self.step,
-            "f8": self.check_now, "f1": lambda: self.show_side_panel("help"),
+            "f8": self.check_now, "f7": self.run_tests, "f1": lambda: self.show_side_panel("help"),
             "f9": lambda: self._edit("breakpoint"),
             "ctrl+n": self.new_tab, "ctrl+o": self.open_dialog, "ctrl+s": self.save, "ctrl+shift+s": self.save_as,
             "ctrl+w": self.close_current, "ctrl+f4": self.close_current,
@@ -615,6 +634,7 @@ class GublanStudio:
             "ctrl+shift+m": lambda: self.show_bottom_panel("problems"),
             "ctrl+shift+v": lambda: self.show_bottom_panel("variables"),
             "ctrl+shift+b": self.open_export, "ctrl+shift+c": self.open_converter,
+            "ctrl+shift+l": self.open_translate,
         }
         self.root.bind_class("GublanKeys", "<KeyPress>", self._on_key, add="+")
         self.root.bind("<KeyPress>", self._on_key, add="+")
@@ -762,6 +782,8 @@ class GublanStudio:
         self._make_tab(doc)
         if select:
             self.select(doc)
+        if self.live is not None:
+            self.live.doc_opened(doc)
         return doc
 
     def new_from_template(self, key):
@@ -906,6 +928,8 @@ class GublanStudio:
             self.stop()
         index = self.docs.index(doc)
         self.docs.remove(doc)
+        if self.live is not None:
+            self.live.doc_closed(doc)
         doc.tab["cell"].destroy()
         doc.frame.destroy()
         if self.current is doc:
@@ -1149,7 +1173,8 @@ class GublanStudio:
             return None
         extension = os.path.splitext(path)[1].lower()
         if extension in FOREIGN:
-            self.open_converter(path)
+            # the converter is a modal window; opening it before the main window is on screen blocks start-up
+            self.when_shown(lambda: self.open_converter(path))
             return None
         if extension in (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".wav", ".ogg", ".mp3", ".exe", ".ico"):
             reveal(path)
@@ -1321,6 +1346,39 @@ class GublanStudio:
         editor = SpriteEditor(self.root, assets, saved, path)
         editor.show(width=px(860), height=px(640))
 
+    def when_shown(self, callback, tries=0):
+        """run callback once the main window is visible (straight away if it already is)."""
+        try:
+            shown = bool(self.root.winfo_viewable())
+        except tk.TclError:
+            return
+        if shown or tries > 100:
+            self.root.after(60 if tries else 0, callback)
+            return
+        self.root.after(100, lambda: self.when_shown(callback, tries + 1))
+
+    def report_error(self, kind, value, trace):
+        """called by tkinter when a button, key or timer callback raises. keeps the studio alive and tells the user."""
+        import traceback
+        details = "".join(traceback.format_exception(kind, value, trace))
+        try:
+            os.makedirs(config.settings_folder(), exist_ok=True)
+            with open(os.path.join(config.settings_folder(), "errors.log"), "a", encoding="utf-8") as handle:
+                handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + details + "\n")
+        except OSError:
+            pass
+        if sys.stderr is not None:  # the windowed exe has no console
+            sys.stderr.write(details)
+        now = time.monotonic()
+        if now - getattr(self, "_last_error_shown", 0.0) < 4.0:
+            return
+        self._last_error_shown = now
+        try:
+            message(self.root, "something went wrong", f"gublan studio hit a problem ({kind.__name__.lower()}) but "
+                    "kept running. your work is safe.", kind="error", details=details)
+        except Exception:  # noqa: BLE001 - the error window itself must never take the studio down
+            pass
+
     def open_converter(self, path=None):
         def opened(text, name):
             doc = self.new_tab(text, name=f"{name} (gublan)")
@@ -1338,11 +1396,101 @@ class GublanStudio:
             except tk.TclError:
                 self.settings_dialog = None
         dialog = SettingsDialog(self.root, self.settings, lambda settings: self.apply_settings(settings),
-                                presence=self.presence)
+                                presence=self.presence, app=self)
         self.settings_dialog = dialog
         dialog.bind("<Destroy>", lambda e: setattr(self, "settings_dialog", None) if e.widget is dialog else None,
                     add="+")
         dialog.show(width=px(600), height=px(min(760, self.root.winfo_screenheight() - 120)), modal=False)
+
+    def open_translate(self):
+        doc = self.current
+        if doc is None:
+            message(self.root, "export as another language", "open a program first")
+            return
+        if doc.view == "blocks" and doc.blocks is not None:
+            doc.blocks.push(now=True)
+        source = doc.editor.get()
+        if not source.strip():
+            self.flash("this program is empty. write some gublan first")
+            return
+        base_dir = doc.folder or self.settings.get("folder") or os.getcwd()
+        dialog = TranslateDialog(self.root, source, doc.name, base_dir, settings=self.settings)
+        dialog.bind("<Destroy>", lambda e: config.save(self.settings) if e.widget is dialog else None,
+                    add="+")
+        dialog.show(width=px(940), height=px(680), modal=False)
+
+    def open_mcp(self):
+        doc = self.current
+        folder = (doc.folder if doc is not None and doc.folder else None) or self.settings.get("folder") or \
+            os.getcwd()
+        dialog = McpDialog(self.root, folder, settings=self.settings)
+        dialog.bind("<Destroy>", lambda e: config.save(self.settings) if e.widget is dialog else None, add="+")
+        dialog.show(width=px(760), height=px(520), modal=False)
+
+    def run_tests(self):
+        """run every test block in the current program (f7) and show what passed in the output."""
+        doc = self.current
+        if doc is None:
+            self.flash("open or make a program first")
+            return
+        if self.tests_running:
+            self.flash("the tests are already running")
+            return
+        if self.running():
+            self.flash("stop the program first (shift+f5), then run the tests")
+            return
+        if doc.view == "blocks" and doc.blocks is not None:
+            doc.blocks.push(now=True)
+        source = doc.editor.get()
+        if not re.search(r"(?m)^\s*test\b", source):
+            self.show_bottom_panel("output")
+            self.output.write("this program has no tests yet. a test block checks your code without running "
+                              "the game:\n    test adding works\n        assert 1 + 1 == 2\n    end", "info")
+            return
+        base_dir = doc.folder or self.settings.get("folder") or os.getcwd()
+        if self.settings.get("clear_output", True):
+            self.output.clear()
+        self.output.write(f"running the tests in {doc.name}", "info")
+        self.show_bottom_panel("output")
+        self.tests_running = True
+        self.set_state("running tests", MOSS_LIGHT)
+        name = os.path.splitext(doc.name)[0]
+
+        def work():
+            runtime = GublanRuntime(onlog=lambda *_: None, base_dir=base_dir, oninput=lambda _prompt: "",
+                                    onpopup=lambda _text: None, save_name=name + "_tests")
+            try:
+                results = runtime.run_tests(source, base_dir)
+            except Exception as err:  # noqa: BLE001 - shown in the output instead of crashing the studio
+                results = [{"name": "running the tests", "passed": False, "line": None, "file": None,
+                            "message": f"{type(err).__name__}: {err}", "seconds": 0.0}]
+            try:
+                self.root.after(0, lambda: self._tests_finished(doc, results))
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _tests_finished(self, doc, results):
+        self.tests_running = False
+        failed = [result for result in results if not result["passed"]]
+        for result in results:
+            if result["passed"]:
+                self.output.write(f"pass  {result['name']}  ({result['seconds']:.2f} s)", "good")
+            else:
+                where = f" (line {result['line']})" if result.get("line") else ""
+                self.output.write(f"fail  {result['name']}{where}: {lower(result['message'])}", "error")
+        summary = f"{len(results) - len(failed)} passed, {len(failed)} failed"
+        self.output.write(summary, "error" if failed else "good")
+        self.set_state(summary, ERROR if failed else MOSS_LIGHT)
+        if failed and doc in self.docs and failed[0].get("line") and not failed[0].get("file"):
+            items = [item for item in doc.diagnostics if not item.get("test")]
+            items.extend({"line": result["line"], "message": f"test '{result['name']}' failed: {result['message']}",
+                          "severity": "error", "runtime": True, "test": True}
+                         for result in failed if result.get("line") and not result.get("file"))
+            doc.diagnostics = items
+            doc.editor.set_diagnostics(items)
+            self._show_problems(doc)
 
     def open_export(self):
         doc = self.current
@@ -1778,8 +1926,13 @@ class GublanStudio:
         running = self.running()
         # running fills the bar with moss; paused uses the same dim moss as the paused line in the editor
         bg = MOSS_DARK if running and not self.paused else (DEBUG_LINE if running else PANEL)
-        for widget in self.status_widgets:
-            widget.configure(bg=bg)
+        try:
+            before = self.status_widgets[0].cget("bg") if self.status_widgets else bg
+        except tk.TclError:
+            before = bg
+        if getattr(self, "_status_fade", None):
+            self._status_fade()
+        self._status_fade = theme.tween_colors(self.status_widgets, "bg", before, bg, 260)
         self.status_state.configure(fg=TEXT if running else color)
         self.presence.refresh()
 
@@ -1871,6 +2024,7 @@ class GublanStudio:
     # ----- settings ---------------------------------------------------------------------------------------
     def apply_settings(self, settings, save=True):
         self.settings = settings
+        theme.MOTION = bool(settings.get("animations", True))
         for doc in self.docs:
             doc.editor.settings = settings
             doc.editor.apply_settings(settings)
@@ -1893,6 +2047,208 @@ class GublanStudio:
     def set_option(self, key, value):
         self.settings[key] = value
         self.apply_settings(self.settings)
+
+    def toast(self, text, kind="info", seconds=3.5):
+        return theme.toast(self.root, text, kind, seconds)
+
+    def restart(self):
+        """close and open gublan studio again (for a new theme)."""
+        import subprocess
+
+        def again():
+            if getattr(sys, "frozen", False):
+                command = [sys.executable]
+            else:
+                command = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                        "gublanide.py")]
+            try:
+                subprocess.Popen(command, close_fds=True)  # noqa: S603 - starts this same program again
+            except OSError:
+                pass
+
+        self.exit(after_exit=again)
+
+    # ----- plugins ---------------------------------------------------------------------------------------------
+    def _report_plugins(self):
+        loaded = [info for info in self.plugins if info.status == "loaded"]
+        broken = [info for info in self.plugins if info.status == "error"]
+        for info in broken:
+            self.output.write(f"plugin {info.describe()}", "error")
+        if loaded:
+            self.output.write("plugins: " + "; ".join(info.describe() for info in loaded), "moss")
+        if broken:
+            self.toast(f"{plural(len(broken), 'plugin')} did not load. the output panel says why.", "warning", 6)
+
+    def _plugin_menu(self):
+        items = []
+        for info in self.plugins:
+            for label, action in info.menu_items:
+                items.append((f"{info.name}: {label}", lambda a=action, i=info: self._run_plugin_action(i, a)))
+        if items:
+            items.append("-")
+        items.append(("open the plugins folder", self.open_plugins_folder))
+        return items
+
+    def _run_plugin_action(self, info, action):
+        try:
+            action()
+        except Exception as err:  # noqa: BLE001 - a plugin's bug must not take the studio down
+            self.output.write(f"plugin {info.name}: {type(err).__name__}: {err}".lower(), "error")
+            self.toast(f"the {info.name} plugin hit a problem", "error")
+
+    def open_plugins_folder(self):
+        folder = plugins.write_example()
+        self._open_folder(folder)
+
+    def open_themes_folder(self):
+        self._open_folder(theme.write_example_theme())
+
+    def _open_folder(self, folder):
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)  # noqa: S606 - the studio's own settings folder
+            else:
+                import subprocess
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", folder])  # noqa: S603,S607
+        except OSError:
+            self.flash(f"the folder is {folder}")
+
+    # ----- live sessions ---------------------------------------------------------------------------------------
+    def _live_menu(self):
+        live = self.live
+        if live is None:
+            return [("start a live session...", self.start_live), ("join a live session...", self.join_live)]
+        items = [("who is here", self.live_people), ("send a message...", self.live_say)]
+        if live.is_host:
+            items.insert(0, ("how to join", self.live_invite))
+            items.append(("end the session", self.leave_live))
+        else:
+            items.append(("leave the session", self.leave_live))
+        return items
+
+    def start_live(self):
+        from .dialogs import LiveDialog
+        if self.live is not None:
+            return self.live_invite()
+        answer = LiveDialog(self.root, self.settings, host=True).show(width=px(520))
+        if not answer:
+            return
+        session = collab.LiveSession(self, answer["name"], host=True)
+        try:
+            session.start_host(answer["port"])
+        except OSError as err:
+            message(self.root, "live session", f"could not start the session on port {answer['port']}: "
+                                               f"{err.strerror or err}. try another port.".lower())
+            return
+        self._live_started(session)
+        self.output.write(f"live session started. people on your network join with your address "
+                          f"{', '.join(collab.local_addresses())}, port {session.port} and code {session.code}.", "moss")
+        self.live_invite()
+
+    def join_live(self):
+        from .dialogs import LiveDialog
+        if self.live is not None:
+            return self.live_people()
+        answer = LiveDialog(self.root, self.settings, host=False).show(width=px(520))
+        if not answer:
+            return
+        session = collab.LiveSession(self, answer["name"], host=False)
+        self.flash(f"joining {answer['address']}...")
+        results = queue.Queue()
+
+        def connect():
+            try:
+                session.start_guest(answer["address"], answer["port"], answer["code"])
+                results.put(None)
+            except OSError as err:
+                results.put(err)
+
+        threading.Thread(target=connect, daemon=True).start()
+
+        def wait():
+            try:
+                err = results.get_nowait()
+            except queue.Empty:
+                self.root.after(60, wait)
+                return
+            if err is not None:
+                message(self.root, "live session", f"could not reach {answer['address']} port {answer['port']}: "
+                                                   f"{getattr(err, 'strerror', None) or err}. check the address, "
+                                                   f"and that the host's firewall lets gublan studio in.".lower())
+                return
+            self._live_started(session)
+
+        wait()
+
+    def _live_started(self, session):
+        self.live = session
+        session.on_end = self._live_ended
+        if not session.is_host:
+            session.begin_polling()
+        self.live_changed()
+
+    def _live_ended(self):
+        self.live = None
+        self.live_changed()
+
+    def leave_live(self):
+        if self.live is None:
+            return
+        host = self.live.is_host
+        if host and len(self.live.people) > 1 and not confirm(
+                self.root, "end the session", "end the live session for everyone?", yes="end it", no="keep going"):
+            return
+        self.live.end("you ended the live session" if host else "you left the live session")
+
+    def live_invite(self):
+        live = self.live
+        if live is None or not live.is_host:
+            return
+        addresses = collab.local_addresses()
+        text = (f"people on the same network join with tools > code together > join a live session, using\n\n"
+                f"address:  {addresses[0]}\nport:  {live.port}\ncode:  {live.code}")
+        if len(addresses) > 1:
+            text += f"\n\nother addresses for this computer: {', '.join(addresses[1:])}"
+        self.root.clipboard_clear()
+        self.root.clipboard_append(f"gublan live session: address {addresses[0]}, port {live.port}, code {live.code}")
+        message(self.root, "how to join", text + "\n\n(copied, so you can paste it to them.)")
+
+    def live_people(self):
+        live = self.live
+        if live is None:
+            return
+        rows = live.describe_people()
+        items = [{"label": f"{label}  {('- ' + where) if where else ''}", "enabled": False} for label, _c, where in rows]
+        items += ["-", ("send a message...", self.live_say), ("leave" if not live.is_host else "end the session",
+                                                             self.leave_live)]
+        widget = self.status_live if self.status_live.winfo_ismapped() else self.statusbar
+        show_menu(widget, items, widget.winfo_rootx(), widget.winfo_rooty() - px(30) * (len(items) + 1))
+
+    def live_say(self):
+        if self.live is None:
+            return
+        text = ask(self.root, "send a message", "say something to everyone in the session:")
+        if text:
+            self.live.say(text)
+            self.output.write(f"{self.live.name} (you): {text}", "moss")
+
+    def live_open(self, name, text):
+        return self.new_tab(text, name=name)
+
+    def live_message(self, text, kind="info"):
+        self.output.write(f"[live] {text}", "error" if kind == "error" else "warning" if kind == "warning" else "moss")
+        self.toast(text, kind, 5 if kind == "chat" else 3.5)
+
+    def live_changed(self):
+        live = self.live
+        if live is None or not live.active:
+            self.status_live.pack_forget()
+            return
+        count = len(live.people)
+        role = "hosting" if live.is_host else "live"
+        self.status_live.configure(text=f"●  {role} · {plural(count, 'person', 'people')}")
+        if not self.status_live.winfo_ismapped():
+            self.status_live.pack(side="left", after=self.status_problems)
 
     def set_level(self, level):
         config.apply_level(self.settings, level)
@@ -2103,6 +2459,8 @@ class GublanStudio:
         if self.running():
             self.stop()
             self.run_thread.join(timeout=1.5)
+        if self.live is not None:
+            self.live.end()
         saved = [doc for doc in self.docs if doc.path]
         self.settings["session"] = [doc.path for doc in saved]
         self.settings["session_active"] = saved.index(self.current) if self.current in saved else 0

@@ -62,6 +62,15 @@ DEFAULTS = {
     "session_active": 0,
     "folder": "",
     "window": "",
+    "translate_language": "python",
+    "mcp_app": "claude code",
+    "theme": "moss",
+    "animations": True,
+    "plugins": False,
+    "disabled_plugins": [],
+    "live_name": "",
+    "live_port": 47800,
+    "live_address": "",
 }
 
 PRESETS = {

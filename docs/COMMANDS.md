@@ -9,8 +9,8 @@ its values. this file is made from the language itself (`py gublancli.py docs`),
 - lines starting with `//` are notes for people and are skipped.
 - put "quotes" around text or file paths that contain spaces: `sound "assets/jump sound.wav"`.
 - anything inside `{braces}` is worked out first: `print you have {coins * 2} coins`.
-- blocks (`if`, `loop`, `forever`, `while`, `for`, `function`) end with `end`. indenting the lines inside
-  is optional but makes programs much easier to read.
+- blocks (`if`, `loop`, `forever`, `while`, `until`, `for`, `match`, `try`, `test`, `function`) end with
+  `end`. indenting the lines inside is optional but makes programs much easier to read.
 
 ## variables
 
@@ -70,6 +70,24 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 - vectors: `vec2(x, y)` and `vec3(x, y, z)` can be added, subtracted and multiplied by numbers.
 - `true`, `false`, `none` and `pi`. `dt` is the seconds since the last `frame` (0 before the first one).
 - functions you make with `function` can be used in expressions: `{double(21)}`.
+- little functions: `x => x * 2` (or `lambda x: x * 2`) is a value you can keep in a variable and pass to
+  `map`, `filter`, `reduce`, `find`, `sortby`, `any` and `every`: `doubled = map(scores, s => s * 2)`.
+- build lists with a `for` inside brackets: `[x * x for x in numbers if x > 0]`.
+- any function can be written after a value: `name.upper()` is `upper(name)`, `items.sort()` is `sort(items)`.
+- whole numbers also have `&`, `|`, `^`, `<<`, `>>` and `~` for working with bits.
+
+## when things go wrong
+
+```gublan
+try
+    coins = number("lots")
+catch problem
+    print that didn't work: {problem}
+end
+```
+
+lines between `try` and `catch` that fail jump to `catch` instead of stopping the program. `throw` makes your
+own error, and `assert` throws one when a condition is false.
 
 ## built-in functions
 
@@ -152,10 +170,34 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 | `now()` | seconds since 1970, for timing things between runs |
 | `saved("name")` | true if a value has been saved under that name |
 | `load("name", default)` | a saved value, or the default when nothing was saved |
+| `map(list, f)` | a new list with f done to every item: map(nums, x => x * 2) |
+| `filter(list, f)` | the items where f is true: filter(nums, x => x > 0) |
+| `reduce(list, f, start)` | combine every item into one value: reduce(nums, (a, b) => a + b, 0) |
+| `find(list, f)` | the first item where f is true, or none |
+| `any(list)` | or any(list, f) true when at least one item is true (or makes f true) |
+| `every(list)` | or every(list, f) true when every item is true (or makes f true) |
+| `sortby(list, f)` | a copy sorted by what f gives for each item: sortby(people, p => p.age) |
+| `zip(a, b)` | pairs up two lists: zip([1, 2], ["a", "b"]) is [[1, "a"], [2, "b"]] |
+| `slice(list-or-text, start, end)` | the part from start up to (not including) end |
+| `flat(list)` | a list of lists joined into one list |
+| `repeat(text-or-list, times)` | the value repeated that many times |
+| `call(f, values...)` | run a function value with some values |
+| `capitalize(text)` | the text with the first letter of each word in capitals |
+| `lines(text)` | a list of the lines in some text |
+| `words(text)` | a list of the words in some text |
+| `char(code)` | the letter for a character code: char(65) is A |
+| `code(letter)` | the character code of a letter: code("A") is 65 |
+| `tojson(value)` | a value written as json text |
+| `fromjson(text)` | json text turned into lists, maps, numbers and text |
+| `textwidth(text, size)` | how many pixels wide some text is when shown |
+| `log(x)` | or log(x, base) the logarithm of a number |
+| `exp(x)` | e to the power of x |
+| `noise(x)` | or noise(x, y) smooth random values from 0 to 1, for hills, clouds and wobbles |
+| `randint(low, high)` | a random whole number from low to high |
 
 ## every command
 
-`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `break` `continue` `wait` `kill` `function` `call` `return` `include` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `box` `circle` `line` `text` `image` `sprite` `button` `ui` `vec2` `cube` `sphere` `spin` `camera` `vec3` `move` `place` `resize` `hide` `show` `animate` `touching` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `get` `save` `load` `forget` `presence`
+`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `const` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `until` `match` `case` `try` `catch` `throw` `break` `continue` `wait` `kill` `function` `call` `return` `include` `use` `test` `assert` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `box` `circle` `line` `text` `image` `sprite` `vec2` `cube` `sphere` `spin` `camera` `vec3` `button` `ui` `textbox` `slider` `checkbox` `focus` `move` `place` `resize` `hide` `show` `animate` `touching` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `get` `save` `load` `forget` `presence`
 
 ## basics: printing, variables and maths
 
@@ -274,6 +316,20 @@ time <variable>
 time now
 ```
 
+### `const`
+
+make a value that can't be changed later, like the speed of the game.
+
+```text
+const <name> = <value>
+```
+
+```gublan
+const speed = 4
+x = 0
+x += speed
+```
+
 ## control: choices and loops
 
 ### `if`
@@ -342,7 +398,7 @@ end
 
 ### `end`
 
-close an if, loop, forever, while, for or function block.
+close an if, loop, forever, while, until, for, match, try, test or function block.
 
 ```text
 end
@@ -417,6 +473,110 @@ for fruit in ["apple", "pear"]
 end
 ```
 
+### `until`
+
+repeat the lines below until the condition becomes true.
+
+```text
+until <condition>
+```
+
+```gublan
+lives = 3
+until lives == 0
+    print {lives} lives left
+    lives -= 1
+end
+```
+
+### `match`
+
+compare one value with several cases and run the case that fits. close with end.
+
+```text
+match <value>
+```
+
+```gublan
+day = "sat"
+match day
+case "mon", "tue", "wed", "thu", "fri"
+    print school
+case "sat", "sun"
+    print weekend!
+else
+    print that isn't a day
+end
+```
+
+### `case`
+
+inside match: run these lines when the value equals one of these.
+
+```text
+case <value> [, more values...]
+```
+
+```gublan
+roll = 6
+match roll
+case 6
+    print you rolled the top number
+case 1
+    print unlucky
+end
+```
+
+### `try`
+
+run lines that might fail. if one does, the program jumps to catch instead of stopping.
+
+```text
+try
+```
+
+```gublan
+try
+    total = 10 / 0
+catch problem
+    print {problem}
+end
+```
+
+### `catch`
+
+inside try: run these lines when something failed. the message goes into the variable (error if you leave it out).
+
+```text
+catch [variable]
+```
+
+```gublan
+try
+    throw the door is locked
+catch reason
+    print could not go in: {reason}
+end
+```
+
+### `throw`
+
+stop with your own error message. a try around it can catch it.
+
+```text
+throw <message...>
+```
+
+```gublan
+function buy price coins
+    if price > coins
+        throw not enough coins
+    end
+    return coins - price
+end
+print {buy(3, 10)}
+```
+
 ### `break`
 
 leave the loop you are in right now.
@@ -475,7 +635,7 @@ kill
 kill
 ```
 
-## functions and other files
+## functions, modules and other files
 
 ### `function`
 
@@ -533,6 +693,55 @@ include <script.gubl>
 
 ```gublan
 include helpers.gubl
+```
+
+### `use`
+
+load a module: a gublan file from a modules folder (yours, your project's or a built-in one).
+
+```text
+use <module>
+```
+
+```gublan
+use easing
+print {easeout(0.5)}
+```
+
+## testing your code
+
+a `test` block is skipped when the program runs. run tests (f7 in the studio, or `py gublancli.py test game.gubl`) runs each test on its own with a fresh start, and lists which passed. tests can use every function in the file.
+
+### `test`
+
+a block that checks your code. it is skipped when the program runs and used by run tests (f7).
+
+```text
+test <name...>
+```
+
+```gublan
+function add a b
+    return a + b
+end
+
+test adding works
+    assert add(2, 3) == 5
+    assert add(-1, 1) == 0
+end
+```
+
+### `assert`
+
+stop with an error when the condition is false. use it inside test blocks.
+
+```text
+assert <condition>
+```
+
+```gublan
+lives = 3
+assert lives > 0
 ```
 
 ## lists and maps
@@ -913,30 +1122,6 @@ mode 2d
 sprite hero assets/hero.png 40 40 48 48
 ```
 
-### `button`
-
-make a clickable button. its variable is 1 while pressed.
-
-```text
-button <variable> <x> <y> <width> <height> <label...>
-```
-
-```gublan
-button start 20 20 120 40 start
-```
-
-### `ui`
-
-make the quick button in the top-left corner.
-
-```text
-ui button <label>
-```
-
-```gublan
-ui button destroy
-```
-
 ### `vec2`
 
 make an x/y value for positions and movement.
@@ -1012,6 +1197,105 @@ vec3 <name> <x> <y> <z>
 
 ```gublan
 vec3 spot 0 0 -6
+```
+
+## buttons, textboxes, sliders and checkboxes
+
+these work in `mode 2d` and in `mode 3d`, where they are drawn flat on top of the 3d scene. click a textbox to type in it; the game's own keys pause while someone is typing. `name.text`, `name.value`, `name.checked`, `name.focused` and `name.submitted` read them, and `name.text = "hi"` changes them.
+
+### `button`
+
+make a clickable button. its variable is 1 while pressed.
+
+```text
+button <variable> <x> <y> <width> <height> <label...>
+```
+
+```gublan
+button start 20 20 120 40 start
+```
+
+### `ui`
+
+make the quick button in the top-left corner.
+
+```text
+ui button <label>
+```
+
+```gublan
+ui button destroy
+```
+
+### `textbox`
+
+make a box the player can click and type into. name.text is what they typed, and name.submitted is true once after they press enter.
+
+```text
+textbox <name> <x> <y> <width> [hint...]
+```
+
+```gublan
+mode 2d
+textbox username 20 60 240 your name
+forever
+    if username.submitted
+        print hello {username.text}
+    end
+    frame
+end
+```
+
+### `slider`
+
+make a slider the player can drag. name.value is where it is.
+
+```text
+slider <name> <x> <y> <width> <min> <max> [start]
+```
+
+```gublan
+mode 2d
+slider loudness 20 120 200 0 100 50
+text shown 20 160 volume
+forever
+    shown.text = "volume " + str(loudness.value)
+    frame
+end
+```
+
+### `checkbox`
+
+make a box the player can tick. name.checked is true while it is ticked.
+
+```text
+checkbox <name> <x> <y> <label...>
+```
+
+```gublan
+mode 2d
+checkbox music 20 160 play music
+forever
+    if music.checked
+        title music on
+    end
+    frame
+end
+```
+
+### `focus`
+
+put the typing cursor in a textbox, or take it out with focus none.
+
+```text
+focus <textbox>
+focus none
+```
+
+```gublan
+mode 2d
+textbox answer 20 60 240 type here
+focus answer
 ```
 
 ## moving and changing shapes

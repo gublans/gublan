@@ -8,9 +8,9 @@ import re
 import tkinter as tk
 from dataclasses import dataclass, field
 
-from gublancore import BLOCK_OPENERS, COLORS, COMMAND_SPECS, parse_line
+from gublancore import BLOCK_MIDDLES, BLOCK_OPENERS, COLORS, COMMAND_SPECS, parse_line
 
-from . import meta
+from . import meta, theme
 from .theme import (
     BORDER, CATEGORY_COLORS, DIM, ERROR, HOVER, MOSS, MOSS_DARK, MOSS_LIGHT, MUTED, PANEL, PANEL_ALT, SELECT,
     SELECT_TEXT, SYNTAX, TEXT, BracketButton, ScrollFrame, Tooltip, flat_entry, icon, icon_font, lower, mono_font,
@@ -23,8 +23,13 @@ _SET_RE = re.compile(r"^set\s+(\S+?)\s*=(?!=)\s*(.*)$")
 _FOR_RANGE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(.+?)\s+to\s+(.+?)(?:\s+step\s+(.+))?$")
 _FOR_IN = re.compile(r"^([A-Za-z_]\w*)\s+in\s+(.+)$")
 EXPRESSION_FIELDS = {"if": "condition", "elseif": "condition", "while": "condition", "return": "value",
-                     "print": "values", "popup": "message", "title": "text", "loop": "times", "wait": "seconds"}
+                     "print": "values", "popup": "message", "title": "text", "loop": "times", "wait": "seconds",
+                     "until": "condition", "assert": "condition", "match": "value", "case": "values",
+                     "throw": "message", "catch": "variable", "test": "name", "use": "module"}
+TEXT_FIELDS = ("print", "popup", "title", "throw", "catch", "test", "use")
 NEEDS_END = set(BLOCK_OPENERS)
+MIDDLES = tuple(BLOCK_MIDDLES)
+CLOSERS = ("end",) + MIDDLES
 
 
 @dataclass
@@ -107,7 +112,7 @@ def _rest_after(text, count):
 
 def fields_for(command):
     if command in EXPRESSION_FIELDS:
-        return [Field(EXPRESSION_FIELDS[command], rest=True, expression=command not in ("print", "popup", "title"))]
+        return [Field(EXPRESSION_FIELDS[command], rest=True, expression=command not in TEXT_FIELDS)]
     if command == "calc":
         return [Field("variable"), Field("expression", rest=True, expression=True)]
     if command == "function":
@@ -242,11 +247,11 @@ def blocks_source(blocks, unit="    "):
         command = block.command if block.kind in ("command", "for") else ""
         if block.kind == "for":
             command = "for"
-        if command in ("end", "else", "elseif"):
+        if command in CLOSERS:
             depth = max(0, depth - 1)
         text = block_line(block)
         lines.append(unit * depth + text if text else "")
-        if command in NEEDS_END or command in ("else", "elseif"):
+        if command in NEEDS_END or command in MIDDLES:
             depth += 1
     return "\n".join(lines) + "\n"
 
@@ -268,7 +273,7 @@ def new_block(command):
     """a fresh block (and its end, for blocks that hold other blocks) built from the command's example."""
     example = COMMAND_SPECS[command][4].split("\n")[0] if command in COMMAND_SPECS else command
     if command in ("end", "else", "forever", "break", "continue", "clear", "frame", "kill", "stopmusic",
-                   "stopsounds"):
+                   "stopsounds", "try"):
         example = command
     block = parse_block(example)
     if block.kind == "code" or (block.command != command and block.kind == "command"):
@@ -473,10 +478,10 @@ class BlocksView(tk.Frame):
         depth = 0
         for index, block in enumerate(shown):
             command = "for" if block.kind == "for" else block.command if block.kind == "command" else ""
-            if command in ("end", "else", "elseif"):
+            if command in CLOSERS:
                 depth = max(0, depth - 1)
             self.rows.append(self._make_row(index, block, depth))
-            if command in NEEDS_END or command in ("else", "elseif"):
+            if command in NEEDS_END or command in MIDDLES:
                 depth += 1
         if len(self.blocks) > MAX_BLOCKS:
             tk.Label(self.list, text=f"only the first {MAX_BLOCKS} of {len(self.blocks)} lines are shown as blocks. "
@@ -608,7 +613,7 @@ class BlocksView(tk.Frame):
             tk.Label(parent, text=prefix, bg=parent.cget("bg"), fg=color, font=mono_font(10)).pack(side="left")
         variable = tk.StringVar(value=block.raw if index is None else (
             block.values[index] if index < len(block.values) else ""))
-        entry = tk.Entry(parent, textvariable=variable, width=width, bg="#1f1f1f", fg=color, insertbackground=TEXT,
+        entry = tk.Entry(parent, textvariable=variable, width=width, bg=theme.FIELD_BG, fg=color, insertbackground=TEXT,
                          relief="flat", highlightthickness=1, highlightbackground=BORDER, highlightcolor=MOSS,
                          selectbackground=SELECT, selectforeground=SELECT_TEXT, bd=px(2),
                          font=mono_font(10) if mono else ui_font(10))
@@ -752,7 +757,7 @@ class BlocksView(tk.Frame):
     def _row_press(self, event, index):
         block = self.blocks[index]
         self.select(index, focus=True)
-        if block.kind == "command" and block.command in ("end", "else", "elseif"):
+        if block.kind == "command" and block.command in CLOSERS:
             self.drag = None
             return
         self.drag = {"kind": "row", "index": index, "x": event.x_root, "y": event.y_root, "moved": False}

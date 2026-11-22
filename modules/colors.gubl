@@ -1,0 +1,18 @@
+// colors: mix and change colours. colours are [red, green, blue] lists from 0 to 255.
+// use colors
+
+function mix first second amount
+    return [round(lerp(first[0], second[0], amount)), round(lerp(first[1], second[1], amount)), round(lerp(first[2], second[2], amount))]
+end
+
+function lighter color amount
+    return mix(color, [255, 255, 255], amount)
+end
+
+function darker color amount
+    return mix(color, [0, 0, 0], amount)
+end
+
+function rainbow t
+    return hsv(t * 360 % 360, 0.8, 1)
+end

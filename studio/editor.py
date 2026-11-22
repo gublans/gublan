@@ -187,6 +187,11 @@ class CodeEditor(tk.Frame):
         self.find_bar = None
         self.matches = []
         self.match_index = -1
+        self.collab_listener = None  # live sessions: called soon after the text changes
+        self.collab_cursor = None  # live sessions: called soon after the cursor moves
+        self.peers = []  # live sessions: other people's cursors (key, name, color, position)
+        self.peer_flags = {}
+        self.live_applying = False  # true while someone else's edit is being put in
 
         size = settings.get("font_size", 11)
         self.font = tkfont.Font(family=theme.MONO_FAMILY, size=size)
@@ -200,7 +205,7 @@ class CodeEditor(tk.Frame):
         self.text = tk.Text(
             self, undo=True, autoseparators=True, maxundo=-1, wrap="word" if settings.get("wrap") else "none",
             font=self.font, bg=EDITOR_BG, fg=TEXT, insertbackground=MOSS_LIGHT, insertwidth=px(2),
-            insertofftime=420, insertontime=640, selectbackground=SELECT, inactiveselectbackground="#252d21",
+            insertofftime=420, insertontime=640, selectbackground=SELECT, inactiveselectbackground=theme.INACTIVE_SELECT,
             relief="flat", borderwidth=0, highlightthickness=0, padx=px(10), pady=px(6), spacing1=px(1),
             spacing3=px(1), exportselection=True,
         )
@@ -240,7 +245,7 @@ class CodeEditor(tk.Frame):
         text.tag_configure("debugline", background=DEBUG_LINE)
         text.tag_configure("found", background=MOSS_DARK)
         text.tag_configure("foundcurrent", background=MOSS, foreground=SELECT_TEXT)
-        text.tag_configure("match", background="#34422a", foreground=SELECT_TEXT)
+        text.tag_configure("match", background=theme.MATCH, foreground=SELECT_TEXT)
         for tag in SYNTAX_TAGS:
             text.tag_configure(tag, foreground=SYNTAX[tag])
         text.tag_configure("comment", font=self.italic)
@@ -363,6 +368,8 @@ proc {W} {{args}} {{
     def _changed(self, op, start, end, delta):
         if op == "cursor":
             self._schedule("cursor", 0, self._cursor_moved)
+            if self.collab_cursor:
+                self._schedule("collab_cursor", 90, self.collab_cursor)
             return
         try:
             start_line, start_col = (int(part) for part in start.split("."))
@@ -382,6 +389,9 @@ proc {W} {{args}} {{
         callback = self.hooks.get("changed")
         if callback:
             self._schedule("changed", 30, callback)
+        if self.collab_listener and not self.live_applying:
+            # right away, so each edit goes out on its own: merged edits would carry unchanged text with them
+            self.collab_listener()
         if self.matches:
             self._schedule("research", 200, self._research)
 
@@ -508,6 +518,8 @@ proc {W} {{args}} {{
     def _yscroll(self, first, last):
         self.vbar.set(first, last)
         self._schedule("gutter", 0, self.draw_gutter)
+        if self.peers:
+            self._schedule("peers", 0, self.place_peer_flags)
         if self._pending:
             self._schedule("visible", 30, self._process_pending)
         if getattr(self, "_last_view", None) not in (None, (first, last)):
@@ -653,7 +665,7 @@ proc {W} {{args}} {{
                 continue
             if word in BLOCK_OPENERS and not _ASSIGN_START.match(raw.strip()):
                 stack.append([number])
-            elif word in ("else", "elseif", "elif") and stack:
+            elif word in meta.MIDDLE_WORDS and stack:
                 stack[-1].append(number)
             elif word == "end" and stack:
                 group = stack.pop() + [number]
@@ -668,7 +680,7 @@ proc {W} {{args}} {{
         line, column = self.cursor()
         raw = self.current_line_text()
         word = first_word(raw)
-        if word in BLOCK_OPENERS or word in ("end", "else", "elseif", "elif"):
+        if word in BLOCK_OPENERS or word in meta.DEDENT_WORDS:
             group = self.block_structure().get(line)
             if group and len(group) > 1:
                 for member in group:
@@ -892,13 +904,13 @@ proc {W} {{args}} {{
             word = first_word(raw)
             if word == "end":
                 return False
-            if word in ("else", "elseif", "elif") and first_word(opener) == "if":
+            if word in meta.MIDDLE_WORDS and first_word(opener) in meta.middle_owners(word):
                 continue
             return True
         return True
 
     def expected_indent(self, line):
-        """the indentation a closing word (end, else, elseif) on this line should have."""
+        """the indentation a closing word (end, else, elseif, case, catch) on this line should have."""
         lines = self.get().split("\n")
         word = first_word(lines[line - 1])
         depth = 0
@@ -912,7 +924,7 @@ proc {W} {{args}} {{
                 if depth == 0:
                     return leading(raw)
                 depth -= 1
-            elif current in ("else", "elseif", "elif") and depth == 0 and word != "end":
+            elif current in meta.MIDDLE_WORDS and depth == 0 and word != "end":
                 return leading(raw)
         return None
 
@@ -1010,7 +1022,7 @@ proc {W} {{args}} {{
         if char == " ":
             line = self.cursor()[0]
             raw = text.get(f"{line}.0", "insert")
-            if raw.strip() in ("else", "elseif", "elif") or raw.strip() == "else if":
+            if raw.strip() in meta.MIDDLE_WORDS or raw.strip() == "else if":
                 self._dedent_closer(line)
         return None
 
@@ -1170,6 +1182,80 @@ proc {W} {{args}} {{
         callback = self.hooks.get("changed")
         if callback:
             self._schedule("changed", 30, callback)
+        if self.collab_listener and not self.live_applying:
+            self.collab_listener()
+
+    # ----- live sessions -------------------------------------------------------------------------------------
+    def _index_of(self, text, offset):
+        """a character offset in text as a tk index."""
+        offset = max(0, min(offset, len(text)))
+        line = text.count("\n", 0, offset) + 1
+        column = offset - (text.rfind("\n", 0, offset) + 1)
+        return f"{line}.{column}"
+
+    def live_apply(self, start, end, insert):
+        """put someone else's edit in, keeping your cursor and scroll where they were."""
+        text = self.get()
+        first, last = self._index_of(text, start), self._index_of(text, end)
+        top = self.text.yview()[0]
+        self.live_applying = True
+        try:
+            if end > start:
+                self.text.delete(first, last)
+            if insert:
+                self.text.insert(first, insert)
+        finally:
+            self.live_applying = False
+        self.text.yview_moveto(top)
+        self._schedule("peers", 0, self.place_peer_flags)
+
+    def live_replace_all(self, value):
+        if value != self.get():
+            self.live_applying = True
+            try:
+                self.replace_all_text(value)
+            finally:
+                self.live_applying = False
+
+    def show_peers(self, peers):
+        """draw other people's cursors: [(key, name, color, offset)]."""
+        self.peers = list(peers)
+        self.place_peer_flags()
+
+    def place_peer_flags(self):
+        """a thin caret in each person's colour, with their name in a small flag above it."""
+        shown = set()
+        text = self.get() if self.peers else ""
+        line_height = self.font.metrics("linespace")
+        for key, name, color, offset in self.peers:
+            parts = self.peer_flags.get(key)
+            if parts is None:
+                caret = tk.Frame(self.text, bg=color, width=max(2, px(2)), height=line_height)
+                flag = tk.Label(self.text, text=name, bg=color, fg=EDITOR_BG, font=theme.ui_font(7), padx=px(3),
+                                pady=0, bd=0)
+                parts = self.peer_flags[key] = (caret, flag)
+            caret, flag = parts
+            caret.configure(bg=color)
+            flag.configure(text=name, bg=color)
+            box = self.text.bbox(self._index_of(text, offset))
+            if box is None:
+                caret.place_forget()
+                flag.place_forget()
+                continue
+            caret.configure(height=box[3])
+            caret.place(x=box[0], y=box[1])
+            height = flag.winfo_reqheight()
+            y = box[1] - height if box[1] - height >= 0 else box[1] + box[3]
+            flag.place(x=box[0], y=y)
+            shown.add(key)
+        current = {peer[0] for peer in self.peers}
+        for key in list(self.peer_flags):
+            if key not in current:
+                for widget in self.peer_flags.pop(key):
+                    widget.destroy()
+            elif key not in shown:
+                for widget in self.peer_flags[key]:
+                    widget.place_forget()
 
     def _on_copy(self, _event):
         if self.text.tag_ranges("sel"):
@@ -1378,7 +1464,7 @@ proc {W} {{args}} {{
                 tk.Label(frame, text=info["body"], bg=PANEL_ALT, fg=TEXT, font=ui_font(9), justify="left",
                          wraplength=wrap, anchor="w").pack(fill="x", padx=px(10), pady=(0, px(4)))
             if info.get("example"):
-                tk.Label(frame, text=info["example"], bg="#202020", fg=MUTED, font=mono_font(9), justify="left",
+                tk.Label(frame, text=info["example"], bg=theme.CODE_BG, fg=MUTED, font=mono_font(9), justify="left",
                          anchor="w", padx=px(6), pady=px(3)).pack(fill="x", padx=px(10), pady=(0, px(6)))
             if "value" in info:
                 tk.Label(frame, text=f"now: {info['value']}", bg=PANEL_ALT, fg=NUMBER, font=mono_font(9),
@@ -1557,7 +1643,7 @@ class CompletionPopup:
         self.frame.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(self.frame, bg=PANEL_ALT, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
-        self.detail = tk.Label(self.frame, bg="#202020", fg=MUTED, font=ui_font(9), anchor="w", justify="left",
+        self.detail = tk.Label(self.frame, bg=theme.CODE_BG, fg=MUTED, font=ui_font(9), anchor="w", justify="left",
                                padx=px(8), pady=px(4))
         self.detail.pack(fill="x")
         self.items = []
@@ -1636,7 +1722,7 @@ class CompletionPopup:
         if more > 0:
             bar_height = max(px(10), row_height * self.ROWS * self.ROWS / len(self.items))
             top = (row_height * self.ROWS - bar_height) * self.offset / max(1, more)
-            canvas.create_rectangle(width - px(3), top, width, top + bar_height, fill="#4a4a4a", outline="")
+            canvas.create_rectangle(width - px(3), top, width, top + bar_height, fill=theme.THUMB_HOVER, outline="")
 
     def move(self, step):
         if not self.items:

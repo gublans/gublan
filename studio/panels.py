@@ -10,7 +10,7 @@ from tkinter import ttk
 
 from gublancore import COMMAND_SPECS, EXPRESSION_FUNCTIONS, format_value, kind_of
 
-from . import meta
+from . import meta, theme
 from .guides import GUIDES
 from .theme import (
     BORDER, DIM, EDITOR_BG, ERROR, MOSS_LIGHT, MUTED, NUMBER, PANEL,
@@ -354,7 +354,7 @@ class HelpPanel(tk.Frame):
         text.tag_configure("h2", font=ui_font(10, "bold"), foreground=TEXT, spacing1=px(8))
         text.tag_configure("usage", font=mono_font(10), foreground=MOSS_LIGHT)
         text.tag_configure("body", foreground=MUTED)
-        text.tag_configure("code", font=mono_font(9), foreground=TEXT, background="#202020", lmargin1=px(8),
+        text.tag_configure("code", font=mono_font(9), foreground=TEXT, background=theme.CODE_BG, lmargin1=px(8),
                            lmargin2=px(8))
         text.tag_configure("insert", foreground=MOSS_LIGHT, font=ui_font(8), underline=True)
         text.tag_configure("topic", foreground=MOSS_LIGHT, font=ui_font(10), underline=False)
@@ -819,13 +819,25 @@ class AssetsPanel(tk.Frame):
             ("pictures and sounds", "*.png *.gif *.jpg *.jpeg *.bmp *.wav *.ogg *.mp3"), ("all files", "*.*")])
         if not files:
             return
-        os.makedirs(self.folder, exist_ok=True)
+        try:
+            os.makedirs(self.folder, exist_ok=True)
+        except OSError as err:
+            self.hooks["message"](f"could not make the assets folder: {str(err).lower()}")
+            return
+        copied, failed = 0, []
         for source in files:
             target = os.path.join(self.folder, os.path.basename(source))
-            if os.path.abspath(source) != os.path.abspath(target):
-                shutil.copy2(source, target)
+            try:
+                if os.path.normcase(os.path.abspath(source)) != os.path.normcase(os.path.abspath(target)):
+                    shutil.copy2(source, target)
+                copied += 1
+            except (OSError, shutil.Error):
+                failed.append(os.path.basename(source))
         self.refresh()
-        self.hooks["message"](f"imported {plural(len(files), 'file')} into assets")
+        text = f"imported {plural(copied, 'file')} into assets"
+        if failed:
+            text += f". could not copy {', '.join(failed[:3])}" + (" and more" if len(failed) > 3 else "")
+        self.hooks["message"](text)
 
     def _context(self, event):
         node = self.tree.identify_row(event.y)

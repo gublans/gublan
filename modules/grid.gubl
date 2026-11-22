@@ -1,0 +1,38 @@
+// grid: helpers for games made of tiles, like mazes and puzzle boards.
+// use grid
+
+// make a grid (a list of rows) filled with one value
+function makegrid columns rows value
+    return [[value for c in range(columns)] for r in range(rows)]
+end
+
+// the cell at a column and row, or none when it is outside the grid
+function cellat board column row
+    if row < 0 or row >= len(board) or column < 0 or column >= len(board[0])
+        return none
+    end
+    return board[row][column]
+end
+
+// which column or row a pixel position falls in
+function tileof position size
+    return floor(position / size)
+end
+
+// the pixel position of a column or row
+function tilepos index size
+    return index * size
+end
+
+// the cells next to a cell (up, down, left and right) as [column, row] pairs inside the grid
+function neighbours board column row
+    found = []
+    for step in [[0, -1], [0, 1], [-1, 0], [1, 0]]
+        c = column + step[0]
+        r = row + step[1]
+        if cellat(board, c, r) != none
+            found = found + [[c, r]]
+        end
+    end
+    return found
+end

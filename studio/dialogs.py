@@ -10,7 +10,7 @@ from tkinter import filedialog, ttk
 
 from gublancore import COMMAND_SPECS
 
-from . import config, exporter
+from . import config, exporter, theme
 from .editor import line_tokens
 from .templates import TEMPLATES
 from .theme import (
@@ -56,6 +56,7 @@ class Dialog(tk.Toplevel):
         x = max(0, min(x, self.winfo_screenwidth() - width - 10))
         y = max(0, min(y, self.winfo_screenheight() - height - 60))
         self.geometry(f"{width}x{height}+{x}+{y}")
+        theme.fade_in(self, 150)
         self.deiconify()
         square_window(self, caption=PANEL)
         self.lift()
@@ -138,11 +139,12 @@ def ask(parent, title, prompt, initial="", mono=False):
 
 # ----- settings -----------------------------------------------------------------------------------------
 class SettingsDialog(Dialog):
-    def __init__(self, master, settings, on_apply, presence=None):
+    def __init__(self, master, settings, on_apply, presence=None, app=None):
         super().__init__(master, "settings", resizable=True)
         self.settings = settings
         self.on_apply = on_apply
         self.presence = presence
+        self.app = app
         self.vars = {}
         self.text_vars = {}
         self.text_jobs = {}
@@ -194,6 +196,8 @@ class SettingsDialog(Dialog):
                           ("toolbar_labels", "show words on the toolbar buttons")):
             self._toggle(page, key, text)
 
+        self._look_section(page)
+        self._plugins_section(page)
         self._discord_section(page)
 
         self._heading(page, "starting up")
@@ -222,6 +226,96 @@ class SettingsDialog(Dialog):
         self.settings[key] = value
         self.on_apply(self.settings)
         self._show_discord()
+
+    # ----- look --------------------------------------------------------------------------------------------
+    def _look_section(self, page):
+        self._heading(page, "look")
+        names = theme.theme_names()
+        self.theme_var = tk.StringVar(value=self.settings.get("theme", theme.DEFAULT_THEME))
+        for start in range(0, len(names), 5):
+            row = tk.Frame(page, bg=PANEL)
+            row.pack(fill="x", pady=px(2))
+            if start == 0:
+                tk.Label(row, text="theme", bg=PANEL, fg=TEXT, font=ui_font(10), width=6, anchor="w").pack(
+                    side="left")
+            else:
+                tk.Label(row, text="", bg=PANEL, width=6).pack(side="left")
+            Segmented(row, [(name, name) for name in names[start:start + 5]], self.theme_var,
+                      command=self._choose_theme, bg=PANEL, size=9).pack(side="left", padx=px(12))
+        self.theme_about = tk.Label(page, text="", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w", justify="left",
+                                    wraplength=px(520))
+        self.theme_about.pack(fill="x", pady=(px(2), 0))
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=(px(4), px(4)))
+        self.restart_button = BracketButton(row, "restart to see it", command=self._restart, kind="accent", size=9,
+                                            bg=PANEL)
+        self.themes_button = BracketButton(row, "open the themes folder", command=self._themes_folder, size=9,
+                                           bg=PANEL)
+        self.themes_button.pack(side="left")
+        self._show_theme()
+        self._toggle(page, "animations", "animate buttons, menus, windows and messages")
+
+    def _choose_theme(self, name):
+        self._set("theme", name)
+        self._show_theme()
+
+    def _show_theme(self):
+        name = self.theme_var.get()
+        spec = theme.theme_spec(name) or {}
+        about = spec.get("about") or ("your own theme" if name not in theme.BUILTIN_THEMES else "")
+        waiting = name != theme.THEME_NAME
+        self.theme_about.configure(text=about + ("  the new look shows after a restart." if waiting else ""))
+        if waiting and self.app is not None:
+            self.restart_button.pack(side="left", padx=(0, px(8)), before=self.themes_button)
+        else:
+            self.restart_button.pack_forget()
+
+    def _restart(self):
+        if self.app is not None:
+            self.cancel()
+            self.app.restart()
+
+    def _themes_folder(self):
+        if self.app is not None:
+            self.app.open_themes_folder()
+
+    # ----- plugins -----------------------------------------------------------------------------------------
+    def _plugins_section(self, page):
+        from . import plugins
+        self._heading(page, "plugins")
+        tk.Label(page, text="plugins are python files that add commands, functions and menu items to gublan "
+                            "studio. they run with your permissions, so only add ones you trust. changes take a "
+                            "restart.",
+                 bg=PANEL, fg=DIM, font=ui_font(9), anchor="w", justify="left", wraplength=px(520)).pack(
+            fill="x", pady=(0, px(4)))
+        self._toggle(page, "plugins", "load plugins from the plugins folder")
+        loaded = {info.key: info for info in (getattr(self.app, "plugins", None) or [])}
+        found = plugins.find_plugins()
+        disabled = set(self.settings.get("disabled_plugins", []))
+        for info in found:
+            shown = loaded.get(info.key, info)
+            variable = tk.BooleanVar(value=info.key not in disabled)
+            text = shown.describe() if shown.status != "off" else info.key
+            Toggle(page, text, variable, command=lambda k=info.key, v=variable: self._plugin_on(k, v.get()),
+                   bg=PANEL).pack(anchor="w", pady=px(2), padx=(px(24), 0))
+        if not found:
+            tk.Label(page, text="no plugins yet. the folder button adds an example to copy.", bg=PANEL, fg=DIM,
+                     font=ui_font(9), anchor="w").pack(fill="x", padx=(px(24), 0))
+        BracketButton(page, "open the plugins folder", command=self._plugins_folder, size=9, bg=PANEL).pack(
+            anchor="w", pady=(px(6), 0))
+
+    def _plugin_on(self, key, on):
+        disabled = [name for name in self.settings.get("disabled_plugins", []) if name != key]
+        if not on:
+            disabled.append(key)
+        self._set("disabled_plugins", disabled)
+
+    def _plugins_folder(self):
+        if self.app is not None:
+            self.app.open_plugins_folder()
+        else:
+            from . import plugins
+            plugins.write_example()
 
     # ----- discord -----------------------------------------------------------------------------------------
     DISCORD_TEXTS = (
@@ -350,7 +444,7 @@ def highlight_into(widget, source):
         widget.tag_configure(tag, foreground=color)
     widget.tag_configure("todo", foreground=NUMBER)
     for number, line in enumerate(source.split("\n"), start=1):
-        if number > 20000:
+        if number > 6000 or len(line) > 2000:
             break
         if line.lstrip().startswith("// todo"):
             widget.tag_add("todo", f"{number}.0", f"{number}.end")
@@ -433,10 +527,16 @@ class ConvertDialog(Dialog):
 
     def load_file(self, path):
         try:
+            if os.path.getsize(path) > 8 * 1024 * 1024:
+                message(self, "convert", "that file is too big to convert (over 8 mb).", "error")
+                return
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
                 content = handle.read()
         except OSError as err:
             message(self, "convert", f"could not open the file: {str(err).lower()}", "error")
+            return
+        if "\x00" in content[:4096]:
+            message(self, "convert", "that file isn't code (it looks like a binary file).", "error")
             return
         self.filename = path
         self.source.delete("1.0", "end")
@@ -501,6 +601,378 @@ class ConvertDialog(Dialog):
         name = os.path.splitext(os.path.basename(self.filename))[0] if self.filename else "converted"
         self.on_open(self.result_text, name)
         self.close(True)
+
+
+# ----- export as another language -------------------------------------------------------------------------------
+def highlight_foreign(widget, source, comment):
+    """light colouring for python, javascript or lua: comments dim, todo notes stand out."""
+    widget.configure(state="normal")
+    widget.delete("1.0", "end")
+    widget.insert("1.0", source)
+    widget.tag_configure("comment", foreground=DIM)
+    widget.tag_configure("todo", foreground=NUMBER)
+    for number, line in enumerate(source.split("\n"), start=1):
+        if number > 6000:
+            break
+        stripped = line.lstrip()
+        if stripped.startswith(comment):
+            tag = "todo" if stripped[len(comment):].lstrip().startswith("todo") else "comment"
+            widget.tag_add(tag, f"{number}.0", f"{number}.end")
+    widget.configure(state="disabled")
+
+
+class TranslateDialog(Dialog):
+    """turn the open gublan program into python, javascript or lua (with the small runtime it needs)."""
+
+    COMMENTS = {"python": "#", "javascript": "//", "lua": "--"}
+
+    def __init__(self, master, source, name, base_dir, settings=None):
+        super().__init__(master, "export as another language", resizable=True)
+        self.source_code = source
+        self.program = os.path.splitext(name)[0] or "program"
+        self.base_dir = base_dir
+        self.settings = settings if settings is not None else {}
+        self.result = None
+        self.files = {}
+        top = tk.Frame(self.body, bg=PANEL)
+        top.pack(fill="x", pady=(0, px(10)))
+        tk.Label(top, text="to", bg=PANEL, fg=MUTED, font=ui_font(10)).pack(side="left")
+        self.language = tk.StringVar(value=self.settings.get("translate_language", "python"))
+        Segmented(top, [("python", "python"), ("javascript", "javascript (web)"), ("lua", "lua (love2d)")],
+                  self.language, bg=PANEL, size=9, command=lambda *_: self.translate()).pack(side="left", padx=px(10))
+        self.status = tk.Label(top, text="", bg=PANEL, fg=DIM, font=ui_font(9))
+        self.status.pack(side="right")
+
+        files_row = tk.Frame(self.body, bg=PANEL)
+        files_row.pack(fill="x", pady=(0, px(6)))
+        tk.Label(files_row, text="file", bg=PANEL, fg=MUTED, font=ui_font(9)).pack(side="left")
+        self.shown_file = tk.StringVar(value="")
+        self.file_tabs = tk.Frame(files_row, bg=PANEL)
+        self.file_tabs.pack(side="left", padx=px(10))
+        self.preview = self._code_box(self.body)
+
+        self.notes = tk.Label(self.body, text="", bg=PANEL, fg=MUTED, font=ui_font(9), justify="left", anchor="w",
+                              wraplength=px(860))
+        self.notes.pack(fill="x", pady=(px(8), 0))
+        where = tk.Frame(self.body, bg=PANEL)
+        where.pack(fill="x", pady=(px(8), 0))
+        where.columnconfigure(1, weight=1)
+        tk.Label(where, text="save in", bg=PANEL, fg=MUTED, font=ui_font(10)).grid(row=0, column=0, sticky="w")
+        self.folder = tk.StringVar(value="")
+        entry = flat_entry(where, self.folder, width=40)
+        entry.grid(row=0, column=1, sticky="ew", padx=px(10))
+        self.folder.trace_add("write", lambda *_: self.after_idle(entry.xview_moveto, 1))
+        BracketButton(where, "choose", size=9, command=self._choose_folder, bg=PANEL).grid(row=0, column=2)
+
+        self.save_button = self.add_button("save the files", self.save_files, kind="accent", icon_name="save")
+        self.add_button("copy", self.copy_shown, icon_name="copy")
+        self.add_button("close", self.cancel, kind="ghost")
+        tk.Label(self.buttons, text="the runtime file next to it gives the program gublan's built-in commands.",
+                 bg=PANEL, fg=DIM, font=ui_font(8)).pack(side="left")
+        self.after(30, self.translate)
+
+    def _code_box(self, parent):
+        frame = tk.Frame(parent, bg=EDITOR_BG, highlightthickness=1, highlightbackground=BORDER)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, bg=EDITOR_BG, fg=TEXT, relief="flat", borderwidth=0, highlightthickness=0,
+                       font=mono_font(10), wrap="none", padx=px(8), pady=px(6), selectbackground=SELECT,
+                       inactiveselectbackground=SELECT, state="disabled")
+        bar = scrollbar(frame, "vertical", text.yview)
+        hbar = scrollbar(frame, "horizontal", text.xview)
+        text.configure(yscrollcommand=bar.set, xscrollcommand=hbar.set)
+        hbar.pack(side="bottom", fill="x")
+        bar.pack(side="right", fill="y")
+        text.pack(fill="both", expand=True)
+        return text
+
+    def _default_folder(self, language):
+        return os.path.join(self.base_dir, "export", f"{self.program}_{language}")
+
+    def translate(self):
+        import gublantranslate
+        language = self.language.get()
+        self.settings["translate_language"] = language
+        try:
+            self.result = gublantranslate.translate(self.source_code, language, name=self.program,
+                                                    base_dir=self.base_dir)
+        except gublantranslate.TranslateError as err:
+            self.result = None
+            self.status.configure(text="could not translate", fg=ERROR)
+            self.notes.configure(text=lower(str(err)), fg=ERROR)
+            highlight_foreign(self.preview, "", "#")
+            self.save_button.set_enabled(False)
+            return
+        except Exception as err:  # noqa: BLE001 - a translator bug should be reported, not crash the studio
+            self.result = None
+            self.status.configure(text="could not translate", fg=ERROR)
+            self.notes.configure(text=f"the translator hit a problem: {type(err).__name__}: {lower(str(err))}",
+                                 fg=ERROR)
+            self.save_button.set_enabled(False)
+            return
+        self.save_button.set_enabled(True)
+        folder = self.folder.get().strip()
+        if not folder or os.path.basename(folder) in {f"{self.program}_{other}" for other in self.COMMENTS}:
+            self.folder.set(self._default_folder(language))
+        self._file_buttons()
+        self.show_file(self.result.main)
+        result = self.result
+        self.status.configure(text=f"{result.source_lines} gublan lines -> {result.output_lines} {language} lines",
+                              fg=MOSS_LIGHT)
+        how = gublantranslate.LANGUAGES[language]["how"].format(main=result.main)
+        parts = [how + "."]
+        if result.todos:
+            parts.append(f"{plural(result.todos, 'line')} could not be translated (marked todo).")
+        parts.extend(lower(note) for note in result.notes[:4])
+        self.notes.configure(text="  ".join(parts), fg=NUMBER if result.todos else MUTED)
+
+    def _file_buttons(self):
+        for child in self.file_tabs.winfo_children():
+            child.destroy()
+        names = list(self.result.files)
+        Segmented(self.file_tabs, [(name, name) for name in names], self.shown_file, bg=PANEL, size=9,
+                  command=lambda *_: self.show_file(self.shown_file.get())).pack(side="left")
+
+    def show_file(self, name):
+        if not self.result or name not in self.result.files:
+            return
+        self.shown_file.set(name)
+        extension = os.path.splitext(name)[1]
+        comment = {".py": "#", ".js": "//", ".lua": "--", ".html": "<!--"}.get(extension, "#")
+        highlight_foreign(self.preview, self.result.files[name], comment)
+
+    def _choose_folder(self):
+        folder = filedialog.askdirectory(parent=self, title="save the translated program in",
+                                         initialdir=self.base_dir)
+        if folder:
+            self.folder.set(os.path.join(folder, f"{self.program}_{self.language.get()}"))
+
+    def copy_shown(self):
+        if self.result:
+            self.clipboard_clear()
+            self.clipboard_append(self.result.files.get(self.shown_file.get(), self.result.text))
+            self.status.configure(text="copied", fg=MOSS_LIGHT)
+
+    def save_files(self):
+        import gublantranslate
+        if not self.result:
+            return
+        folder = self.folder.get().strip() or self._default_folder(self.language.get())
+        try:
+            written = gublantranslate.write_files(self.result, folder)
+        except OSError as err:
+            message(self, "export as another language", f"could not save the files: {lower(str(err))}", "error")
+            return
+        self.status.configure(text=f"saved {plural(len(written), 'file')}", fg=MOSS_LIGHT)
+        from .panels import reveal
+        reveal(os.path.join(folder, self.result.main))
+
+
+# ----- ai helpers (mcp) ---------------------------------------------------------------------------------------------
+# ----- live sessions -------------------------------------------------------------------------------------------
+class LiveDialog(Dialog):
+    """asks for your name (always) and, to join, the host's address and code."""
+
+    def __init__(self, master, settings, host=True):
+        super().__init__(master, "start a live session" if host else "join a live session")
+        from . import collab
+        self.collab = collab
+        self.settings = settings
+        self.host = host
+        body = self.body
+        about = ("people on the same network (the same wi-fi or cable) can join and type in your open programs "
+                 "with you. you will get an address and a code to give them." if host else
+                 "the host finds the address, port and code under tools > code together > how to join.")
+        tk.Label(body, text=about, bg=PANEL, fg=MUTED, font=ui_font(9), justify="left", anchor="w",
+                 wraplength=px(460)).pack(fill="x", pady=(0, px(10)))
+        self.name = tk.StringVar(value=settings.get("live_name", ""))
+        self.address = tk.StringVar(value=settings.get("live_address", ""))
+        self.port = tk.StringVar(value=str(settings.get("live_port", collab.DEFAULT_PORT)))
+        self.code = tk.StringVar(value="")
+        first = self._field(body, "your name", self.name, "everyone sees this next to your cursor")
+        if not host:
+            self._field(body, "address", self.address, "like 192.168.1.20", mono=True)
+            self._field(body, "code", self.code, "six letters and numbers", mono=True)
+        self._field(body, "port", self.port, "47800 unless the host changed it", mono=True, width=8)
+        if host:
+            tk.Label(body, text="windows may ask if gublan studio can use the network the first time. allow it "
+                                "on private networks so people can reach you.",
+                     bg=PANEL, fg=DIM, font=ui_font(8), justify="left", anchor="w",
+                     wraplength=px(460)).pack(fill="x", pady=(px(8), 0))
+        self.problem = tk.Label(body, text="", bg=PANEL, fg=ERROR, font=ui_font(9), anchor="w", justify="left",
+                                wraplength=px(460))
+        self.problem.pack(fill="x", pady=(px(8), 0))
+        self.add_button("start" if host else "join", self.ok, kind="accent")
+        self.add_button("cancel", self.cancel)
+        self.bind("<Return>", lambda _e: self.ok())
+        self.after(50, first.focus_set)
+
+    def _field(self, parent, label_text, variable, hint, mono=False, width=30):
+        row = tk.Frame(parent, bg=PANEL)
+        row.pack(fill="x", pady=px(3))
+        tk.Label(row, text=label_text, bg=PANEL, fg=TEXT, font=ui_font(10), width=10, anchor="w").pack(side="left")
+        entry = flat_entry(row, variable, width=width, mono=mono)
+        entry.pack(side="left", fill="x", expand=width >= 20)
+        tk.Label(row, text=hint, bg=PANEL, fg=DIM, font=ui_font(8)).pack(side="left", padx=(px(8), 0))
+        return entry
+
+    def ok(self):
+        name = self.collab.clean_name(self.name.get())
+        if not name:
+            self.problem.configure(text="type your name first. everyone in the session sees it.")
+            return
+        try:
+            port = int(self.port.get().strip())
+            if not 1024 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            self.problem.configure(text="the port is a number from 1024 to 65535.")
+            return
+        answer = {"name": name, "port": port}
+        if not self.host:
+            address = self.address.get().strip()
+            code = self.code.get().strip().lower()
+            if not address:
+                self.problem.configure(text="type the host's address.")
+                return
+            if len(code) != 6:
+                self.problem.configure(text="the code is six letters and numbers long.")
+                return
+            answer.update(address=address, code=code)
+            self.settings["live_address"] = address
+        self.settings["live_name"] = name
+        self.settings["live_port"] = port
+        config.save(self.settings)
+        self.close(answer)
+
+
+class McpDialog(Dialog):
+    """show how to connect an ai helper (claude, copilot, cursor) to this project through gublan's mcp server."""
+
+    TOOLS_TEXT = ("the helper can read and write files in the project, check code for problems, run programs (and "
+                  "press keys or click in them), run tests, take screenshots of the game window, look up commands, "
+                  "and turn code into or out of gublan. it can only touch files inside the project folder.")
+
+    def __init__(self, master, folder, settings=None):
+        super().__init__(master, "connect an ai helper", resizable=True)
+        import gublanmcp
+        self.gublanmcp = gublanmcp
+        self.settings = settings if settings is not None else {}
+        tk.Label(self.body, text=self.TOOLS_TEXT, bg=PANEL, fg=MUTED, font=ui_font(10), justify="left",
+                 anchor="w", wraplength=px(700)).pack(fill="x")
+
+        where = tk.Frame(self.body, bg=PANEL)
+        where.pack(fill="x", pady=(px(12), px(8)))
+        where.columnconfigure(1, weight=1)
+        tk.Label(where, text="project", bg=PANEL, fg=MUTED, font=ui_font(10)).grid(row=0, column=0, sticky="w")
+        self.folder = tk.StringVar(value=folder)
+        entry = flat_entry(where, self.folder, width=40)
+        entry.grid(row=0, column=1, sticky="ew", padx=px(10))
+        self.folder.trace_add("write", lambda *_: self.refresh())
+        BracketButton(where, "choose", size=9, command=self._choose_folder, bg=PANEL).grid(row=0, column=2)
+
+        row = tk.Frame(self.body, bg=PANEL)
+        row.pack(fill="x", pady=(0, px(6)))
+        tk.Label(row, text="for", bg=PANEL, fg=MUTED, font=ui_font(10)).pack(side="left")
+        names = list(gublanmcp.client_snippets(folder))
+        self.app_name = tk.StringVar(value=self.settings.get("mcp_app", names[0]))
+        if self.app_name.get() not in names:
+            self.app_name.set(names[0])
+        Segmented(row, [(name, name) for name in names], self.app_name, bg=PANEL, size=9,
+                  command=lambda *_: self.refresh()).pack(side="left", padx=px(10))
+        self.where_label = tk.Label(self.body, text="", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w")
+        self.where_label.pack(fill="x")
+        frame = tk.Frame(self.body, bg=EDITOR_BG, highlightthickness=1, highlightbackground=BORDER)
+        frame.pack(fill="both", expand=True, pady=(px(4), 0))
+        self.snippet = tk.Text(frame, bg=EDITOR_BG, fg=TEXT, relief="flat", borderwidth=0, highlightthickness=0,
+                               font=mono_font(10), wrap="char", padx=px(8), pady=px(6), height=9,
+                               selectbackground=SELECT, inactiveselectbackground=SELECT)
+        self.snippet.pack(fill="both", expand=True)
+        self.status = tk.Label(self.body, text="", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w", justify="left",
+                               wraplength=px(700))
+        self.status.pack(fill="x", pady=(px(8), 0))
+
+        self.add_button("close", self.cancel, kind="ghost")
+        self.add_button("copy", self.copy, kind="accent", icon_name="copy")
+        self.save_button = self.add_button("save in the project", self.save_project_file, icon_name="save")
+        self.add_button("test it", self.test, side="left")
+        self.refresh()
+
+    def _choose_folder(self):
+        folder = filedialog.askdirectory(parent=self, title="the project the ai helper works on",
+                                         initialdir=self.folder.get() or None)
+        if folder:
+            self.folder.set(os.path.normpath(folder))
+
+    def refresh(self):
+        name = self.app_name.get()
+        self.settings["mcp_app"] = name
+        where, text = self.gublanmcp.client_snippets(self.folder.get().strip() or os.getcwd())[name]
+        self.where_label.configure(text=where)
+        self.snippet.configure(state="normal")
+        self.snippet.delete("1.0", "end")
+        self.snippet.insert("1.0", text)
+        self.snippet.configure(state="disabled")
+        self.save_button.set_enabled(name != "claude desktop / cursor")
+
+    def copy(self):
+        self.clipboard_clear()
+        self.clipboard_append(self.snippet.get("1.0", "end-1c"))
+        self.status.configure(text="copied. paste it into the ai app's settings, then restart the app.",
+                              fg=MOSS_LIGHT)
+
+    def project_file(self):
+        """(path, text) of the settings file that sits in the project for the chosen app."""
+        folder = self.folder.get().strip()
+        config_json = self.gublanmcp.client_config(folder)
+        if self.app_name.get() == "vs code":
+            server = config_json["mcpServers"]["gublan"]
+            data = {"servers": {"gublan": {"type": "stdio", "command": server["command"], "args": server["args"]}}}
+            return os.path.join(folder, ".vscode", "mcp.json"), data
+        return os.path.join(folder, ".mcp.json"), config_json
+
+    def save_project_file(self):
+        import json
+        folder = self.folder.get().strip()
+        if not folder or not os.path.isdir(folder):
+            self.status.configure(text="choose a project folder that exists first", fg=ERROR)
+            return
+        path, data = self.project_file()
+        try:
+            existing = {}
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as handle:
+                    existing = json.load(handle)
+            key = "servers" if "servers" in data else "mcpServers"
+            existing.setdefault(key, {}).update(data[key])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(existing, handle, indent=2)
+                handle.write("\n")
+        except (OSError, ValueError) as err:
+            self.status.configure(text=f"could not save {os.path.basename(path)}: {lower(str(err))}", fg=ERROR)
+            return
+        self.status.configure(text=f"saved {path}. the ai app finds it when it opens this folder.", fg=MOSS_LIGHT)
+
+    def test(self):
+        folder = self.folder.get().strip()
+        if not folder or not os.path.isdir(folder):
+            self.status.configure(text="choose a project folder that exists first", fg=ERROR)
+            return
+        self.status.configure(text="starting the server...", fg=DIM)
+
+        def work():
+            try:
+                tools = self.gublanmcp.self_test(folder)
+                text, colour = f"it works: the server answered with {plural(len(tools), 'tool')} " \
+                               f"({', '.join(tools)}).", MOSS_LIGHT
+            except Exception as err:  # noqa: BLE001 - shown in the dialog
+                text, colour = f"the server did not start: {lower(str(err))}", ERROR
+            try:
+                self.after(0, lambda: self.winfo_exists() and self.status.configure(text=text, fg=colour))
+            except (tk.TclError, RuntimeError):
+                pass
+
+        threading.Thread(target=work, daemon=True).start()
 
 
 # ----- export -------------------------------------------------------------------------------------------------
@@ -982,9 +1454,9 @@ class SpriteEditor(Dialog):
         side = tk.Frame(main, bg=PANEL)
         side.pack(side="left", fill="y", padx=(px(12), 0))
         tk.Label(side, text="preview", bg=PANEL, fg=MUTED, font=ui_font(9)).pack(anchor="w")
-        self.preview_label = tk.Label(side, bg="#202020")
+        self.preview_label = tk.Label(side, bg=theme.CODE_BG)
         self.preview_label.pack(anchor="w", pady=px(4))
-        self.preview_big = tk.Label(side, bg="#202020")
+        self.preview_big = tk.Label(side, bg=theme.CODE_BG)
         self.preview_big.pack(anchor="w", pady=px(4))
         BracketButton(side, "clear", size=9, command=self.clear, kind="ghost", bg=PANEL).pack(anchor="w",
                                                                                               pady=(px(10), 0))
@@ -1059,8 +1531,8 @@ class SpriteEditor(Dialog):
                 if pixel[3]:
                     fill = "#%02x%02x%02x" % pixel[:3]
                 else:
-                    fill = "#262626" if (x + y) % 2 else "#1f1f1f"
-                outline = "#2c2c2c" if self.grid_on.get() and cell >= 6 else fill
+                    fill = theme.PANEL_ALT if (x + y) % 2 else theme.FIELD_BG
+                outline = theme.BORDER if self.grid_on.get() and cell >= 6 else fill
                 canvas.create_rectangle(x * cell, y * cell, (x + 1) * cell, (y + 1) * cell, fill=fill,
                                         outline=outline)
         canvas.create_rectangle(0, 0, cell * self.size, cell * self.size, outline=MOSS_DARK)
@@ -1071,7 +1543,7 @@ class SpriteEditor(Dialog):
         image = tk.PhotoImage(width=size, height=size)
         rows = []
         for row in self.pixels:
-            rows.append("{" + " ".join("#%02x%02x%02x" % pixel[:3] if pixel[3] else "#202020" for pixel in row) + "}")
+            rows.append("{" + " ".join("#%02x%02x%02x" % pixel[:3] if pixel[3] else theme.CODE_BG for pixel in row) + "}")
         image.put(" ".join(rows), to=(0, 0))
         self.preview = image
         self.preview_large = image.zoom(max(1, 96 // size))

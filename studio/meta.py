@@ -6,33 +6,44 @@ everything comes from gublancore so the editor can never disagree with the langu
 import re
 
 from gublancore import (
-    BLOCK_OPENERS, CATEGORY_ORDER, COLORS, COMMAND_SPECS, EXPRESSION_FUNCTIONS, EXPRESSION_KEYWORDS,
+    BLOCK_MIDDLES, BLOCK_OPENERS, CATEGORY_ORDER, COLORS, COMMAND_SPECS, EXPRESSION_FUNCTIONS, EXPRESSION_KEYWORDS,
     GUBLANCOMMANDS, KEY_ALIASES, parse_line, split_command,
 )
 
-FLOW_WORDS = {"if", "elseif", "elif", "else", "then", "end", "loop", "forever", "while", "for", "break", "continue",
-              "function", "return", "kill", "wait", "include"}
+FLOW_WORDS = {"if", "elseif", "elif", "else", "then", "end", "loop", "forever", "while", "until", "for", "break",
+              "continue", "function", "return", "kill", "wait", "include", "use", "match", "case", "try", "catch",
+              "throw", "test", "assert", "const"}
 KEY_NAMES = sorted({"left", "right", "up", "down", "space", "return", "escape", "tab", "backspace", "left shift",
                     "right shift", "left ctrl", "a", "d", "s", "w", "f1"} | set(KEY_ALIASES))
 EXPRESSION_WORDS = {"and", "or", "not", "in", "to", "step", "true", "false", "none", "pi", "dt", "all"} | set(
     EXPRESSION_KEYWORDS)
-INDENT_OPENERS = set(BLOCK_OPENERS) | {"elseif", "else"}
-DEDENT_WORDS = {"end", "else", "elseif", "elif"}
+# middle words sit level with their opener and start a new branch (else, elseif, case, catch)
+MIDDLE_WORDS = set(BLOCK_MIDDLES) | {"elif"}
+INDENT_OPENERS = set(BLOCK_OPENERS) | MIDDLE_WORDS
+DEDENT_WORDS = {"end"} | MIDDLE_WORDS
+
+
+def middle_owners(word):
+    """the openers a middle word can belong to (else belongs to if and match, catch to try)."""
+    return BLOCK_MIDDLES.get("elseif" if word == "elif" else word, ())
 
 CATEGORY_ABOUT = {
     "basics": "printing, variables and math",
     "control": "choices, loops and timing",
-    "functions": "reusable named blocks of code",
+    "functions": "reusable named blocks of code and modules",
+    "testing": "checking your code works",
     "lists and maps": "collections of values",
     "display": "the window, colours and frames",
     "2d": "flat shapes, text, pictures and buttons",
     "3d": "cubes, spheres and the camera",
+    "ui": "buttons, text boxes, sliders and checkboxes",
     "objects": "moving, hiding and checking shapes",
     "input": "keyboard, mouse and questions",
     "sound": "sound effects and music",
     "web": "reading text from the internet",
     "saving": "keeping values between runs",
     "discord": "your status on discord",
+    "plugins": "commands added by plugins",
 }
 
 

@@ -29,11 +29,13 @@ version_info = VSVersionInfo(
 )
 
 # gublancore.py and gublanpresence.py also ship as plain files: exported games are built from them
-# (see studio/exporter.py core_folder)
+# (see studio/exporter.py core_folder). runtimes/ holds the python, javascript and lua runtimes that
+# "export as another language" copies next to a translated program, and modules/ the modules `use` finds.
 datas = [('docs', 'docs'), ('gublancore.py', '.'), ('gublanpresence.py', '.'), ('logo.png', '.'),
-         ('logo.ico', '.')]
+         ('logo.ico', '.'), ('runtimes', 'runtimes'), ('modules', 'modules')]
 binaries = []
-hiddenimports = ['gublancore', 'gublanconvert', 'gublanpresence'] + collect_submodules('studio')
+hiddenimports = (['gublancore', 'gublanconvert', 'gublanpresence', 'gublantranslate', 'gublanmcp']
+                 + collect_submodules('studio'))
 tmp_ret = collect_all('OpenGL')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

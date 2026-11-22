@@ -7,7 +7,11 @@ three rules hold everywhere in the studio:
 """
 
 import ctypes
+import json
+import os
+import re
 import sys
+import time
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -61,9 +65,399 @@ CATEGORY_COLORS = {
     "web": "#8a9a80",
     "saving": "#a8b27c",
     "discord": "#8f9cc4",
+    "testing": "#b8a878",
+    "ui": "#9cbf9a",
+    "plugins": "#a89cc4",
     "comments": "#6b7266",
     "code": "#7d8a74",
 }
+
+# smaller shades the widgets use
+FIELD_BG = "#1f1f1f"
+CODE_BG = "#202020"
+INACTIVE_SELECT = "#252d21"
+MATCH = "#34422a"
+THUMB = "#333333"
+THUMB_HOVER = "#4a4a4a"
+BUTTON_HOVER = "#2e2e2e"
+ACCENT_TEXT = "#10140c"
+DARK = True
+THEME_NAME = "moss"
+
+# ----- themes ------------------------------------------------------------------
+# a theme changes the names above. json themes in the themes folder use the lowercase names, for example
+#   {"name": "night sea", "base": "midnight", "colors": {"bg": "#0d1117", "accent": "#3b82f6"},
+#    "syntax": {"string": "#9ecbff"}}
+# "accent", "accent_light" and "accent_dark" are friendlier names for moss, moss_light and moss_dark.
+COLOR_NAMES = ("BG", "PANEL", "PANEL_ALT", "EDITOR_BG", "TEXT", "MUTED", "DIM", "MOSS", "MOSS_LIGHT", "MOSS_DARK",
+               "NUMBER", "ERROR", "ACTIVE_LINE", "ERROR_LINE", "DEBUG_LINE", "BORDER", "HOVER", "SELECT",
+               "SELECT_TEXT", "FIELD_BG", "CODE_BG", "INACTIVE_SELECT", "MATCH", "THUMB", "THUMB_HOVER",
+               "BUTTON_HOVER", "ACCENT_TEXT")
+COLOR_ALIASES = {"accent": "MOSS", "accent_light": "MOSS_LIGHT", "accent_dark": "MOSS_DARK"}
+DEFAULT_THEME = "moss"
+_MOSS_COLORS = {name: globals()[name] for name in COLOR_NAMES}
+_MOSS_SYNTAX = dict(SYNTAX)
+_MOSS_CATEGORIES = dict(CATEGORY_COLORS)
+
+BUILTIN_THEMES = {
+    "moss": {"about": "soft green and soft black. the gublan look.", "dark": True, "colors": {}},
+    "midnight": {
+        "about": "deep blue and slate.", "dark": True,
+        "colors": {"bg": "#11141a", "panel": "#181c24", "panel_alt": "#222834", "editor_bg": "#141820",
+                   "text": "#e3e7ee", "muted": "#a3abba", "dim": "#687082", "moss": "#4f6f9f",
+                   "moss_light": "#8fb0e0", "moss_dark": "#2c3d5a", "number": "#e0c27a", "error": "#e57373",
+                   "active_line": "#1a2030", "error_line": "#352228", "debug_line": "#1f2c3a", "border": "#2a303c",
+                   "hover": "#1f2430", "select": "#2a3a55", "select_text": "#eef3fb", "field_bg": "#1b2029",
+                   "code_bg": "#1d222c", "inactive_select": "#232c3c", "match": "#2e4366", "thumb": "#303644",
+                   "thumb_hover": "#465066", "button_hover": "#2a3140", "accent_text": "#0c111a"},
+        "syntax": {"command": "#8fb0e0", "flow": "#b3c8f0", "string": "#9fc9b0", "number": "#e0c27a",
+                   "comment": "#687386", "brace": "#9ab8c8", "function": "#c9d8f5", "keyword": "#c3b8e8",
+                   "color": "#a9c0e0", "operator": "#98a2b3"},
+    },
+    "ember": {
+        "about": "warm browns and orange.", "dark": True,
+        "colors": {"bg": "#161312", "panel": "#1e1a18", "panel_alt": "#29231f", "editor_bg": "#181513",
+                   "text": "#ece4dc", "muted": "#b3a69a", "dim": "#75695e", "moss": "#a0623a",
+                   "moss_light": "#e0a070", "moss_dark": "#5a3622", "number": "#e8c46c", "error": "#e86b6b",
+                   "active_line": "#241d19", "error_line": "#3a2222", "debug_line": "#2e2a1f", "border": "#322b26",
+                   "hover": "#261f1b", "select": "#4a2f20", "select_text": "#fbf1e8", "field_bg": "#211c19",
+                   "code_bg": "#231e1b", "inactive_select": "#33251c", "match": "#553624", "thumb": "#3a322c",
+                   "thumb_hover": "#54483f", "button_hover": "#332a25", "accent_text": "#1a0f08"},
+        "syntax": {"command": "#e0a070", "flow": "#f0c090", "string": "#c8c08a", "number": "#e8c46c",
+                   "comment": "#7a6e64", "brace": "#d0a890", "function": "#f2d0a8", "keyword": "#e8b8a0",
+                   "color": "#d8b080", "operator": "#b0a294"},
+    },
+    "paper": {
+        "about": "a light theme for bright rooms.", "dark": False,
+        "colors": {"bg": "#f3f1ec", "panel": "#e9e6df", "panel_alt": "#dedad1", "editor_bg": "#fbfaf7",
+                   "text": "#22251f", "muted": "#5c6157", "dim": "#8c9087", "moss": "#5a7a3e",
+                   "moss_light": "#3f6a1f", "moss_dark": "#c9d8b4", "number": "#9a6a00", "error": "#c03a3a",
+                   "active_line": "#eef2e6", "error_line": "#f6dede", "debug_line": "#e2ecd6", "border": "#cfcbc2",
+                   "hover": "#e0ddd5", "select": "#cddcb8", "select_text": "#1a1f14", "field_bg": "#f6f5f1",
+                   "code_bg": "#eceae4", "inactive_select": "#dfe6d4", "match": "#d8e6c0", "thumb": "#c8c4bb",
+                   "thumb_hover": "#aaa59b", "button_hover": "#d6d2c9", "accent_text": "#ffffff"},
+        "syntax": {"command": "#3f6a1f", "flow": "#5a7a1a", "string": "#2f7a4a", "number": "#9a6a00",
+                   "comment": "#8a9084", "brace": "#3a6a6a", "function": "#2f5a20", "keyword": "#6a6a1a",
+                   "color": "#5a7a2a", "operator": "#5a6257"},
+    },
+    "contrast": {
+        "about": "pure black, bright text and strong edges.", "dark": True,
+        "colors": {"bg": "#000000", "panel": "#0a0a0a", "panel_alt": "#161616", "editor_bg": "#000000",
+                   "text": "#ffffff", "muted": "#d6d6d6", "dim": "#a0a0a0", "moss": "#7fbf3f",
+                   "moss_light": "#b6f070", "moss_dark": "#3f6a1f", "number": "#ffd75e", "error": "#ff6b6b",
+                   "active_line": "#141c0c", "error_line": "#3a1010", "debug_line": "#1c2c10", "border": "#5a5a5a",
+                   "hover": "#1e1e1e", "select": "#3f6a1f", "select_text": "#ffffff", "field_bg": "#0f0f0f",
+                   "code_bg": "#121212", "inactive_select": "#2a3a1a", "match": "#4a6a22", "thumb": "#4a4a4a",
+                   "thumb_hover": "#707070", "button_hover": "#2a2a2a", "accent_text": "#000000"},
+        "syntax": {"command": "#b6f070", "flow": "#d8f5a0", "string": "#a0e8b0", "number": "#ffd75e",
+                   "comment": "#9a9a9a", "brace": "#a0e0e0", "function": "#e0ffc0", "keyword": "#f0f0a0",
+                   "color": "#c8e890", "operator": "#d0d0d0"},
+    },
+}
+
+
+def themes_folder():
+    from . import config
+    return os.path.join(config.settings_folder(), "themes")
+
+
+def _is_color(value):
+    return isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) is not None
+
+
+def _theme_file_name(path):
+    return os.path.splitext(os.path.basename(path))[0].lower()
+
+
+def theme_files():
+    """{name: path} for each .json theme in the themes folder."""
+    found = {}
+    try:
+        entries = sorted(os.listdir(themes_folder()))
+    except OSError:
+        return found
+    for entry in entries:
+        if entry.lower().endswith(".json"):
+            path = os.path.join(themes_folder(), entry)
+            spec = _read_theme_file(path)
+            if spec is not None:
+                found[str(spec.get("name") or _theme_file_name(path)).lower()] = path
+    return found
+
+
+def _read_theme_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            spec = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return spec if isinstance(spec, dict) else None
+
+
+def theme_names():
+    """every theme you can pick: the built-in ones first, then your own."""
+    return list(BUILTIN_THEMES) + [name for name in theme_files() if name not in BUILTIN_THEMES]
+
+
+def theme_spec(name, _seen=None):
+    """the theme with its base filled in: {"dark", "about", "colors", "syntax", "categories"}, or None."""
+    name = str(name or "").lower()
+    _seen = _seen or set()
+    if name in _seen:
+        return None
+    _seen.add(name)
+    spec = BUILTIN_THEMES.get(name)
+    if spec is None:
+        path = theme_files().get(name)
+        spec = _read_theme_file(path) if path else None
+    if spec is None:
+        return None
+    base_name = str(spec.get("base") or ("moss" if name != "moss" else "")).lower()
+    base = theme_spec(base_name, _seen) if base_name and base_name != name else None
+    result = {"dark": True, "about": "", "colors": {}, "syntax": {}, "categories": {}}
+    if base:
+        for key in ("colors", "syntax", "categories"):
+            result[key].update(base[key])
+        result["dark"] = base["dark"]
+    for key in ("colors", "syntax", "categories"):
+        values = spec.get(key)
+        if isinstance(values, dict):
+            for item, value in values.items():
+                if _is_color(value):
+                    result[key][str(item).lower()] = value
+    if isinstance(spec.get("dark"), bool):
+        result["dark"] = spec["dark"]
+    result["about"] = str(spec.get("about", "") or "")
+    return result
+
+
+def _mix(color, other, amount):
+    """blend two #rrggbb colours: amount 0 is color, 1 is other."""
+    first = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
+    second = [int(other[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(a + (b - a) * amount):02x}" for a, b in zip(first, second))
+
+
+def apply_theme(name):
+    """switch the palette. widgets read it when they are made, so the studio restarts to show it."""
+    global DARK, THEME_NAME
+    spec = theme_spec(name)
+    if spec is None:
+        return False
+    values = dict(_MOSS_COLORS)
+    for key, value in spec["colors"].items():
+        target = COLOR_ALIASES.get(key, key.upper())
+        if target in values:
+            values[target] = value
+    globals().update(values)
+    DARK = spec["dark"]
+    SYNTAX.clear()
+    SYNTAX.update(_MOSS_SYNTAX)
+    if not DARK and not spec["syntax"]:
+        SYNTAX.update({key: _mix(value, "#000000", 0.45) for key, value in _MOSS_SYNTAX.items()})
+    SYNTAX.update({key: value for key, value in spec["syntax"].items() if key in SYNTAX})
+    CATEGORY_COLORS.clear()
+    CATEGORY_COLORS.update(_MOSS_CATEGORIES if DARK else
+                           {key: _mix(value, "#000000", 0.45) for key, value in _MOSS_CATEGORIES.items()})
+    CATEGORY_COLORS.update({key: value for key, value in spec["categories"].items() if key in CATEGORY_COLORS})
+    THEME_NAME = str(name).lower()
+    return True
+
+
+def write_example_theme():
+    """make the themes folder with an example theme in it, and give back the folder."""
+    folder = themes_folder()
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "my theme.json")
+    if not os.path.exists(path):
+        example = {"name": "my theme", "base": "midnight", "about": "copy this file to make your own theme.",
+                   "dark": True,
+                   "colors": {"bg": "#0f1115", "accent": "#5b8def", "accent_light": "#9cc0ff"},
+                   "syntax": {"string": "#a5d6a7", "comment": "#6b7280"}}
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(example, handle, indent=2)
+    return folder
+
+
+def _theme_from_settings():
+    try:
+        from . import config
+        with open(config.settings_path(), "r", encoding="utf-8") as handle:
+            stored = json.load(handle)
+        return str(stored.get("theme") or DEFAULT_THEME) if isinstance(stored, dict) else DEFAULT_THEME
+    except (OSError, ValueError, ImportError):
+        return DEFAULT_THEME
+
+
+if not apply_theme(_theme_from_settings()):
+    apply_theme(DEFAULT_THEME)
+
+
+# ----- motion --------------------------------------------------------------------
+MOTION = True  # the "animations" setting; when it is off every animation jumps straight to its end
+
+
+def ease_out(progress):
+    return 1 - (1 - progress) ** 3
+
+
+def animate(widget, duration, step, done=None, ease=ease_out):
+    """call step(progress from 0 to 1) about 60 times a second for duration milliseconds.
+    gives back a function that stops it early."""
+    state = {"job": None}
+
+    def finish():
+        try:
+            step(1.0)
+        except tk.TclError:
+            return
+        if done:
+            done()
+
+    if not MOTION or duration <= 0:
+        finish()
+        return lambda: None
+    start = time.perf_counter()
+
+    def tick():
+        state["job"] = None
+        try:
+            if not widget.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        progress = min(1.0, (time.perf_counter() - start) * 1000.0 / duration)
+        if progress >= 1.0:
+            finish()
+            return
+        try:
+            step(ease(progress))
+            state["job"] = widget.after(16, tick)
+        except tk.TclError:
+            return
+
+    def cancel():
+        if state["job"]:
+            try:
+                widget.after_cancel(state["job"])
+            except tk.TclError:
+                pass
+            state["job"] = None
+
+    tick()
+    return cancel
+
+
+def mix(color, other, amount):
+    """blend two colours for animations: amount 0 gives color, 1 gives other. names that are not #rrggbb
+    switch over halfway."""
+    if _is_color(color) and _is_color(other):
+        return _mix(color, other, max(0.0, min(1.0, amount)))
+    return other if amount >= 0.5 else color
+
+
+def fade_in(window, duration=130):
+    """fade a window in from see-through. does nothing where windows can't be see-through."""
+    if not MOTION:
+        return
+    try:
+        window.attributes("-alpha", 0.0)
+    except tk.TclError:
+        return
+
+    def step(progress):
+        window.attributes("-alpha", progress)
+
+    animate(window, duration, step)
+
+
+def tween_colors(widgets, option, start, end, duration=220):
+    """fade a colour option (like bg) on several widgets from start to end."""
+    def step(progress):
+        color = mix(start, end, progress)
+        for widget in widgets:
+            try:
+                widget.configure(**{option: color})
+            except tk.TclError:
+                pass
+
+    if not widgets:
+        return lambda: None
+    return animate(widgets[0], duration, step)
+
+
+class Toast:
+    """a short message that slides up in the bottom right corner of a window, then slides away."""
+
+    shown = []
+
+    def __init__(self, window, text, kind="info", seconds=3.5, margin=None):
+        self.window = window.winfo_toplevel()
+        self.margin = px(34) if margin is None else margin
+        accent = {"error": ERROR, "warning": NUMBER}.get(kind, MOSS_LIGHT)
+        self.frame = tk.Frame(self.window, bg=PANEL_ALT, highlightthickness=1, highlightbackground=MOSS_DARK)
+        tk.Frame(self.frame, bg=accent, width=px(3)).pack(side="left", fill="y")
+        self.label = tk.Label(self.frame, text=lower(text), bg=PANEL_ALT, fg=PANEL_ALT, font=ui_font(10),
+                              justify="left", wraplength=px(380), padx=px(12), pady=px(8))
+        self.label.pack(side="left")
+        self.label.bind("<Button-1>", lambda _e: self.hide())
+        self.offset = 0
+        self.closing = False
+        Toast.shown.append(self)
+        self._place(0.0)
+        self.cancel = animate(self.frame, 200, self._place)
+        self.frame.after(int(seconds * 1000), self.hide)
+
+    def _stack_y(self):
+        y = self.margin
+        for toast in Toast.shown:
+            if toast is self:
+                break
+            try:
+                y += toast.frame.winfo_reqheight() + px(8)
+            except tk.TclError:
+                pass
+        return y
+
+    def _place(self, progress):
+        drop = px(18) * (1 - progress)
+        self.frame.place(relx=1.0, rely=1.0, x=-px(16), y=-(self._stack_y() - drop), anchor="se")
+        self.label.configure(fg=mix(PANEL_ALT, TEXT, progress))
+        self.frame.lift()
+
+    def hide(self):
+        if self.closing:
+            return
+        self.closing = True
+
+        def step(progress):
+            self._place(1.0 - progress)
+
+        def gone():
+            if self in Toast.shown:
+                Toast.shown.remove(self)
+            try:
+                self.frame.destroy()
+            except tk.TclError:
+                pass
+            for toast in Toast.shown:
+                try:
+                    toast._place(1.0)
+                except tk.TclError:
+                    pass
+
+        try:
+            self.cancel()
+            animate(self.frame, 160, step, done=gone)
+        except tk.TclError:
+            gone()
+
+
+def toast(window, text, kind="info", seconds=3.5):
+    try:
+        return Toast(window, text, kind, seconds)
+    except tk.TclError:
+        return None
 
 # ----- fonts -------------------------------------------------------------------
 UI_FAMILY = "Segoe UI"
@@ -163,7 +557,7 @@ def square_window(window, caption=BG, border=MOSS_DARK, text=TEXT):
             data = ctypes.c_int(value)
             dwm.DwmSetWindowAttribute(handle, attribute, ctypes.byref(data), ctypes.sizeof(data))
 
-        setattr_(20, 1)  # dark mode title bar
+        setattr_(20, 1 if DARK else 0)  # dark mode title bar
         setattr_(33, 1)  # DWMWCP_DONOTROUND: square corners
         setattr_(34, _colorref(border))
         setattr_(35, _colorref(caption))
@@ -195,10 +589,10 @@ def setup_styles(root):
         name = f"Flat.{orient}.TScrollbar"
         style.layout(name, [(f"{orient}.Scrollbar.trough", {"sticky": "nswe", "children": [
             (f"{orient}.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"})]})])
-        style.configure(name, background="#333333", troughcolor=PANEL, bordercolor=PANEL, lightcolor="#333333",
-                        darkcolor="#333333", arrowsize=px(10), gripcount=0, relief="flat", borderwidth=0)
-        style.map(name, background=[("active", "#4a4a4a"), ("pressed", MOSS)],
-                  lightcolor=[("active", "#4a4a4a")], darkcolor=[("active", "#4a4a4a")])
+        style.configure(name, background=THUMB, troughcolor=PANEL, bordercolor=PANEL, lightcolor=THUMB,
+                        darkcolor=THUMB, arrowsize=px(10), gripcount=0, relief="flat", borderwidth=0)
+        style.map(name, background=[("active", THUMB_HOVER), ("pressed", MOSS)],
+                  lightcolor=[("active", THUMB_HOVER)], darkcolor=[("active", THUMB_HOVER)])
     style.configure("Flat.Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT, borderwidth=0,
                     rowheight=px(24), font=ui_font(10), relief="flat")
     style.map("Flat.Treeview", background=[("selected", SELECT)], foreground=[("selected", SELECT_TEXT)])
@@ -243,6 +637,8 @@ class BracketButton(tk.Canvas):
         self.pad_x, self.pad_y = px(pad_x), px(pad_y)
         self.fixed_width = px(width) if width else None
         self.hover = False
+        self.glow = 0.0  # 0 resting, 1 fully hovered; animated between the two
+        self._glow_stop = None
         self.pressed = False
         self.enabled = True
         self.checked = False
@@ -285,18 +681,29 @@ class BracketButton(tk.Canvas):
         self.draw()
 
     def colors(self):
+        if 0.0 < self.glow < 1.0 and self.enabled:
+            hovered = self.hover
+            self.hover = False
+            rest = self._colors()
+            self.hover = True
+            lit = self._colors()
+            self.hover = hovered
+            return tuple(mix(a, b, self.glow) for a, b in zip(rest, lit))
+        return self._colors()
+
+    def _colors(self):
         if not self.enabled:
             return (PANEL if self.kind != "ghost" else self.parent_bg), DIM, BORDER
         if self.kind == "accent":
             fill = MOSS_LIGHT if self.hover else MOSS
-            return fill, "#10140c" if self.hover else SELECT_TEXT, MOSS_LIGHT
+            return fill, ACCENT_TEXT if self.hover else SELECT_TEXT, MOSS_LIGHT
         if self.kind == "danger":
             fill = ERROR_LINE if self.hover else PANEL_ALT
             return fill, ERROR if self.hover else TEXT, ERROR
         if self.kind == "ghost":
             fill = HOVER if self.hover or self.checked else self.parent_bg
             return fill, (MOSS_LIGHT if self.checked else TEXT if self.hover else MUTED), MOSS
-        fill = "#2e2e2e" if self.hover else PANEL_ALT
+        fill = BUTTON_HOVER if self.hover else PANEL_ALT
         if self.checked:
             fill = SELECT
         return fill, TEXT, MOSS_LIGHT if self.hover or self.checked else MOSS
@@ -331,14 +738,25 @@ class BracketButton(tk.Canvas):
         else:
             self.create_text(cursor_x, height / 2, text=self.text, font=self.font, fill=foreground)
 
+    def _glow_to(self, target, duration):
+        if self._glow_stop:
+            self._glow_stop()
+        start = self.glow
+
+        def step(progress):
+            self.glow = start + (target - start) * progress
+            self.draw()
+
+        self._glow_stop = animate(self, duration, step)
+
     def _enter(self, _event):
         self.hover = True
-        self.draw()
+        self._glow_to(1.0, 90)
 
     def _leave(self, _event):
         self.hover = False
         self.pressed = False
-        self.draw()
+        self._glow_to(0.0, 180)
 
     def _press(self, _event):
         if self.enabled:
@@ -372,8 +790,22 @@ class Toggle(tk.Frame):
         self.label.pack(side="left", padx=(px(8), 0))
         for widget in (self, self.box, self.label):
             widget.bind("<Button-1>", self.flip)
-        self.variable.trace_add("write", lambda *_: self.draw())
+        self.fill = 1.0 if self.variable.get() else 0.0
+        self._fill_stop = None
+        self.variable.trace_add("write", lambda *_: self._animate_to())
         self.draw()
+
+    def _animate_to(self):
+        target = 1.0 if self.variable.get() else 0.0
+        if self._fill_stop:
+            self._fill_stop()
+        start = self.fill
+
+        def step(progress):
+            self.fill = start + (target - start) * progress
+            self.draw()
+
+        self._fill_stop = animate(self, 140, step)
 
     def flip(self, _event=None):
         self.variable.set(not self.variable.get())
@@ -383,11 +815,12 @@ class Toggle(tk.Frame):
     def draw(self):
         self.box.delete("all")
         size = px(16)
-        on = bool(self.variable.get())
-        self.box.create_rectangle(1, 1, size - 1, size - 1, outline=MOSS_LIGHT if on else "#4a4a4a",
-                                  fill=MOSS if on else PANEL_ALT)
-        if on:
-            self.box.create_line(px(4), px(8), px(7), px(11), px(12), px(5), fill=SELECT_TEXT, width=px(2))
+        fill = getattr(self, "fill", 1.0 if self.variable.get() else 0.0)
+        self.box.create_rectangle(1, 1, size - 1, size - 1, outline=mix(THUMB_HOVER, MOSS_LIGHT, fill),
+                                  fill=mix(PANEL_ALT, MOSS, fill))
+        if fill > 0.35:
+            self.box.create_line(px(4), px(8), px(7), px(11), px(12), px(5), fill=mix(MOSS, SELECT_TEXT, fill),
+                                 width=px(2))
 
 
 class Segmented(tk.Frame):
@@ -404,8 +837,18 @@ class Segmented(tk.Frame):
                                    bg=bg, pad_x=10, pad_y=5)
             button.pack(side="left", padx=(0, px(4)))
             self.buttons[value] = button
-        self.variable.trace_add("write", lambda *_: self.refresh())
+        self._trace = self.variable.trace_add("write", lambda *_: self.refresh())
+        self.bind("<Destroy>", self._forget_variable, add="+")
         self.refresh()
+
+    def _forget_variable(self, event):
+        # a segmented row can be rebuilt over the same variable; the old one must stop listening
+        if event.widget is self and self._trace:
+            try:
+                self.variable.trace_remove("write", self._trace)
+            except tk.TclError:
+                pass
+            self._trace = None
 
     def choose(self, value):
         self.variable.set(value)
@@ -471,6 +914,7 @@ class Tooltip:
         tk.Label(frame, text=self.text, bg=PANEL_ALT, fg=TEXT, font=ui_font(9), justify="left",
                  wraplength=px(360)).pack(padx=px(8), pady=px(5))
         self.window.geometry(f"+{x}+{y}")
+        fade_in(self.window, 110)
         self.window.deiconify()
 
     def hide(self, _event=None):
@@ -562,6 +1006,7 @@ class PopupMenu:
         x = min(x, screen_w - width - 4)
         y = min(y, screen_h - height - 4)
         self.window.geometry(f"{width}x{height}+{x}+{y}")
+        fade_in(self.window, 90)
         self.window.deiconify()
         self.window.lift()
         if self.parent_menu is None:

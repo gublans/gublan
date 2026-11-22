@@ -14,6 +14,8 @@ import io
 import math
 import os
 import re
+import sys
+import threading
 import tokenize as _pytokenize
 from dataclasses import dataclass
 
@@ -170,7 +172,7 @@ _JS_OPS = sorted(
     key=len, reverse=True,
 )
 _LUA_OPS = sorted(
-    "... .. == ~= <= >= // :: { } ( ) [ ] ; , < > + - * / % ^ # = . : & | ~".split(),
+    "... .. == ~= <= >= << >> // :: { } ( ) [ ] ; , < > + - * / % ^ # = . : & | ~".split(),
     key=len, reverse=True,
 )
 _NUM_RE = re.compile(r"0[xX][0-9a-fA-F_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?n?")
@@ -483,11 +485,11 @@ def _fold_concat(left, right):
 
 _JS_BINARY = {
     "||": (1, "or"), "??": (1, "or"), "&&": (2, "and"),
-    "|": (3, None), "^": (4, None), "&": (5, None),
+    "|": (3, ast.BitOr), "^": (4, ast.BitXor), "&": (5, ast.BitAnd),
     "==": (6, ast.Eq), "!=": (6, ast.NotEq), "===": (6, ast.Eq), "!==": (6, ast.NotEq),
     "<": (7, ast.Lt), ">": (7, ast.Gt), "<=": (7, ast.LtE), ">=": (7, ast.GtE),
     "instanceof": (7, None), "in": (7, ast.In),
-    "<<": (8, None), ">>": (8, None), ">>>": (8, None),
+    "<<": (8, ast.LShift), ">>": (8, ast.RShift), ">>>": (8, None),
     "+": (9, ast.Add), "-": (9, ast.Sub), "*": (10, ast.Mult), "/": (10, ast.Div), "%": (10, ast.Mod),
     "**": (11, ast.Pow),
 }
@@ -983,7 +985,8 @@ class JSParser(_Parser):
             if token.value in ("++", "--"):
                 raise Unsupported("++ and -- inside expressions have no gublan version")
             if token.value == "~":
-                raise Unsupported("the '~' operator has no gublan version")
+                self.next()
+                return ast.UnaryOp(op=ast.Invert(), operand=self.unary())
         if token.kind == "name":
             if token.value in ("typeof", "void", "delete"):
                 raise Unsupported(f"'{token.value}' has no gublan version")
@@ -1153,12 +1156,13 @@ _LUA_BINARY = {
     "or": (1, "or"), "and": (2, "and"),
     "<": (3, ast.Lt), ">": (3, ast.Gt), "<=": (3, ast.LtE), ">=": (3, ast.GtE), "~=": (3, ast.NotEq),
     "==": (3, ast.Eq),
-    "|": (4, None), "~": (4, None), "&": (4, None), "<<": (4, None), ">>": (4, None),
-    "..": (5, "concat"),
-    "+": (6, ast.Add), "-": (6, ast.Sub),
-    "*": (7, ast.Mult), "/": (7, ast.Div), "//": (7, ast.FloorDiv), "%": (7, ast.Mod),
-    "^": (9, ast.Pow),
+    "|": (4, ast.BitOr), "~": (5, ast.BitXor), "&": (6, ast.BitAnd), "<<": (7, ast.LShift), ">>": (7, ast.RShift),
+    "..": (8, "concat"),
+    "+": (9, ast.Add), "-": (9, ast.Sub),
+    "*": (10, ast.Mult), "/": (10, ast.Div), "//": (10, ast.FloorDiv), "%": (10, ast.Mod),
+    "^": (12, ast.Pow),
 }
+_LUA_UNARY = 11  # not, #, - and ~ bind tighter than * but looser than ^
 _LUA_BLOCK_END = ("end", "else", "elseif", "until")
 
 
@@ -1392,17 +1396,18 @@ class LuaParser(_Parser):
         token = self.peek()
         if token.kind == "name" and token.value == "not":
             self.next()
-            left = ast.UnaryOp(op=ast.Not(), operand=self.expression(8))
+            left = ast.UnaryOp(op=ast.Not(), operand=self.expression(_LUA_UNARY))
         elif token.kind == "op" and token.value == "#":
             self.next()
-            left = _call("len", self.expression(8))
+            left = _call("len", self.expression(_LUA_UNARY))
         elif token.kind == "op" and token.value == "-":
             self.next()
-            operand = self.expression(8)
+            operand = self.expression(_LUA_UNARY)
             left = _const(-operand.value) if _is_const(operand, int, float) else ast.UnaryOp(op=ast.USub(),
                                                                                              operand=operand)
         elif token.kind == "op" and token.value == "~":
-            raise Unsupported("the '~' operator has no gublan version")
+            self.next()
+            left = ast.UnaryOp(op=ast.Invert(), operand=self.expression(_LUA_UNARY))
         else:
             left = self.simple()
         while True:
@@ -1615,6 +1620,84 @@ TIME_SECONDS = {"time.time", "time.perf_counter", "time.monotonic", "love.timer.
 TIME_MILLIS = {"pygame.time.get_ticks", "Date.now", "millis", "performance.now"}
 
 
+TYPE_NAMES = {"int": "number", "float": "number", "complex": "number", "numbers.Number": "number",
+              "numbers.Real": "number", "numbers.Integral": "number", "str": "text", "bool": "boolean",
+              "list": "list", "tuple": "list", "dict": "map"}
+
+
+JS_KEY_NAMES = {"ArrowLeft": "left", "ArrowRight": "right", "ArrowUp": "up", "ArrowDown": "down", " ": "space",
+                "Space": "space", "Enter": "return", "Escape": "escape", "Shift": "left shift",
+                "ShiftLeft": "left shift", "ShiftRight": "right shift", "Control": "left ctrl",
+                "ControlLeft": "left ctrl", "Tab": "tab", "Backspace": "backspace"}
+
+
+def _js_key(name):
+    """a javascript key name (e.key or e.code) as a gublan key name."""
+    if name in JS_KEY_NAMES:
+        return JS_KEY_NAMES[name]
+    match = re.fullmatch(r"(?:Key|Digit)?([A-Za-z0-9])", name)
+    if match:
+        return match.group(1).lower()
+    return name.lower()
+
+
+def _key_state_map(call):
+    """document.addEventListener("keydown", e => { keys[e.key] = true }) -> "keys" (the map that holds which keys
+    are down), or None when the listener does anything else."""
+    if not (isinstance(call.func, ast.Attribute) and call.func.attr == "addEventListener" and len(call.args) >= 2
+            and _is_const(call.args[0], str) and call.args[0].value in ("keydown", "keyup")
+            and isinstance(call.args[1], ArrowFunction) and len(call.args[1].params) == 1):
+        return None
+    param = call.args[1].params[0]
+    body = call.args[1].body if isinstance(call.args[1].body, list) else [call.args[1].body]
+    found = None
+    for statement in body:
+        if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call) and \
+                isinstance(statement.value.func, ast.Attribute) and statement.value.func.attr == "preventDefault":
+            continue
+        if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Subscript)
+                and isinstance(statement.targets[0].value, ast.Name)
+                and isinstance(statement.targets[0].slice, ast.Attribute)
+                and isinstance(statement.targets[0].slice.value, ast.Name)
+                and statement.targets[0].slice.value.id == param
+                and statement.targets[0].slice.attr in ("key", "code")
+                and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, bool)):
+            return None
+        found = statement.targets[0].value.id
+    return found
+
+
+def _all_params(args):
+    """every parameter in order: plain ones, then *args, then keyword-only ones, then **kwargs."""
+    found = list(args.posonlyargs) + list(args.args)
+    if args.vararg:
+        found.append(args.vararg)
+    found.extend(args.kwonlyargs)
+    if args.kwarg:
+        found.append(args.kwarg)
+    return found
+
+
+def _default_map(args):
+    plain = [arg.arg for arg in list(args.posonlyargs) + list(args.args)]
+    defaults = args.defaults
+    found = dict(zip(plain[len(plain) - len(defaults):], defaults)) if defaults else {}
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        if default is not None:
+            found[arg.arg] = default
+    return found
+
+
+def _is_variadic(args):
+    return bool(args.vararg or args.kwarg or args.kwonlyargs)
+
+
+def _variadic_info(args):
+    return (args.vararg.arg if args.vararg else None, args.kwarg.arg if args.kwarg else None,
+            len(args.posonlyargs) + len(args.args))
+
+
 def _key_from_pygame(attr):
     key = attr[2:]
     return PYGAME_KEYS.get(key.upper(), key.lower())
@@ -1710,7 +1793,76 @@ class _ExprMapper(ast.NodeTransformer):
         return super().generic_visit(node)
 
     def visit_ArrowFunction(self, node):
-        raise Unsupported("functions used as values have no gublan version")
+        # a javascript or lua function written as a value: x => x * 2 works in gublan when it gives back one value
+        body = node.body if isinstance(node.body, list) else [node.body]
+        if len(body) == 1 and isinstance(body[0], ast.Return) and body[0].value is not None:
+            return self._lambda([str(param) for param in node.params], body[0].value)
+        if len(body) == 1 and isinstance(body[0], ast.Expr):
+            return self._lambda([str(param) for param in node.params], body[0].value)
+        raise Unsupported("functions written as values only work in gublan when they give back one value "
+                          "(x => x * 2); make this a named function")
+
+    def visit_Lambda(self, node):
+        args = node.args
+        if args.vararg or args.kwarg or args.kwonlyargs or args.defaults or args.posonlyargs:
+            raise Unsupported("little functions with default or * parameters have no gublan version")
+        return self._lambda([arg.arg for arg in args.args], node.body)
+
+    def _lambda(self, params, body):
+        names = []
+        for param in params:
+            if not isinstance(param, str) or not param.isidentifier():
+                raise Unsupported("this little function's parameters have no gublan version")
+            names.append(ast.arg(arg=self.w.variable(param)))
+        return ast.Lambda(args=ast.arguments(posonlyargs=[], args=names, vararg=None, kwonlyargs=[],
+                                             kw_defaults=[], kwarg=None, defaults=[]),
+                          body=self.visit(body))
+
+    def _comprehension(self, generators):
+        out = []
+        for generator in generators:
+            if generator.is_async:
+                raise Unsupported("async comprehensions have no gublan version")
+            out.append(ast.comprehension(target=self._loop_target(generator.target),
+                                         iter=self._iterable(generator.iter),
+                                         ifs=[self.visit(test) for test in generator.ifs], is_async=0))
+        return out
+
+    def _loop_target(self, node):
+        if isinstance(node, ast.Name):
+            mapped = self.visit(ast.Name(id=node.id, ctx=ast.Load()))
+            if not isinstance(mapped, ast.Name):
+                raise Unsupported("this loop variable has no gublan version")
+            return ast.Name(id=mapped.id, ctx=ast.Store())
+        if isinstance(node, (ast.Tuple, ast.List)) and all(isinstance(item, (ast.Name, ast.Tuple, ast.List))
+                                                           for item in node.elts):
+            return ast.Tuple(elts=[self._loop_target(item) for item in node.elts], ctx=ast.Store())
+        raise Unsupported("this loop variable has no gublan version")
+
+    def _iterable(self, node):
+        """what a comprehension walks over. d.items() becomes zip(keys(d), values(d))."""
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and not node.args and \
+                node.func.attr == "items" and self.w.language == "python":
+            receiver = self.visit(node.func.value)
+            return _call("zip", _call("keys", receiver), _call("values", copy.deepcopy(receiver)))
+        return self.visit(node)
+
+    def visit_ListComp(self, node):
+        generators = self._comprehension(node.generators)
+        return ast.ListComp(elt=self.visit(node.elt), generators=generators)
+
+    def visit_GeneratorExp(self, node):
+        generators = self._comprehension(node.generators)
+        return ast.ListComp(elt=self.visit(node.elt), generators=generators)
+
+    def visit_SetComp(self, node):
+        self.w.note("sets became lists")
+        generators = self._comprehension(node.generators)
+        return _call("unique", ast.ListComp(elt=self.visit(node.elt), generators=generators))
+
+    def visit_DictComp(self, node):
+        generators = self._comprehension(node.generators)
+        return ast.DictComp(key=self.visit(node.key), value=self.visit(node.value), generators=generators)
 
     def visit_Constant(self, node):
         value = node.value
@@ -1722,7 +1874,10 @@ class _ExprMapper(ast.NodeTransformer):
             return _name("none")
         if isinstance(value, float) and not math.isfinite(value):
             raise Unsupported("infinite numbers have no gublan version")
-        if isinstance(value, (bytes, complex)) or value is Ellipsis:
+        if isinstance(value, bytes):
+            self.w.note("bytes (b\"...\") became text")
+            return _const(value.decode("latin-1"))
+        if isinstance(value, complex) or value is Ellipsis:
             raise Unsupported("this kind of value has no gublan version")
         return node
 
@@ -1757,6 +1912,8 @@ class _ExprMapper(ast.NodeTransformer):
             return _name("screen_width" if identifier == "innerWidth" else "screen_height")
         if identifier in w.renames:
             return _name(w.renames[identifier])
+        if identifier in w.functions and identifier not in w.assigned and identifier not in w.parameters:
+            return _name(w.functions[identifier])  # a function used as a value: map(items, double)
         return _name(w.variable(identifier))
 
     def visit_Attribute(self, node):
@@ -1810,6 +1967,8 @@ class _ExprMapper(ast.NodeTransformer):
         w = self.w
         container = node.value
         index = node.slice
+        if isinstance(container, ast.Name) and container.id in w.key_maps and _is_const(index, str):
+            return _call("keydown", _const(_js_key(index.value)))
         dotted_index = w.dotted(index) if isinstance(index, (ast.Attribute, ast.Name)) else None
         if dotted_index and (dotted_index.startswith("pygame.K_") or (
                 isinstance(container, ast.Name) and container.id in w.keys_vars)):
@@ -1838,8 +1997,8 @@ class _ExprMapper(ast.NodeTransformer):
         return ast.Subscript(value=value, slice=new_index, ctx=ast.Load())
 
     def visit_BinOp(self, node):
-        if isinstance(node.op, (ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift, ast.MatMult)):
-            raise Unsupported("bitwise operators have no gublan version")
+        if isinstance(node.op, ast.MatMult):
+            raise Unsupported("the @ operator has no gublan version")
         if isinstance(node.op, ast.Mod) and _is_const(node.left, str):
             args = node.right.elts if isinstance(node.right, (ast.Tuple, ast.List)) else [node.right]
             return self.visit(_format_to_fstring(node.left.value, args, "percent"))
@@ -1956,12 +2115,17 @@ class _ExprMapper(ast.NodeTransformer):
             name = node.func.id
             if name in GUBLAN_FUNCTIONS:
                 return ast.Call(func=_name(name), args=[self.visit(arg) for arg in args], keywords=[])
+            if (name in w.assigned or name in w.parameters) and not node.keywords:
+                # a variable holding a function (a lambda, or a function passed in)
+                return ast.Call(func=self.visit(node.func), args=[self.visit(arg) for arg in args], keywords=[])
             raise Unsupported(f"{name}() has no gublan version")
         raise Unsupported(f"{dotted or 'this call'}() has no gublan version")
 
     def _user_call(self, gublan_name, node, prefix=()):
         w = self.w
         signature = w.signatures.get(gublan_name)
+        if gublan_name in w.variadic and signature is not None:
+            return self._variadic_call(gublan_name, node, prefix, signature, w.variadic[gublan_name])
         args = list(prefix) + [self.visit(arg) for arg in node.args]
         if node.keywords:
             if signature is None or any(keyword.arg is None for keyword in node.keywords):
@@ -1989,6 +2153,126 @@ class _ExprMapper(ast.NodeTransformer):
                     break
                 args.append(self.visit(copy.deepcopy(default)))
         return ast.Call(func=_name(gublan_name), args=args, keywords=[])
+
+    def _variadic_call(self, gublan_name, node, prefix, signature, variadic):
+        """a call to a function with *args, keyword-only parameters or **kwargs: gublan passes the extra values as
+        a list and the extra named values as a map."""
+        params, defaults = signature
+        vararg, kwarg, positional = variadic
+        values = list(prefix) + [self.visit(arg) for arg in node.args]
+        slots = {}
+        for index, value in enumerate(values[:positional]):
+            slots[params[index]] = value
+        extra = values[positional:]
+        if extra and not vararg:
+            raise Unsupported(f"{gublan_name} is given more values than it takes")
+        if vararg:
+            slots[vararg] = ast.List(elts=extra, ctx=ast.Load())
+        loose_keys, loose_values = [], []
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                raise Unsupported("** arguments have no gublan version")
+            if keyword.arg in params and keyword.arg not in (vararg, kwarg):
+                slots[keyword.arg] = self.visit(keyword.value)
+            elif kwarg:
+                loose_keys.append(_const(keyword.arg))
+                loose_values.append(self.visit(keyword.value))
+            else:
+                raise Unsupported(f"'{keyword.arg}' is not a parameter of {gublan_name}")
+        if kwarg:
+            slots[kwarg] = ast.Dict(keys=loose_keys, values=loose_values)
+        args = []
+        for param in params:
+            if param in slots:
+                args.append(slots[param])
+                continue
+            default = defaults.get(param)
+            if default is None:
+                raise Unsupported(f"call to {gublan_name} is missing '{param}'")
+            args.append(self.visit(copy.deepcopy(default)))
+        return ast.Call(func=_name(gublan_name), args=args, keywords=[])
+
+    def _builtin_call(self, name, args, node):
+        """python built-ins that gublan has in another shape."""
+        visit = self.visit
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords if keyword.arg}
+        if any(keyword.arg is None for keyword in node.keywords):
+            return None
+        if name == "isinstance" and len(args) == 2 and not keywords:
+            kinds = args[1].elts if isinstance(args[1], (ast.Tuple, ast.List)) else [args[1]]
+            names = []
+            for kind in kinds:
+                label = TYPE_NAMES.get(self.w.dotted(kind) if isinstance(kind, (ast.Name, ast.Attribute)) else None)
+                if label is None:
+                    raise Unsupported("isinstance() only has a gublan version for numbers, text, lists and maps; "
+                                      "use type(x) == \"number\"")
+                if label not in names:
+                    names.append(label)
+            checks = [ast.Compare(left=_call("type", visit(args[0])), ops=[ast.Eq()], comparators=[_const(label)])
+                      for label in names]
+            return checks[0] if len(checks) == 1 else ast.BoolOp(op=ast.Or(), values=checks)
+        if name in ("sorted", "min", "max") and keywords and set(keywords) <= {"key", "reverse", "default"} \
+                and len(args) == 1:
+            items = visit(args[0])
+            if "key" in keywords and not _is_const(keywords["key"], type(None)):
+                # sortby keeps ties in order; max walks the list backwards so the first of equal items wins
+                source = _call("reverse", items) if name == "max" else items
+                ordered = _call("sortby", source, visit(keywords["key"]))
+            else:
+                ordered = _call("sort", items)
+            if "reverse" in keywords:
+                if _is_true(keywords["reverse"]):
+                    ordered = _call("reverse", ordered)
+                elif not _is_false(keywords["reverse"]):
+                    return None
+            if name == "sorted":
+                if "default" in keywords:
+                    return None
+                return ordered
+            picked = ast.Subscript(value=ordered, slice=_const(0 if name == "min" else -1), ctx=ast.Load())
+            if "default" in keywords:
+                return ast.IfExp(test=_call("len", copy.deepcopy(items)), body=picked, orelse=visit(keywords["default"]))
+            return picked
+        if keywords:
+            return None
+        if name in ("map", "filter") and len(args) == 2:
+            function = args[0]
+            if name == "filter" and _is_const(function, type(None)):
+                return _call("filter", visit(args[1]), self._lambda(["item"], ast.Name(id="item", ctx=ast.Load())))
+            return _call(name, visit(args[1]), visit(function))
+        if name == "all" and len(args) == 1:
+            return _call("every", visit(args[0]))
+        if name in ("set", "frozenset") and len(args) <= 1:
+            self.w.note("sets became lists")
+            return _call("unique", visit(args[0])) if args else ast.List(elts=[], ctx=ast.Load())
+        if name == "tuple" and len(args) <= 1:
+            return visit(args[0]) if args else ast.List(elts=[], ctx=ast.Load())
+        if name == "repr" and len(args) == 1:
+            return _call("str", visit(args[0]))
+        if name == "divmod" and len(args) == 2:
+            return ast.List(elts=[ast.BinOp(left=visit(args[0]), op=ast.FloorDiv(), right=visit(args[1])),
+                                  ast.BinOp(left=visit(args[0]), op=ast.Mod(), right=visit(args[1]))],
+                            ctx=ast.Load())
+        if name == "reversed" and len(args) == 1:
+            return _call("reverse", visit(args[0]))
+        if name in ("getattr", "hasattr") and len(args) in (2, 3) and _is_const(args[1], str) and \
+                args[1].value.isidentifier():
+            field = args[1].value
+            owner = visit(args[0])
+            has = ast.Compare(left=_const(field), ops=[ast.In()], comparators=[owner])
+            if name == "hasattr":
+                return has if len(args) == 2 else None
+            read = ast.Attribute(value=copy.deepcopy(owner), attr=field, ctx=ast.Load())
+            if len(args) == 2:
+                return read
+            return ast.IfExp(test=has, body=read, orelse=visit(args[2]))
+        if name == "chr" and len(args) == 1:
+            return _call("char", visit(args[0]))
+        if name == "ord" and len(args) == 1:
+            return _call("code", visit(args[0]))
+        if name == "callable" and len(args) == 1:
+            return ast.Compare(left=_call("type", visit(args[0])), ops=[ast.Eq()], comparators=[_const("function")])
+        return None
 
     def _constructor(self, class_name, node):
         info = self.w.classes[class_name]
@@ -2019,7 +2303,34 @@ class _ExprMapper(ast.NodeTransformer):
             return self._user_call(f"{owner}_{attr}", node, prefix=[self.visit(receiver)])
         value = lambda: self.visit(receiver)  # noqa: E731
         call = lambda name, *extra: ast.Call(func=_name(name), args=list(extra), keywords=[])  # noqa: E731
+        if attr == "tick" and w.library == "pygame" and len(args) <= 1:
+            return ast.BinOp(left=_name("dt"), op=ast.Mult(), right=_const(1000))
+        callback = len(args) >= 1 and isinstance(args[0], (ArrowFunction, ast.Lambda))
+        if callback and w.language == "javascript":
+            function = self.visit(args[0])
+            simple = {"map": "map", "filter": "filter", "find": "find", "some": "any", "every": "every"}
+            if attr in simple and len(args) == 1:
+                return call(simple[attr], value(), function)
+            if attr == "reduce" and len(args) == 2:
+                return call("reduce", value(), function, self.visit(args[1]))
+            if attr == "findIndex" and len(args) == 1:
+                found = call("find", value(), function)
+                return call("indexof", value(), found)
         visited = [self.visit(arg) for arg in args]
+        if attr in ("endswith", "endsWith") and len(args) == 1:
+            return call("endswith", value(), visited[0])
+        if attr in ("title", "capitalize") and not args and w.language == "python":
+            return call("capitalize", value())
+        if attr == "count" and len(args) == 1 and w.language == "python":
+            return call("count", value(), visited[0])
+        if attr == "isdigit" and not args:
+            return call("isnumber", value())
+        if attr in ("lstrip", "rstrip") and not args:
+            return call("trim", value())
+        if attr == "concat" and len(args) == 1 and w.language == "javascript":
+            return ast.BinOp(left=value(), op=ast.Add(), right=visited[0])
+        if attr == "items" and not args and w.language == "python":
+            return call("zip", call("keys", value()), call("values", value()))
         if attr in ("upper", "toUpperCase") and not args:
             return call("upper", value())
         if attr in ("lower", "toLowerCase") and not args:
@@ -2087,6 +2398,11 @@ class _ExprMapper(ast.NodeTransformer):
         visit = self.visit
         lib = w.library
         name = dotted
+        if w.language == "python" and name in ("sorted", "min", "max") and node.keywords:
+            mapped = self._builtin_call(name, args, node)
+            if mapped is None:
+                raise Unsupported(f"{name}() with these named values has no gublan version")
+            return mapped
         if name in MATH_SIMPLE:
             target = MATH_SIMPLE[name]
             if target == "__bool":
@@ -2217,6 +2533,10 @@ class _ExprMapper(ast.NodeTransformer):
             return self._lua_sub(visit(args[0]), [visit(arg) for arg in args[1:]])
         if name == "string.rep" and len(args) == 2:
             return ast.BinOp(left=visit(args[0]), op=ast.Mult(), right=visit(args[1]))
+        if w.language == "python" and "." not in name and name not in w.functions:
+            mapped = self._builtin_call(name, args, node)
+            if mapped is not None:
+                return mapped
         if name == "isinstance":
             raise Unsupported("isinstance() has no gublan version; use type(x) == \"number\"")
         if name in ("input", "prompt"):
@@ -2281,9 +2601,37 @@ class _Folder(ast.NodeTransformer):
         return values[0] if len(values) == 1 else ast.BoolOp(op=node.op, values=values)
 
 
+try:  # python 3.14 keeps the unparser in its own module; older versions keep it inside ast
+    from _ast_unparse import Unparser as _BaseUnparser, _Precedence
+except ImportError:  # pragma: no cover - depends on the python version
+    _BaseUnparser, _Precedence = getattr(ast, "_Unparser", None), getattr(ast, "_Precedence", None)
+if _BaseUnparser is not None and _Precedence is not None:
+    class _GublanUnparser(_BaseUnparser):
+        """writes lambdas as arrows (x => x * 2, (a, b) => a + b), the way gublan's guide shows them."""
+
+        def visit_Lambda(self, node):
+            with self.require_parens(_Precedence.TEST, node):
+                names = [arg.arg for arg in node.args.args]
+                self.write(names[0] if len(names) == 1 else f"({', '.join(names)})")
+                self.write(" => ")
+                self.set_precedence(_Precedence.TEST, node.body)
+                self.traverse(node.body)
+else:  # pragma: no cover - older or newer pythons without the private unparser
+    _GublanUnparser = None
+
+
+def _plain_unparse(node):
+    if _GublanUnparser is not None and any(isinstance(item, ast.Lambda) for item in ast.walk(node)):
+        try:
+            return _GublanUnparser().visit(node)
+        except Exception:  # noqa: BLE001 - fall back to python's spelling, which gublan also reads
+            pass
+    return ast.unparse(node)
+
+
 def _unparse(node):
     """ast.unparse, but text uses "double quotes" the way gublan examples do."""
-    text = ast.unparse(node)
+    text = _plain_unparse(node)
     if "'" not in text:
         return text
     try:
@@ -2302,6 +2650,16 @@ def _unparse(node):
     for start, end, replacement in reversed(replacements):
         text = text[:start] + replacement + text[end:]
     return text
+
+
+class _TickRemover(ast.NodeTransformer):
+    """clock.tick(60) -> clock.tick() so the frame rate is only set once (the fps line above it)."""
+
+    def visit_Call(self, node):
+        self.generic_visit(node)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "tick":
+            node.args = []
+        return node
 
 
 class _Renamer(ast.NodeTransformer):
@@ -2361,6 +2719,10 @@ class _Writer:
         self.functions = {}
         self.dotted_functions = {}
         self.signatures = {}
+        self.variadic = {}  # gublan name -> (*args name, **kwargs name, how many plain parameters)
+        self.parameters = set()  # every parameter name, so calling one (a function passed in) works
+        self.key_maps = set()  # javascript maps filled by keydown and keyup listeners
+        self.loop_conditional = set()  # requestAnimationFrame loops that can stop
         self.classes = {}
         self.methods = {}
         self.static_methods = {}
@@ -2822,9 +3184,11 @@ class _Writer:
         if self.language == "python" and "pygame" in self.modules:
             self.library = "pygame"
         elif self.language == "javascript":
-            if top_names & {"setup", "draw"} or "createCanvas" in calls:
+            canvas = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                         and node.func.attr == "getContext" for node in ast.walk(module))
+            if "createCanvas" in calls or (top_names & {"setup", "draw"} and not canvas):
                 self.library = "p5"
-            elif any(call and call.endswith(".getContext") for call in calls):
+            elif canvas:
                 self.library = "canvas"
         elif self.language == "lua" and (any(call and call.startswith("love.") for call in calls) or any(
                 name.startswith("love_") for name in self.functions)):
@@ -2840,25 +3204,35 @@ class _Writer:
                     if isinstance(inner, ast.Call) and self.dotted(inner.func) == "requestAnimationFrame" and \
                             inner.args and isinstance(inner.args[0], ast.Name) and inner.args[0].id == node.name:
                         self.loop_functions.add(node.name)
+                        if not any(isinstance(statement, ast.Expr) and statement.value is inner
+                                   for statement in node.body):
+                            # only asks for the next frame sometimes (inside an if): the loop stops when it doesn't
+                            self.loop_conditional.add(node.name)
         for node in ast.walk(module):
+            if isinstance(node, ast.Call):
+                held = _key_state_map(node)
+                if held:
+                    self.key_maps.add(held)
+            if isinstance(node, (ast.FunctionDef, ast.Lambda)):
+                self.parameters.update(arg.arg for arg in _all_params(node.args))
             if isinstance(node, ast.FunctionDef):
-                params = [arg.arg for arg in node.args.posonlyargs + node.args.args]
-                defaults = node.args.defaults
-                default_map = dict(zip(params[len(params) - len(defaults):], defaults)) if defaults else {}
+                params = [arg.arg for arg in _all_params(node.args)]
+                default_map = _default_map(node.args)
                 default_map = {key: value for key, value in default_map.items()
                                if not (isinstance(value, ast.Constant) and value.value is None and
                                        self.language == "javascript")}
                 gublan_name = self.functions.get(node.name, node.name)
                 self.signatures.setdefault(gublan_name, (params, default_map))
+                if _is_variadic(node.args):
+                    self.variadic.setdefault(gublan_name, _variadic_info(node.args))
             if isinstance(node, ast.ClassDef):
                 for item in node.body:
                     if isinstance(item, ast.FunctionDef):
-                        params = [arg.arg for arg in item.args.posonlyargs + item.args.args]
-                        defaults = item.args.defaults
-                        default_map = dict(zip(params[len(params) - len(defaults):], defaults)) if defaults else {}
-                        static = self.static_methods.get((node.name, item.name))
-                        visible = params if static or item.name == "__init__" else params
-                        self.signatures[f"{node.name}_{item.name}"] = (visible, default_map)
+                        params = [arg.arg for arg in _all_params(item.args)]
+                        default_map = _default_map(item.args)
+                        self.signatures[f"{node.name}_{item.name}"] = (params, default_map)
+                        if _is_variadic(item.args):
+                            self.variadic[f"{node.name}_{item.name}"] = _variadic_info(item.args)
 
     # layout ----------------------------------------------------------------
     def layout(self, body):
@@ -2986,6 +3360,9 @@ class _Writer:
         except RecursionError:
             del self.out[mark:]
             self.todo(node, depth, "this part is nested too deeply to convert")
+        except Exception as err:  # noqa: BLE001 - one odd statement must never stop the whole file
+            del self.out[mark:]
+            self.todo(node, depth, f"the converter could not read this part ({type(err).__name__.lower()})")
 
     def body(self, statements, depth):
         for node in statements:
@@ -3028,6 +3405,36 @@ class _Writer:
             return
         if isinstance(value, (ast.Constant, ast.Name)):
             return
+        if isinstance(value, (ast.Yield, ast.YieldFrom)):
+            raise Unsupported("yield (generator functions) has no gublan version; build a list and return it")
+        if isinstance(value, ast.Await) and isinstance(value.value, ast.Call):
+            self.call_statement(value.value, depth)
+            return
+        if isinstance(value, (ast.ListComp, ast.SetComp, ast.GeneratorExp)) and len(value.generators) == 1 and \
+                not value.generators[0].is_async:
+            # [draw(x) for x in things] used only for what it does: a for loop
+            generator = value.generators[0]
+            inner = [ast.Expr(value=value.elt)]
+            for test in reversed(generator.ifs):
+                inner = [ast.If(test=test, body=inner, orelse=[])]
+            self.stmt(ast.For(target=generator.target, iter=generator.iter, body=inner, orelse=[],
+                              lineno=getattr(node, "lineno", None)), depth)
+            return
+        if isinstance(value, ast.BoolOp) and len(value.values) == 2 and isinstance(value.values[1], ast.Call):
+            # ready and start()  /  done or finish()
+            test = value.values[0] if isinstance(value.op, ast.And) else ast.UnaryOp(op=ast.Not(),
+                                                                                    operand=value.values[0])
+            self.stmt(ast.If(test=test, body=[ast.Expr(value=value.values[1])], orelse=[],
+                             lineno=getattr(node, "lineno", None)), depth)
+            return
+        if isinstance(value, ast.IfExp) and isinstance(value.body, ast.Call) and isinstance(value.orelse, ast.Call):
+            self.stmt(ast.If(test=value.test, body=[ast.Expr(value=value.body)],
+                             orelse=[ast.Expr(value=value.orelse)], lineno=getattr(node, "lineno", None)), depth)
+            return
+        if not any(isinstance(item, (ast.Call, ast.Yield, ast.YieldFrom, ast.Await, ast.NamedExpr))
+                   for item in ast.walk(value)):
+            self.note("lines that only worked out a value (and did nothing with it) were left out")
+            return
         raise Unsupported("this line only works out a value and does nothing with it")
 
     def s_FunctionDef(self, node, depth, hoisted=False, name=None, method_of=None):
@@ -3040,9 +3447,11 @@ class _Writer:
             raise Unsupported(f"a function called {gublan_name} was already made earlier; gublan needs a "
                               "different name for each function")
         args = node.args
-        if args.vararg or args.kwarg or args.kwonlyargs:
-            raise Unsupported("*args, **kwargs and keyword-only parameters have no gublan version")
-        params = [self.variable(arg.arg) for arg in args.posonlyargs + args.args]
+        params = [self.variable(arg.arg) for arg in _all_params(args)]
+        if args.vararg:
+            self.note(f"*{args.vararg.arg} became a list parameter called {args.vararg.arg}")
+        if args.kwarg:
+            self.note(f"**{args.kwarg.arg} became a map parameter called {args.kwarg.arg}")
         if node.decorator_list:
             self.note("decorators like @property were removed")
         previous = (self.current_class, self.in_init, self.key_names, self.key_events)
@@ -3191,6 +3600,17 @@ class _Writer:
     def s_Assign(self, node, depth):
         value = node.value
         targets = node.targets
+        ticks = [item for item in ast.walk(value) if isinstance(item, ast.Call) and
+                 isinstance(item.func, ast.Attribute) and item.func.attr == "tick" and len(item.args) == 1]
+        if ticks and self.library == "pygame":
+            # dt = clock.tick(60) / 1000: gublan keeps the frame rate with fps and gives dt by itself
+            self.emit(depth, f"fps {self.token(ticks[0].args[0])}")
+            if len(targets) == 1 and isinstance(targets[0], ast.Name) and targets[0].id == "dt":
+                self.note("clock.tick() became fps, and gublan's own dt")
+                return
+            node = ast.Assign(targets=targets, value=_TickRemover().visit(copy.deepcopy(value)),
+                              lineno=getattr(node, "lineno", None))
+            value = node.value
         if len(targets) > 1:
             first = targets[0]
             self.s_Assign(_assign(first, value), depth)
@@ -3434,6 +3854,8 @@ class _Writer:
                 header = f"for {target.id} in {self.expr(iterator)}"
         elif name == "enumerate" and isinstance(target, ast.Tuple) and len(target.elts) == 2:
             index, item = target.elts
+            if not isinstance(index, ast.Name):
+                raise Unsupported("this loop variable has no gublan version")
             start = iterator.args[1] if len(iterator.args) > 1 else _const(0)
             before.append(f"{index.id} = {self.expr(_minus(start, 1))}")
             prefix.append(f"{index.id} += 1")
@@ -3460,8 +3882,26 @@ class _Writer:
                 iterator.func.attr == "items" and isinstance(target, ast.Tuple) and len(target.elts) == 2:
             key, value = target.elts
             table_text = self.expr(iterator.func.value)
-            header = f"for {key.id} in {table_text}"
-            prefix.append(f"{value.id} = {table_text}[{key.id}]")
+            key_name = key.id if isinstance(key, ast.Name) else self.temp("key")
+            header = f"for {key_name} in {table_text}"
+            if isinstance(value, ast.Name):
+                prefix.append(f"{value.id} = {table_text}[{key_name}]")
+            else:
+                pair = self.temp("value")
+                prefix.append(f"{pair} = {table_text}[{key_name}]")
+                for index, part in enumerate(value.elts if isinstance(value, (ast.Tuple, ast.List)) else []):
+                    if not isinstance(part, ast.Name):
+                        raise Unsupported("this loop variable has no gublan version")
+                    prefix.append(f"{part.id} = {pair}[{index}]")
+                if not isinstance(value, (ast.Tuple, ast.List)):
+                    raise Unsupported("this loop variable has no gublan version")
+            if not isinstance(key, ast.Name):
+                for index, part in enumerate(key.elts if isinstance(key, (ast.Tuple, ast.List)) else []):
+                    if not isinstance(part, ast.Name):
+                        raise Unsupported("this loop variable has no gublan version")
+                    prefix.insert(0, f"{part.id} = {key_name}[{index}]")
+                if not isinstance(key, (ast.Tuple, ast.List)):
+                    raise Unsupported("this loop variable has no gublan version")
         else:
             header = f"for {self.loop_target(target, prefix)} in {self.expr(iterator)}"
 
@@ -3645,6 +4085,11 @@ class _Writer:
         receiver_name = receiver.id if isinstance(receiver, ast.Name) else None
         lib = self.library
 
+        if name == "setattr" and len(args) == 3 and _is_const(args[1], str) and args[1].value.isidentifier() \
+                and self.language == "python":
+            target = ast.Attribute(value=args[0], attr=args[1].value, ctx=ast.Store())
+            self.stmt(ast.Assign(targets=[target], value=args[2], lineno=getattr(call, "lineno", None)), depth)
+            return
         if name in SKIP_CALLS:
             if name in ("stroke", "noFill"):
                 self.note("outlines (stroke, nofill) are drawn as filled shapes")
@@ -3691,6 +4136,8 @@ class _Writer:
         if name == "requestAnimationFrame":
             if args and isinstance(args[0], ast.Name) and args[0].id in self.loop_functions:
                 if self.function_depth:
+                    if args[0].id in self.loop_conditional:
+                        self.emit(depth, f"{self.functions.get(args[0].id, args[0].id)}_again = true")
                     return
                 self.emit_game_loop(args[0].id, depth)
                 return
@@ -3802,6 +4249,9 @@ class _Writer:
                                iter=_call("enumerate", receiver), body=args[0].body, orelse=[])
             self.s_For(loop, depth)
             return
+        if attr == "addEventListener" and _key_state_map(call):
+            self.note("keys[e.key] listeners became keydown(\"left\") checks")
+            return
         if name in ("document.addEventListener", "window.addEventListener", "addEventListener") or \
                 attr == "addEventListener":
             self.note("event listeners were not converted; check keys with keydown(\"left\") or "
@@ -3823,8 +4273,14 @@ class _Writer:
 
     def emit_game_loop(self, function, depth):
         self.ensure_mode(depth)
-        self.emit(depth, "forever")
-        self.emit(depth + 1, f"{self.functions.get(function, function)}()")
+        gublan_name = self.functions.get(function, function)
+        if function in self.loop_conditional:
+            self.emit(depth, f"{gublan_name}_again = true")
+            self.emit(depth, f"while {gublan_name}_again")
+            self.emit(depth + 1, f"{gublan_name}_again = false")
+        else:
+            self.emit(depth, "forever")
+        self.emit(depth + 1, f"{gublan_name}()")
         self.emit(depth + 1, "frame")
         self.emit(depth, "end")
 
@@ -3970,8 +4426,43 @@ class _Writer:
 # entry points
 # --------------------------------------------------------------------------
 
+_DEEP_LOCK = threading.Lock()
+
+
 def convert(source, language=None, filename=None):
-    """convert source code to gublan. returns a ConversionResult."""
+    """convert source code to gublan. returns a ConversionResult.
+
+    the work runs on a helper thread with a big stack, so deeply nested code converts instead of
+    stopping the whole file with a recursion error."""
+    box = {}
+
+    def work():
+        try:
+            box["result"] = _convert(source, language, filename)
+        except BaseException as err:  # noqa: BLE001 - handed back to the caller below
+            box["error"] = err
+
+    with _DEEP_LOCK:
+        old_limit = sys.getrecursionlimit()
+        old_stack = threading.stack_size()
+        try:
+            threading.stack_size(64 * 1024 * 1024)
+            sys.setrecursionlimit(max(old_limit, 20000))
+            helper = threading.Thread(target=work, name="gublan-convert", daemon=True)
+            helper.start()
+        finally:
+            threading.stack_size(old_stack)
+        helper.join()
+        sys.setrecursionlimit(old_limit)
+    if "error" in box:
+        error = box["error"]
+        if isinstance(error, RecursionError):
+            raise ValueError("this code is nested too deeply to convert") from error
+        raise error
+    return box["result"]
+
+
+def _convert(source, language=None, filename=None):
     source = source.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
     language = (language or detect_language(source, filename)).lower()
     if language not in LANGUAGES:

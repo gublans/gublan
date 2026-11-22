@@ -77,6 +77,8 @@ COMMAND_SPECS = {
     "random": ("basics", "random <variable> <min> <max>", 4,
                "pick a random number between min and max.", "random roll 1 6"),
     "time": ("basics", "time <variable>", 2, "store the seconds since the program started.", "time now"),
+    "const": ("basics", "const <name> = <value>", 4,
+              "make a value that can't be changed later, like the speed of the game.", "const speed = 4"),
     # control
     "if": ("control", "if <condition>", 2,
            "run the lines below only when the condition is true. close with end.", "if score > 10"),
@@ -84,13 +86,27 @@ COMMAND_SPECS = {
                "check another condition when the ones above were false.", "elseif score > 5"),
     "else": ("control", "else", 1, "run these lines when nothing above matched.", "else"),
     "then": ("control", "then kill", 2, "stop the program when the surrounding if matched.", "then kill"),
-    "end": ("control", "end", 1, "close an if, loop, forever, while, for or function block.", "end"),
+    "end": ("control", "end", 1,
+            "close an if, loop, forever, while, until, for, match, try, test or function block.", "end"),
     "loop": ("control", "loop <count>", 2, "repeat the lines below a number of times.", "loop 10"),
     "forever": ("control", "forever", 1, "repeat the lines below until the program stops.", "forever"),
     "while": ("control", "while <condition>", 2,
               "repeat the lines below while the condition stays true.", "while lives > 0"),
     "for": ("control", "for <var> = <start> to <end> [step <n>] | for <var> in <list>", 4,
             "count through numbers or go through every item of a list.", "for i = 1 to 10"),
+    "until": ("control", "until <condition>", 2,
+              "repeat the lines below until the condition becomes true.", "until lives == 0"),
+    "match": ("control", "match <value>", 2,
+              "compare one value with several cases and run the case that fits. close with end.", "match day"),
+    "case": ("control", "case <value> [, more values...]", 2,
+             "inside match: run these lines when the value equals one of these.", 'case "sat", "sun"'),
+    "try": ("control", "try", 1,
+            "run lines that might fail. if one does, the program jumps to catch instead of stopping.", "try"),
+    "catch": ("control", "catch [variable]", 1,
+              "inside try: run these lines when something failed. the message goes into the variable "
+              "(error if you leave it out).", "catch problem"),
+    "throw": ("control", "throw <message...>", 2,
+              "stop with your own error message. a try around it can catch it.", "throw not enough coins"),
     "break": ("control", "break", 1, "leave the loop you are in right now.", "break"),
     "continue": ("control", "continue", 1, "skip to the next round of the loop.", "continue"),
     "wait": ("control", "wait <seconds>", 2, "pause for a number of seconds.", "wait 0.5"),
@@ -104,6 +120,16 @@ COMMAND_SPECS = {
                "return total"),
     "include": ("functions", "include <script.gubl>", 2, "load another gublan script into this one.",
                 "include helpers.gubl"),
+    "use": ("functions", "use <module>", 2,
+            "load a module: a gublan file from a modules folder (yours, your project's or a built-in one).",
+            "use easing"),
+    # testing
+    "test": ("testing", "test <name...>", 2,
+             "a block that checks your code. it is skipped when the program runs and used by run tests (f7).",
+             "test adding works"),
+    "assert": ("testing", "assert <condition>", 2,
+               "stop with an error when the condition is false. use it inside test blocks.",
+               "assert 2 + 3 == 5"),
     # lists and maps
     "list": ("lists and maps", "list <name> [values...]", 2, "make a list, optionally with starting values.",
              "list fruit apple pear"),
@@ -157,9 +183,6 @@ COMMAND_SPECS = {
     "image": ("2d", "image <name> <path> <x> <y>", 5, "show an image file.", "image logo assets/logo.png 20 20"),
     "sprite": ("2d", "sprite <name> <path> <x> <y> <width> <height>", 7,
                "show a resized image you can move and collide.", "sprite hero assets/hero.png 40 40 48 48"),
-    "button": ("2d", "button <variable> <x> <y> <width> <height> <label...>", 7,
-               "make a clickable button. its variable is 1 while pressed.", "button start 20 20 120 40 start"),
-    "ui": ("2d", "ui button <label>", 3, "make the quick button in the top-left corner.", "ui button destroy"),
     "vec2": ("2d", "vec2 <name> <x> <y>", 4, "make an x/y value for positions and movement.", "vec2 speed 3 0"),
     # 3d
     "cube": ("3d", "cube <name> <x> <y> <z> <size>", 6, "make a 3d cube.", "cube crate 0 0 -6 1"),
@@ -169,8 +192,22 @@ COMMAND_SPECS = {
     "camera": ("3d", "camera <x> <y> <z> [yaw] [pitch] | camera <vec3>", 2,
                "move and turn the 3d camera.", "camera 0 1 0"),
     "vec3": ("3d", "vec3 <name> <x> <y> <z>", 5, "make an x/y/z value for 3d positions.", "vec3 spot 0 0 -6"),
+    # ui: works in 2d, and drawn on top of the scene in 3d
+    "button": ("ui", "button <variable> <x> <y> <width> <height> <label...>", 7,
+               "make a clickable button. its variable is 1 while pressed.", "button start 20 20 120 40 start"),
+    "ui": ("ui", "ui button <label>", 3, "make the quick button in the top-left corner.", "ui button destroy"),
+    "textbox": ("ui", "textbox <name> <x> <y> <width> [hint...]", 5,
+                "make a box the player can click and type into. name.text is what they typed, and "
+                "name.submitted is true once after they press enter.", "textbox username 20 60 240 your name"),
+    "slider": ("ui", "slider <name> <x> <y> <width> <min> <max> [start]", 7,
+               "make a slider the player can drag. name.value is where it is.", "slider loudness 20 120 200 0 100 50"),
+    "checkbox": ("ui", "checkbox <name> <x> <y> <label...>", 5,
+                 "make a box the player can tick. name.checked is true while it is ticked.",
+                 "checkbox music 20 160 play music"),
+    "focus": ("ui", "focus <textbox> | focus none", 2,
+              "put the typing cursor in a textbox, or take it out with focus none.", "focus username"),
     # objects
-    "move": ("objects", "move <object> <dx> <dy> [dz] | move <object> <vector>", 3,
+    "move":("objects", "move <object> <dx> <dy> [dz] | move <object> <vector>", 3,
              "move an object by an amount.", "move player 3 0"),
     "place": ("objects", "place <object> <x> <y> [z]", 4, "put an object at an exact position.",
               "place player 40 300"),
@@ -221,8 +258,8 @@ COMMAND_SPECS = {
 }
 
 CATEGORY_ORDER = (
-    "basics", "control", "functions", "lists and maps", "display", "2d", "3d",
-    "objects", "input", "sound", "web", "saving", "discord",
+    "basics", "control", "functions", "testing", "lists and maps", "display", "2d", "3d", "ui",
+    "objects", "input", "sound", "web", "saving", "discord", "plugins",
 )
 
 GUBLANCOMMANDS = set(COMMAND_SPECS)
@@ -233,10 +270,14 @@ COMMAND_SUMMARY = {name: spec[3] for name, spec in COMMAND_SPECS.items()}
 COMMAND_EXAMPLE = {name: spec[4] for name, spec in COMMAND_SPECS.items()}
 
 NO_ARGUMENT_COMMANDS = {
-    "clear", "kill", "forever", "end", "else", "stopmusic", "stopsounds", "frame", "break", "continue",
+    "clear", "kill", "forever", "end", "else", "stopmusic", "stopsounds", "frame", "break", "continue", "try",
 }
-BLOCK_OPENERS = {"if", "loop", "forever", "while", "for", "function"}
-LOOP_COMMANDS = {"loop", "forever", "while", "for"}
+BLOCK_OPENERS = {"if", "loop", "forever", "while", "until", "for", "function", "match", "try", "test"}
+# lines that end one branch of a block and start the next. each maps to the blocks it can be inside.
+BLOCK_MIDDLES = {"elseif": ("if",), "else": ("if", "match"), "case": ("match",), "catch": ("try",)}
+LOOP_COMMANDS = {"loop", "forever", "while", "until", "for"}
+# blocks that are skipped when the program runs and called on their own
+CALLABLE_BLOCKS = {"function", "test"}
 COMPARISON_OPERATORS = {"=", "==", "!=", ">", "<", ">=", "<="}
 
 COLORS = {
@@ -342,13 +383,41 @@ EXPRESSION_FUNCTIONS = {
     "now": "now() seconds since 1970, for timing things between runs",
     "saved": "saved(\"name\") true if a value has been saved under that name",
     "load": "load(\"name\", default) a saved value, or the default when nothing was saved",
+    # working with lists and functions as values
+    "map": "map(list, f) a new list with f done to every item: map(nums, x => x * 2)",
+    "filter": "filter(list, f) the items where f is true: filter(nums, x => x > 0)",
+    "reduce": "reduce(list, f, start) combine every item into one value: reduce(nums, (a, b) => a + b, 0)",
+    "find": "find(list, f) the first item where f is true, or none",
+    "any": "any(list) or any(list, f) true when at least one item is true (or makes f true)",
+    "every": "every(list) or every(list, f) true when every item is true (or makes f true)",
+    "sortby": "sortby(list, f) a copy sorted by what f gives for each item: sortby(people, p => p.age)",
+    "zip": "zip(a, b) pairs up two lists: zip([1, 2], [\"a\", \"b\"]) is [[1, \"a\"], [2, \"b\"]]",
+    "slice": "slice(list-or-text, start, end) the part from start up to (not including) end",
+    "flat": "flat(list) a list of lists joined into one list",
+    "repeat": "repeat(text-or-list, times) the value repeated that many times",
+    "call": "call(f, values...) run a function value with some values",
+    # text
+    "capitalize": "capitalize(text) the text with the first letter of each word in capitals",
+    "lines": "lines(text) a list of the lines in some text",
+    "words": "words(text) a list of the words in some text",
+    "char": "char(code) the letter for a character code: char(65) is A",
+    "code": "code(letter) the character code of a letter: code(\"A\") is 65",
+    "tojson": "tojson(value) a value written as json text",
+    "fromjson": "fromjson(text) json text turned into lists, maps, numbers and text",
+    "textwidth": "textwidth(text, size) how many pixels wide some text is when shown",
+    # math
+    "log": "log(x) or log(x, base) the logarithm of a number",
+    "exp": "exp(x) e to the power of x",
+    "noise": "noise(x) or noise(x, y) smooth random values from 0 to 1, for hills, clouds and wobbles",
+    "randint": "randint(low, high) a random whole number from low to high",
 }
 
 PRESENCE_PARTS = ("details", "state", "image", "smallimage", "button", "party", "timer", "countdown", "app",
                   "clear")
 _ASSIGNMENT_TOKENS = ("=", "+=", "-=", "*=", "/=")
 
-EXPRESSION_KEYWORDS = {"and", "or", "not", "true", "false", "none", "pi", "to", "step", "in", "all", "dt"}
+EXPRESSION_KEYWORDS = {"and", "or", "not", "true", "false", "none", "pi", "to", "step", "in", "all", "dt",
+                       "lambda", "if", "else", "for"}
 
 GUBLANWORDS = sorted(
     GUBLANCOMMANDS | set(COLORS) | {"2d", "3d", "true", "false", "button", "to", "step", "in", "and",
@@ -581,7 +650,7 @@ def _normalize_condition(text):
         elif pair in ("<>", "~="):
             out.append("!=")
             index += 2
-        elif pair in ("==", "!=", "<=", ">="):
+        elif pair in ("==", "!=", "<=", ">=", "=>"):
             out.append(pair)
             index += 2
         elif char == "!":
@@ -602,7 +671,27 @@ _ALLOWED_NODES = (
     ast.JoinedStr, ast.FormattedValue, ast.Slice,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub, ast.UAdd,
     ast.Not, ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn,
+    # whole-number bit operators (mostly for converted code)
+    ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift, ast.Invert,
+    # little functions (x => x * 2 or lambda x: x * 2) and list building ([x * 2 for x in items])
+    ast.Lambda, ast.arguments, ast.arg, ast.ListComp, ast.DictComp, ast.comprehension, ast.Store,
 )
+
+_ARROW_GROUP_RE = re.compile(r"\(\s*((?:[A-Za-z_]\w*\s*(?:,\s*[A-Za-z_]\w*\s*)*)?)\)\s*=>")
+_ARROW_SINGLE_RE = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*=>")
+_QUOTED_RE = re.compile(r"(\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*')")
+
+
+def _arrows_to_lambdas(text):
+    """rewrite javascript-style arrow functions (x => x * 2, (a, b) => a + b) as python lambdas,
+    leaving anything inside quotes alone."""
+    if "=>" not in text:
+        return text
+    pieces = _QUOTED_RE.split(text)
+    for index in range(0, len(pieces), 2):
+        piece = _ARROW_GROUP_RE.sub(lambda m: f"lambda {m.group(1).strip()}:", pieces[index])
+        pieces[index] = _ARROW_SINGLE_RE.sub(lambda m: f"lambda {m.group(1)}:", piece)
+    return "".join(pieces)
 
 _EXPRESSION_CACHE = {}
 
@@ -615,10 +704,15 @@ def parse_expression(text):
             raise cached
         return cached
     try:
-        tree = ast.parse(text.strip(), mode="eval")
+        tree = ast.parse(_arrows_to_lambdas(text.strip()), mode="eval")
         for node in ast.walk(tree):
             if not isinstance(node, _ALLOWED_NODES):
                 raise ValueError(f"'{type(node).__name__.lower()}' is not supported in expressions")
+            if isinstance(node, ast.arguments) and (node.vararg or node.kwarg or node.kwonlyargs or node.defaults
+                                                    or node.posonlyargs):
+                raise ValueError("little functions only take plain names, like: x => x * 2")
+            if isinstance(node, ast.comprehension) and node.is_async:
+                raise ValueError("'async' is not supported in expressions")
         result = tree.body
     except (SyntaxError, ValueError) as err:
         if len(_EXPRESSION_CACHE) > 20000:
@@ -632,15 +726,56 @@ def parse_expression(text):
 
 
 def parse_condition(text):
-    return parse_expression(_normalize_condition(text))
+    node = parse_expression(_normalize_condition(text))
+    if isinstance(node, ast.Lambda):
+        # "if score => 2" is almost always a typo for >=, not a little function
+        raise ValueError("this condition is not valid. did you mean >= ?")
+    return node
 
 
 def _condition_is_simple(tokens):
     return len(tokens) == 3 and tokens[1] in COMPARISON_OPERATORS
 
 
+_MISSING = object()
+
+# commands and functions added by studio plugins (see register_command and register_function)
+_PLUGIN_COMMANDS = {}
+_PLUGIN_FUNCTIONS = {}
+
+
+def _noise_hash(x, y):
+    n = (x * 374761393 + y * 668265263) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((n ^ (n >> 16)) & 0xFFFF) / 65535.0
+
+
+def _value_noise(x, y=0.0):
+    """smooth value noise from 0 to 1: the same x and y always give the same answer."""
+    x0, y0 = math.floor(x), math.floor(y)
+    fx, fy = x - x0, y - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    top = _noise_hash(x0, y0) + (_noise_hash(x0 + 1, y0) - _noise_hash(x0, y0)) * fx
+    bottom = _noise_hash(x0, y0 + 1) + (_noise_hash(x0 + 1, y0 + 1) - _noise_hash(x0, y0 + 1)) * fx
+    return top + (bottom - top) * fy
+
+
+class GublanLambda:
+    """a little function value: x => x * 2 (or lambda x: x * 2)."""
+    __slots__ = ("params", "body")
+
+    def __init__(self, params, body):
+        self.params = params
+        self.body = body
+
+    def __repr__(self):
+        return f"function({', '.join(self.params)})"
+
+
 def format_value(value):
     """turn a runtime value into friendly text (lowercase booleans, tidy decimals)."""
+    if isinstance(value, GublanLambda):
+        return repr(value)
     if value is True:
         return "true"
     if value is False:
@@ -683,6 +818,8 @@ def kind_of(value):
         return "vec2"
     if isinstance(value, Vector3):
         return "vec3"
+    if isinstance(value, GublanLambda):
+        return "function"
     if value is None:
         return "none"
     return "value"
@@ -767,7 +904,7 @@ def analyze_source(source, warnings=False):
         parsed_lines.append(parsed)
         if parsed and parsed.cmd == "function" and len(parsed.parts) >= 2:
             function_names.add(parsed.parts[1])
-        if parsed and parsed.cmd == "include":
+        if parsed and parsed.cmd in ("include", "use"):
             has_include = True
 
     def report(line, message, severity="error"):
@@ -775,6 +912,7 @@ def analyze_source(source, warnings=False):
             diagnostics.append({"line": line, "severity": severity, "message": message})
 
     defined_functions = set()
+    constants = {}
     for lineno, parsed in enumerate(parsed_lines, start=1):
         if parsed is None:
             continue
@@ -806,6 +944,36 @@ def analyze_source(source, warnings=False):
                 target = _SET_RE.match(parsed.rest).group(1)
                 if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[.+\])?", target):
                     report(lineno, f"'{target}' is not a valid variable name. names start with a letter")
+        if command in ("const",) and len(parts) >= 2:
+            match = _SET_RE.match(parsed.rest)
+            if not match or not re.fullmatch(r"[A-Za-z_]\w*", match.group(1)):
+                report(lineno, "write constants as: const name = value")
+            else:
+                constants.setdefault(match.group(1), lineno)
+        if command in ("set", "add", "sub", "mul", "div") and len(parts) >= 2:
+            assignment = _SET_RE.match(parsed.rest) if command == "set" else None
+            target = assignment.group(1) if assignment else str(parts[1])
+            if target in constants and constants[target] < lineno:
+                report(lineno, f"'{target}' is a constant (line {constants[target]}), so it can't be changed")
+        if command in ("until", "assert") and len(parts) >= 2:
+            tokens = parts[1:]
+            if not _condition_is_simple(tokens) and len(tokens) != 1 and _check_expression(parsed.rest, True):
+                report(lineno, "this condition is not valid. use comparisons like x > 3")
+        if command == "match" and len(parts) >= 2 and len(parts) > 2 and _check_expression(parsed.rest):
+            report(lineno, "match needs one value to compare, like: match day")
+        if command == "case" and len(parts) >= 2:
+            for piece in _split_top_level_commas(parsed.rest):
+                if _check_expression(piece):
+                    report(lineno, "write cases as values split by commas, like: case 1, 2, 3")
+                    break
+        if command == "catch" and (len(parts) > 2 or (len(parts) == 2 and not str(parts[1]).isidentifier())):
+            report(lineno, "use: catch  or  catch <variable>")
+        if command == "use" and len(parts) != 2:
+            report(lineno, "use: use <module-name>")
+        if command == "slider" and len(parts) not in (7, 8):
+            report(lineno, "use: slider <name> <x> <y> <width> <min> <max> [start]")
+        if command == "focus" and len(parts) != 2:
+            report(lineno, "use: focus <textbox>  or  focus none")
         if command in ("if", "elseif", "while") and len(parts) >= 2:
             tokens = parts[1:]
             if not _condition_is_simple(tokens) and len(tokens) != 1:
@@ -877,6 +1045,8 @@ def analyze_source(source, warnings=False):
             problem = _presence_problem(parts[1:])
             if problem:
                 report(lineno, problem)
+        if command == "test" and blocks:
+            report(lineno, "test blocks must be written outside other blocks")
         if command == "function":
             if len(parts) >= 2:
                 if not parts[1].isidentifier():
@@ -906,20 +1076,26 @@ def analyze_source(source, warnings=False):
             if not inside_loop:
                 report(lineno, f"'{command}' must be inside a loop")
         if command in BLOCK_OPENERS:
-            blocks.append({"type": command, "line": lineno, "else_seen": False, "waits": False})
-        elif command in ("elseif", "else"):
-            if not blocks or blocks[-1]["type"] != "if":
-                report(lineno, f"'{command}' must be inside an if block")
+            blocks.append({"type": command, "line": lineno, "else_seen": False, "waits": False, "branches": 0})
+        elif command in BLOCK_MIDDLES:
+            parents = BLOCK_MIDDLES[command]
+            if not blocks or blocks[-1]["type"] not in parents:
+                report(lineno, f"'{command}' must be inside {' or '.join('a ' + p for p in parents)} block")
             elif blocks[-1]["else_seen"]:
-                report(lineno, "an if block cannot have another branch after else")
-            elif command == "else":
-                blocks[-1]["else_seen"] = True
-        elif command == "end":
+                report(lineno, f"a {blocks[-1]['type']} block cannot have another branch after "
+                               f"{'catch' if blocks[-1]['type'] == 'try' else 'else'}")
+            else:
+                blocks[-1]["branches"] += 1
+                if command in ("else", "catch"):
+                    blocks[-1]["else_seen"] = True
+        elif blocks and blocks[-1]["type"] == "match" and blocks[-1]["branches"] == 0 and command != "end":
+            report(lineno, "inside match, start with a case line, like: case 1")
+        if command == "end":
             if not blocks:
-                report(lineno, "'end' does not have a matching if, loop, forever, while, for or function")
+                report(lineno, "'end' does not have a matching block (if, loop, while, for, match, try, function...)")
             else:
                 block = blocks.pop()
-                if block["type"] in ("forever", "while") and not block["waits"]:
+                if block["type"] in ("forever", "while", "until") and not block["waits"]:
                     report(
                         block["line"],
                         f"this {block['type']} loop never waits (wait or frame), so it will run "
@@ -1041,8 +1217,55 @@ _NUMBER_RE = re.compile(r"^-?(?:\d+\.?\d*|\.\d+)$")
 _BRACE_RE = re.compile(r"\{([^{}]*)\}")
 _FLOW_COMMANDS = {
     "if", "elseif", "else", "end", "loop", "forever", "while", "for", "break", "continue",
-    "function", "return", "kill", "then",
+    "function", "return", "kill", "then", "until", "match", "case", "try", "catch", "test",
 }
+
+
+BUILTIN_MODULES_FOLDER = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+                                      "modules")
+
+
+def user_folder():
+    """the folder gublan studio keeps its settings, modules, themes and plugins in."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "GublanStudio")
+
+
+def module_folders(base_dir=None):
+    """where use <module> looks, in order: the program's modules folder, the program's folder,
+    your own modules folder, then the modules that come with gublan."""
+    folders = []
+    if base_dir:
+        folders += [os.path.join(base_dir, "modules"), base_dir]
+    folders += [os.path.join(user_folder(), "modules"), BUILTIN_MODULES_FOLDER]
+    return folders
+
+
+def find_module(name, base_dir=None):
+    if not re.fullmatch(r"[A-Za-z_][\w\-]*(?:/[A-Za-z_][\w\-]*)*", name or ""):
+        return None
+    for folder in module_folders(base_dir):
+        path = os.path.join(folder, *name.split("/")) + ".gubl"
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def list_modules(base_dir=None):
+    """every module use can find: {name: path}, nearest first."""
+    found = {}
+    for folder in module_folders(base_dir):
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for filename in names:
+            if filename.endswith(".gubl") and filename[:-5] not in found:
+                found[filename[:-5]] = os.path.join(folder, filename)
+    return found
 
 
 def saves_folder():
@@ -1085,6 +1308,8 @@ class GublanRuntime:
         self._handlers = {
             name[3:]: getattr(self, name) for name in dir(self) if name.startswith("_c_")
         }
+        for name, run in _PLUGIN_COMMANDS.items():
+            self._handlers[name] = lambda statement, run=run: run(CommandContext(self, statement))
         self.reset()
 
     # ----- state ---------------------------------------------------------
@@ -1092,6 +1317,11 @@ class GublanRuntime:
         self.vars = {}
         self.objects = {}
         self.functions = {}
+        self.tests = []
+        self.constants = set()
+        self._focus = None
+        self._dragging = None
+        self._overlay_texture = None
         self.mode = "2d"
         self.activecolor = "white"
         self.background = (20, 20, 20)
@@ -1269,6 +1499,10 @@ class GublanRuntime:
             value = self._eval(node.operand, lenient=isinstance(node.op, ast.Not))
             if isinstance(node.op, ast.Not):
                 return not self._truthy(value)
+            if isinstance(node.op, ast.Invert):
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError("~ needs a whole number")
+                return ~value
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 if isinstance(value, (Vector2, Vector3)) and isinstance(node.op, ast.USub):
                     return self._binary(ast.Mult(), value, -1)
@@ -1311,6 +1545,10 @@ class GublanRuntime:
             return self._index(container, index)
         if kind is ast.Call:
             return self._call_expression(node)
+        if kind is ast.Lambda:
+            return GublanLambda([argument.arg for argument in node.args.args], node.body)
+        if kind is ast.ListComp or kind is ast.DictComp:
+            return self._comprehension(node)
         if kind is ast.List:
             return [self._eval(item, lenient=True) for item in node.elts]
         if kind is ast.Dict:
@@ -1353,6 +1591,23 @@ class GublanRuntime:
             )
         if isinstance(operator, ast.Pow) and abs(right) > 1000:
             raise ValueError("use an exponent between -1000 and 1000")
+        if isinstance(operator, (ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)):
+            if isinstance(left, float) and left.is_integer():
+                left = int(left)
+            if isinstance(right, float) and right.is_integer():
+                right = int(right)
+            if isinstance(left, bool) or isinstance(right, bool) or not isinstance(left, int) \
+                    or not isinstance(right, int):
+                raise ValueError("&, |, ^, << and >> need whole numbers")
+            if isinstance(operator, (ast.LShift, ast.RShift)) and not 0 <= right <= 64:
+                raise ValueError("shift by 0 to 64 places")
+            if isinstance(operator, ast.BitAnd):
+                return left & right
+            if isinstance(operator, ast.BitOr):
+                return left | right
+            if isinstance(operator, ast.BitXor):
+                return left ^ right
+            return left << right if isinstance(operator, ast.LShift) else left >> right
         try:
             if isinstance(operator, ast.Add):
                 result = left + right
@@ -1502,6 +1757,13 @@ class GublanRuntime:
         field = self._FIELD_ALIASES.get(field, field)
         if field == "visible":
             return not obj.get("hidden", False)
+        if field == "focused":
+            return self._focus == name
+        if field == "submitted" and obj["type"] == "textbox":
+            was, obj["submitted"] = obj["submitted"], False
+            return was
+        if field in ("cursor", "anchor", "whole"):
+            raise ValueError(f"object '{name}' has no '{field}'")
         if field in ("w", "h") and "surface" in obj and field not in obj:
             width, height = obj["surface"].get_size()
             return width if field == "w" else height
@@ -1531,13 +1793,116 @@ class GublanRuntime:
         raise ValueError(f"can't take an item from {kind_of(container)} '{format_value(container)}'")
 
     def _call_expression(self, node):
-        if not isinstance(node.func, ast.Name) or node.keywords:
+        if node.keywords:
             raise ValueError("call functions by name, like: max(a, b)")
-        name = node.func.id
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            # name.upper() is the same as upper(name), and a map can hold little functions: tools.double(3)
+            base = self._eval(func.value, lenient=False)
+            args = [self._eval(argument, lenient=isinstance(argument, ast.Name)) for argument in node.args]
+            if isinstance(base, dict) and func.attr in base:
+                return self._call_value(base[func.attr], args)
+            return self._call_named(func.attr, [base] + args)
+        if not isinstance(func, ast.Name):
+            value = self._eval(func)
+            return self._call_value(value, [self._eval(argument, lenient=isinstance(argument, ast.Name))
+                                            for argument in node.args])
+        name = func.id
         args = [self._eval(argument, lenient=isinstance(argument, ast.Name)) for argument in node.args]
+        held = self.vars.get(name)
+        if isinstance(held, GublanLambda):
+            return self._call_value(held, args)
+        if isinstance(held, str) and name not in self.functions and held in self.functions:
+            # a function handed over by name: function apply f v / return f(v) / end ... apply(double, 3)
+            return self._call_value(held, args)
+        return self._call_named(name, args)
+
+    def _call_named(self, name, args):
         if name in self.functions:
             return self._call_function(name, args)
         return self._builtin(name, args)
+
+    def _call_value(self, value, args):
+        """call a function value: a little function, or the name of a function."""
+        if isinstance(value, GublanLambda):
+            if len(args) != len(value.params):
+                raise ValueError(f"{value!r} needs {len(value.params)} value(s), got {len(args)}")
+            if self._depth >= 180:
+                raise ValueError("functions are calling each other too deeply (limit 180)")
+            saved = {name: (name in self.vars, self.vars.get(name)) for name in value.params}
+            self.vars.update(zip(value.params, args))
+            self._depth += 1
+            try:
+                return self._eval(value.body, lenient=False)
+            finally:
+                self._depth -= 1
+                self._restore_names(saved)
+        if isinstance(value, str) and (value in self.functions or value in EXPRESSION_FUNCTIONS
+                                       or value in _PLUGIN_FUNCTIONS):
+            return self._call_named(value, list(args))
+        raise ValueError(f"'{format_value(value)}' is not a function. use a name, or a little function like "
+                         "x => x * 2")
+
+    def _restore_names(self, saved):
+        for name, (was_defined, old_value) in saved.items():
+            if was_defined:
+                self.vars[name] = old_value
+            else:
+                self.vars.pop(name, None)
+
+    def _comprehension(self, node):
+        """[x * 2 for x in items if x > 0] and {k: v for k in keys}"""
+        names = set()
+        for generator in node.generators:
+            for target in ast.walk(generator.target):
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+                elif not isinstance(target, (ast.Tuple, ast.List, ast.Store)):
+                    raise ValueError("use plain names in a for inside brackets, like: [x * 2 for x in items]")
+        saved = {name: (name in self.vars, self.vars.get(name)) for name in names}
+        out = {} if isinstance(node, ast.DictComp) else []
+        made = [0]
+
+        def bind(target, value):
+            if isinstance(target, ast.Name):
+                self.vars[target.id] = value
+                return
+            items = list(value) if isinstance(value, (list, str)) else None
+            if items is None or len(items) != len(target.elts):
+                raise ValueError(f"can't split '{format_value(value)}' into {len(target.elts)} names")
+            for part, item in zip(target.elts, items):
+                bind(part, item)
+
+        def walk(level):
+            if level == len(node.generators):
+                made[0] += 1
+                if made[0] > 1_000_000:
+                    raise ValueError("that list would be too large")
+                if isinstance(node, ast.DictComp):
+                    out[format_value(self._eval(node.key, lenient=True))] = self._eval(node.value, lenient=True)
+                else:
+                    out.append(self._eval(node.elt, lenient=True))
+                return
+            generator = node.generators[level]
+            source = self._eval(generator.iter)
+            if isinstance(source, dict):
+                items = list(source.keys())
+            elif isinstance(source, (list, str)):
+                items = list(source)
+            elif isinstance(source, (int, float)) and not isinstance(source, bool):
+                items = list(range(int(source)))
+            else:
+                raise ValueError(f"can't go through {kind_of(source)} '{format_value(source)}' with for")
+            for item in items:
+                bind(generator.target, item)
+                if all(self._truthy(self._eval(test, lenient=True)) for test in generator.ifs):
+                    walk(level + 1)
+
+        try:
+            walk(0)
+        finally:
+            self._restore_names(saved)
+        return out
 
     def _builtin(self, name, args):
         def number(value, label="value"):
@@ -1869,7 +2234,158 @@ class GublanRuntime:
             if key in saves:
                 return self._restored(saves[key])
             return args[1] if len(args) == 2 else 0
+        extra = self._builtin_extra(name, args, number, need)
+        if extra is not _MISSING:
+            return extra
+        if name in _PLUGIN_FUNCTIONS:
+            try:
+                return _PLUGIN_FUNCTIONS[name](*args)
+            except (ValueError, TypeError) as err:
+                raise ValueError(f"{name}(): {err}") from err
         raise ValueError(f"there is no function named '{name}'")
+
+    def _builtin_extra(self, name, args, number, need):
+        """the functions added in 1.0.5: lists and functions as values, text helpers and a little more math."""
+        def sequence(value, label="list"):
+            if isinstance(value, dict):
+                return list(value.keys())
+            if not isinstance(value, (list, str)):
+                raise ValueError(f"{name}() needs a {label}, got '{format_value(value)}'")
+            return list(value)
+
+        def between(low, high):
+            if not low <= len(args) <= high:
+                raise ValueError(f"{name}() needs {low} to {high} values, got {len(args)}")
+
+        if name in ("map", "filter", "find", "sortby"):
+            need(2)
+            items, function = sequence(args[0]), args[1]
+            if name == "map":
+                return [self._call_value(function, [item]) for item in items]
+            if name == "filter":
+                return [item for item in items if self._truthy(self._call_value(function, [item]))]
+            if name == "find":
+                for item in items:
+                    if self._truthy(self._call_value(function, [item])):
+                        return item
+                return None
+            keyed = [(self._call_value(function, [item]), index, item) for index, item in enumerate(items)]
+            try:
+                keyed.sort(key=lambda entry: (entry[0], entry[1]))
+            except TypeError as err:
+                raise ValueError("sortby() needs the function to give values of the same kind") from err
+            return [item for _key, _index, item in keyed]
+        if name == "reduce":
+            between(2, 3)
+            items = sequence(args[0])
+            if len(args) == 2:
+                if not items:
+                    raise ValueError("reduce() of an empty list needs a start value")
+                total, items = items[0], items[1:]
+            else:
+                total = args[2]
+            for item in items:
+                total = self._call_value(args[1], [total, item])
+            return total
+        if name in ("any", "every"):
+            between(1, 2)
+            items = sequence(args[0])
+            test = (lambda item: self._truthy(self._call_value(args[1], [item]))) if len(args) == 2 \
+                else self._truthy
+            return any(test(item) for item in items) if name == "any" else all(test(item) for item in items)
+        if name == "zip":
+            if len(args) < 2:
+                raise ValueError("zip() needs at least two lists")
+            return [list(group) for group in zip(*(sequence(arg) for arg in args))]
+        if name == "slice":
+            between(2, 3)
+            if not isinstance(args[0], (list, str)):
+                raise ValueError(f"slice() needs a list or text, got '{format_value(args[0])}'")
+            start = int(number(args[1], "start"))
+            end = int(number(args[2], "end")) if len(args) == 3 else None
+            return args[0][start:end]
+        if name == "flat":
+            need(1)
+            out = []
+            for item in sequence(args[0]):
+                out.extend(item if isinstance(item, list) else [item])
+            return out
+        if name == "repeat":
+            need(2)
+            times = int(number(args[1], "times"))
+            value = args[0] if isinstance(args[0], (list, str)) else format_value(args[0])
+            if len(value) * max(times, 0) > 1_000_000:
+                raise ValueError("that text or list would be too large")
+            return value * max(times, 0)
+        if name == "call":
+            if not args:
+                raise ValueError("call() needs a function, then its values")
+            return self._call_value(args[0], args[1:])
+        if name == "capitalize":
+            need(1)
+            return re.sub(r"\b([a-z])", lambda match: match.group(1).upper(), format_value(args[0]))
+        if name == "lines":
+            need(1)
+            return format_value(args[0]).splitlines()
+        if name == "words":
+            need(1)
+            return format_value(args[0]).split()
+        if name == "char":
+            need(1)
+            code = int(number(args[0], "code"))
+            if not 0 <= code <= 0x10FFFF:
+                raise ValueError("char() needs a code from 0 to 1114111")
+            return chr(code)
+        if name == "code":
+            need(1)
+            text = format_value(args[0])
+            if len(text) != 1:
+                raise ValueError("code() needs exactly one letter")
+            return ord(text)
+        if name == "tojson":
+            need(1)
+            return json.dumps(self._storable(args[0]))
+        if name == "fromjson":
+            need(1)
+            try:
+                return self._restored(json.loads(format_value(args[0])))
+            except (json.JSONDecodeError, RecursionError) as err:
+                raise ValueError("fromjson() got text that isn't json") from err
+        if name == "textwidth":
+            between(1, 2)
+            size = int(number(args[1], "size")) if len(args) == 2 else self.text_size
+            if not pygame.font.get_init():
+                pygame.font.init()
+            return self._font(size).size(format_value(args[0]))[0]
+        if name == "log":
+            between(1, 2)
+            value = number(args[0])
+            if value <= 0:
+                raise ValueError("log() needs a number above 0")
+            if len(args) == 2:
+                base = number(args[1], "base")
+                if base <= 0 or base == 1:
+                    raise ValueError("log() needs a base above 0 that isn't 1")
+                return math.log(value, base)
+            return math.log(value)
+        if name == "exp":
+            need(1)
+            try:
+                return math.exp(number(args[0]))
+            except OverflowError as err:
+                raise ValueError("the expression result is too large") from err
+        if name == "noise":
+            between(1, 2)
+            x = number(args[0], "x")
+            y = number(args[1], "y") if len(args) == 2 else 0.0
+            return _value_noise(x, y)
+        if name == "randint":
+            need(2)
+            low, high = int(number(args[0], "low")), int(number(args[1], "high"))
+            if low > high:
+                low, high = high, low
+            return random.randint(low, high)
+        return _MISSING
 
     def _rect_of(self, value):
         if isinstance(value, str) and (value in self.objects or ("button:" + value) in self.objects):
@@ -1888,26 +2404,42 @@ class GublanRuntime:
         raise ValueError("overlap() needs object names, [x, y, w, h] lists or maps with x, y, w and h")
 
     # ----- includes and compiling --------------------------------------------
-    def _expand_includes_mapped(self, source, base_dir, include_stack=(), depth=0, budget=None, label=None):
+    def _expand_includes_mapped(self, source, base_dir, include_stack=(), depth=0, budget=None, label=None,
+                                modules=None):
         if budget is None:
             budget = [len(source)]
+        if modules is None:
+            modules = set()
         if depth > 16:
             raise ValueError("include nesting is limited to 16 files")
         expanded = []
         for lineno, raw in enumerate(source.splitlines(), start=1):
             stripped = raw.strip()
-            if not stripped.startswith("include") or stripped.startswith("//"):
+            if not stripped.startswith(("include", "use")) or stripped.startswith("//"):
                 expanded.append((raw, label, lineno))
                 continue
             parts = split_command(stripped)
-            if not parts or parts[0] != "include":
+            if not parts or parts[0] not in ("include", "use") or (len(parts) > 1 and parts[1] in _ASSIGNMENT_TOKENS):
                 expanded.append((raw, label, lineno))
                 continue
             where = f"{label} line {lineno}" if label else f"line {lineno}"
-            if len(parts) < 2:
-                raise ValueError(f"{where}: use include <relative-script-path>")
-            include_path = " ".join(parts[1:])
-            path = os.path.realpath(os.path.join(base_dir, include_path))
+            if parts[0] == "use":
+                if len(parts) != 2:
+                    raise ValueError(f"{where}: write it as use <module-name>")
+                path = find_module(str(parts[1]), base_dir)
+                if path is None:
+                    raise ValueError(f"{where}: there is no module named '{parts[1]}'. modules are .gubl files in "
+                                     "a modules folder")
+                path = os.path.realpath(path)
+                if path in modules or path in include_stack:
+                    continue
+                modules.add(path)
+                include_path = str(parts[1])
+            else:
+                if len(parts) < 2:
+                    raise ValueError(f"{where}: use include <relative-script-path>")
+                include_path = " ".join(parts[1:])
+                path = os.path.realpath(os.path.join(base_dir, include_path))
             if path in include_stack:
                 raise ValueError(f"{where}: '{include_path}' creates a recursive include")
             try:
@@ -1920,7 +2452,7 @@ class GublanRuntime:
                 raise ValueError("combined included scripts are limited to 2 mb")
             expanded.extend(self._expand_includes_mapped(
                 included_source, os.path.dirname(path), include_stack + (path,), depth + 1, budget,
-                label=os.path.basename(path),
+                label=os.path.basename(path), modules=modules,
             ))
         return expanded
 
@@ -1943,20 +2475,25 @@ class GublanRuntime:
 
         stack = []
         functions = {}
+        tests = []
         for statement in program:
             cmd = statement.cmd
             if cmd is None:
                 continue
             if cmd in BLOCK_OPENERS:
-                if cmd == "function":
+                if cmd in CALLABLE_BLOCKS:
                     if stack:
-                        raise GublanError("functions must be defined outside other blocks", statement)
+                        raise GublanError(f"{cmd} blocks must be written outside other blocks", statement)
                     if len(statement.parts) < 2:
-                        raise GublanError("give the function a name: function <name>", statement)
+                        raise GublanError(f"give the {cmd} a name: {cmd} <name>", statement)
                 stack.append([statement, statement])
-            elif cmd in ("elseif", "else"):
-                if not stack or stack[-1][0].cmd != "if":
-                    raise GublanError(f"'{cmd}' must be inside an if block", statement)
+            elif cmd in BLOCK_MIDDLES:
+                parents = BLOCK_MIDDLES[cmd]
+                if not stack or stack[-1][0].cmd not in parents:
+                    raise GublanError(f"'{cmd}' must be inside {' or '.join('a ' + p for p in parents)} block",
+                                      statement)
+                if stack[-1][1].cmd in ("else", "catch"):
+                    raise GublanError(f"'{cmd}' can't come after {stack[-1][1].cmd}", statement)
                 stack[-1][1].next = statement.index
                 stack[-1][1] = statement
                 stack[-1].append(statement)
@@ -1967,16 +2504,19 @@ class GublanRuntime:
                 opener = entry[0]
                 opener.end = statement.index
                 statement.owner = opener.index
-                if opener.cmd == "if":
+                if opener.cmd in ("if", "match", "try"):
                     entry[1].next = statement.index
                     for branch in entry[2:]:
                         branch.end = statement.index
                 if opener.cmd == "function":
                     functions[opener.parts[1]] = FunctionInfo(opener.index, statement.index, list(opener.parts[2:]))
+                if opener.cmd == "test":
+                    tests.append((" ".join(str(part) for part in opener.parts[1:]), opener.index, statement.index))
         if stack:
             raise GublanError(f"'{stack[-1][0].cmd}' block is missing end", stack[-1][0])
         self._prog = program
         self.functions = functions
+        self.tests = tests
 
     # ----- running ---------------------------------------------------------------
     def run(self, source, base_dir=None):
@@ -2076,13 +2616,35 @@ class GublanRuntime:
                     pc = self._flow(statement, stack, pc)
                     continue
                 handlers[cmd](statement)
-            except (_Signal, GublanError):
+            except _Signal:
                 raise
             except RecursionError:
                 raise
+            except GublanError as err:
+                pc = self._catch(stack, err)
+                continue
             except Exception as err:
-                raise GublanError(self._describe(cmd, err), statement) from err
+                error = GublanError(self._describe(cmd, err), statement)
+                error.__cause__ = err
+                pc = self._catch(stack, error)
+                continue
             pc += 1
+
+    def _catch(self, stack, error):
+        """send an error to the nearest try block (inside this function), or let it stop the program."""
+        for position in range(len(stack) - 1, -1, -1):
+            if stack[position][0] != "try":
+                continue
+            opener = stack[position][1]
+            del stack[position:]
+            catch = self._prog[opener.next] if opener.next is not None else None
+            if catch is None or catch.cmd != "catch":
+                return opener.end + 1
+            name = str(catch.parts[1]) if len(catch.parts) > 1 else "error"
+            self.vars[name] = error.message
+            stack.append(["catch", catch])
+            return catch.index + 1
+        raise error
 
     @staticmethod
     def _describe(cmd, err):
@@ -2127,10 +2689,42 @@ class GublanRuntime:
                 return statement.end
             frame[2] = True
             return pc + 1
+        if cmd == "until":
+            if not self._condition(statement):
+                stack.append(["until", statement])
+                return pc + 1
+            return statement.end + 1
+        if cmd == "match":
+            value = self._eval_value(statement.rest, statement.parts[1:])
+            stack.append(["match", statement, False, value])
+            return statement.next
+        if cmd == "case":
+            frame = stack[-1]
+            if frame[2]:
+                return statement.end
+            if statement.cache is None:
+                try:
+                    statement.cache = [parse_expression(part) for part in _split_top_level_commas(statement.rest)]
+                except (SyntaxError, ValueError) as err:
+                    raise ValueError("write cases as values split by commas, like: case 1, 2, 3") from err
+            for node in statement.cache:
+                if self._equal(frame[3], self._eval(node, lenient=isinstance(node, ast.Name))):
+                    frame[2] = True
+                    return pc + 1
+            return statement.next
+        if cmd == "try":
+            stack.append(["try", statement])
+            return pc + 1
+        if cmd == "catch":
+            # reached by finishing the try part without a problem: skip the catch part
+            stack.pop()
+            return statement.end + 1
+        if cmd == "test":
+            return statement.end + 1
         if cmd == "end":
             frame = stack[-1]
             kind = frame[0]
-            if kind == "if":
+            if kind in ("if", "match", "try", "catch"):
                 stack.pop()
                 return pc + 1
             if kind == "loop":
@@ -2141,7 +2735,7 @@ class GublanRuntime:
                 return pc + 1
             if kind == "forever":
                 return frame[1].index + 1
-            if kind == "while":
+            if kind in ("while", "until"):
                 stack.pop()
                 return frame[1].index
             if kind == "for":
@@ -2283,11 +2877,7 @@ class GublanRuntime:
             value = signal.value
         finally:
             self._depth -= 1
-            for parameter, (was_defined, old_value) in saved.items():
-                if was_defined:
-                    self.vars[parameter] = old_value
-                else:
-                    self.vars.pop(parameter, None)
+            self._restore_names(saved)
         self.vars["result"] = value
         return value
 
@@ -2316,6 +2906,7 @@ class GublanRuntime:
             glLightfv(GL_LIGHT0, GL_AMBIENT, (0.32, 0.32, 0.32, 1.0))
             glLightfv(GL_LIGHT0, GL_DIFFUSE, (0.85, 0.85, 0.85, 1.0))
             self._gl_clear = None
+        self._overlay_texture = None
         pygame.display.set_caption(caption)
         pygame.mouse.set_visible(self.cursor_visible)
         self.text_font = self._font(self.text_size)
@@ -2400,33 +2991,99 @@ class GublanRuntime:
     def pumpevents(self):
         if not self.screen:
             return
+        if self._focus is not None and self._focus not in self.objects:
+            self._set_focus(None)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
+                if self._focus is not None:
+                    self._type_into_textbox(event)
+                    continue
                 self._key_presses.add(event.key)
                 if len(self._key_presses) > 64:
                     self._key_presses.clear()
+            elif event.type == pygame.TEXTINPUT:
+                if self._focus is not None:
+                    self._type_into_textbox(event)
+                continue
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self._mouse_presses.add(getattr(event, "button", 1))
-            if (
-                self.mode == "2d" and event.type == pygame.MOUSEBUTTONDOWN
-                and getattr(event, "button", 1) == 1
-            ):
+            elif event.type == pygame.MOUSEMOTION and self._dragging is not None:
+                self._drag_slider(getattr(event, "pos", None) or pygame.mouse.get_pos())
+            # buttons and the other ui work the same in 2d and 3d (in 3d they are drawn on top of the scene)
+            if event.type == pygame.MOUSEBUTTONDOWN and getattr(event, "button", 1) == 1:
                 position = getattr(event, "pos", None)
                 mx, my = position if position is not None else pygame.mouse.get_pos()
                 if "uibtn" in self.objects:
                     bx, by, bw, bh = self.objects["uibtn"]
                     if bx <= mx <= bx + bw and by <= my <= by + bh:
                         self.vars["ui"] = self.button_label
-                for obj in self.objects.values():
-                    if isinstance(obj, dict) and obj.get("type") == "button" and not obj.get("hidden") \
-                            and pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"]).collidepoint(mx, my):
+                focus = None
+                for name, obj in list(self.objects.items()):
+                    if not isinstance(obj, dict) or obj.get("hidden"):
+                        continue
+                    kind = obj.get("type")
+                    if kind not in ("button", "textbox", "slider", "checkbox"):
+                        continue
+                    if kind == "checkbox":
+                        width = obj["w"] + 8 + self._font(obj.get("size", 24)).size(obj["label"])[0]
+                        inside = pygame.Rect(obj["x"], obj["y"], width, obj["h"]).collidepoint(mx, my)
+                    else:
+                        inside = pygame.Rect(obj["x"], obj["y"] - (6 if kind == "slider" else 0), obj["w"],
+                                             obj["h"] + (12 if kind == "slider" else 0)).collidepoint(mx, my)
+                    if not inside:
+                        continue
+                    if kind == "button":
                         self.vars[obj["variable"]] = 1
+                    elif kind == "textbox":
+                        focus = name
+                        obj["cursor"], obj["anchor"] = self._textbox_index(obj, mx), None
+                    elif kind == "checkbox":
+                        obj["checked"] = not obj["checked"]
+                    elif kind == "slider":
+                        self._dragging = name
+                        self._drag_slider((mx, my))
+                self._set_focus(focus)
             if event.type == pygame.MOUSEBUTTONUP:
+                self._dragging = None
                 for obj in self.objects.values():
                     if isinstance(obj, dict) and obj.get("type") == "button":
                         self.vars[obj["variable"]] = 0
+
+    def _drag_slider(self, position):
+        obj = self.objects.get(self._dragging)
+        if not isinstance(obj, dict) or obj.get("type") != "slider":
+            self._dragging = None
+            return
+        share = max(0.0, min(1.0, (position[0] - obj["x"]) / max(1, obj["w"])))
+        value = obj["min"] + (obj["max"] - obj["min"]) * share
+        obj["value"] = int(round(value)) if obj.get("whole") else round(value, 4)
+
+    def _textbox_index(self, obj, mouse_x):
+        font = self._font(obj.get("size", 24))
+        text = obj["text"]
+        offset = obj.get("_offset", 0)
+        target = mouse_x - (obj["x"] + 8) + offset
+        best, best_distance = 0, abs(target)
+        for index in range(1, len(text) + 1):
+            distance = abs(font.size(text[:index])[0] - target)
+            if distance < best_distance:
+                best, best_distance = index, distance
+        return best
+
+    def _type_into_textbox(self, event):
+        obj = self.objects.get(self._focus)
+        if not isinstance(obj, dict) or obj.get("type") != "textbox":
+            self._set_focus(None)
+            return
+        value, cursor, anchor, action = self._edit_input_event(obj["text"], obj["cursor"], obj["anchor"], event)
+        obj["text"], obj["cursor"], obj["anchor"] = value, cursor, anchor
+        obj["_blink"] = time.monotonic()
+        if action == "accept":
+            obj["submitted"] = True
+        elif action == "cancel":
+            self._set_focus(None)
 
     def _consume_press(self, keycode):
         self.pumpevents()
@@ -2463,8 +3120,13 @@ class GublanRuntime:
             pygame.display.flip()
 
     def _render_2d(self):
-        screen = self.screen
-        screen.fill(self.background)
+        self.screen.fill(self.background)
+        self._draw_objects(self.screen)
+
+    _FLAT_KINDS = ("box", "circle", "line", "text", "image", "sprite", "button", "textbox", "slider", "checkbox")
+
+    def _draw_objects(self, screen, overlay=False):
+        """draw every 2d object onto a surface. in 3d (overlay=True) text is left to _render_3d_text."""
         if "uibtn" in self.objects:
             bx, by, bw, bh = self.objects["uibtn"]
             pygame.draw.rect(screen, (109, 137, 79), (bx, by, bw, bh))
@@ -2474,8 +3136,12 @@ class GublanRuntime:
             if name == "uibtn" or obj.get("hidden"):
                 continue
             kind = obj["type"]
+            if kind not in self._FLAT_KINDS or (overlay and kind == "text"):
+                continue
             color = color_value(obj["color"])
-            if kind == "box":
+            if kind in ("textbox", "slider", "checkbox"):
+                self._draw_widget(screen, name, obj, color)
+            elif kind == "box":
                 pygame.draw.rect(screen, color, (obj["x"], obj["y"], obj["w"], obj["h"]))
             elif kind == "circle":
                 pygame.draw.circle(screen, color, (int(obj["x"]), int(obj["y"])), int(obj["r"]))
@@ -2506,6 +3172,108 @@ class GublanRuntime:
                 pygame.draw.rect(screen, (148, 182, 108) if hovered else (82, 105, 61), rect)
                 label = self._font(24).render(obj["label"], True, (240, 240, 240))
                 screen.blit(label, label.get_rect(center=rect.center))
+
+    def _draw_widget(self, screen, name, obj, color):
+        kind = obj["type"]
+        font = self._font(obj.get("size", 24))
+        accent = (148, 182, 108)
+        if kind == "textbox":
+            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+            focused = self._focus == name
+            pygame.draw.rect(screen, (23, 23, 23), rect)
+            pygame.draw.rect(screen, accent if focused else (90, 90, 90), rect, 2)
+            text, cursor = obj["text"], obj["cursor"]
+            inner = rect.inflate(-16, 0)
+            prefix = font.size(text[:cursor])[0]
+            offset = max(0, prefix - inner.width + 2) if focused else 0
+            obj["_offset"] = offset
+            text_y = rect.y + (rect.height - font.get_height()) // 2
+            previous_clip = screen.get_clip()
+            screen.set_clip(inner.clip(previous_clip) if previous_clip else inner)
+            if obj.get("anchor") is not None and obj["anchor"] != cursor and focused:
+                start, end = sorted((obj["anchor"], cursor))
+                left = inner.x + font.size(text[:start])[0] - offset
+                right = inner.x + font.size(text[:end])[0] - offset
+                pygame.draw.rect(screen, (75, 96, 57), (left, text_y, right - left, font.get_height()))
+            if text:
+                screen.blit(font.render(text, True, color), (inner.x - offset, text_y))
+            elif obj.get("hint") and not focused:
+                screen.blit(font.render(obj["hint"], True, (120, 120, 120)), (inner.x, text_y))
+            if focused and int((time.monotonic() - obj.get("_blink", 0)) * 2) % 2 == 0:
+                caret = inner.x + prefix - offset
+                pygame.draw.line(screen, accent, (caret, text_y + 2), (caret, text_y + font.get_height() - 2), 2)
+            screen.set_clip(previous_clip)
+        elif kind == "slider":
+            low, high = obj["min"], obj["max"]
+            share = 0.0 if high == low else (obj["value"] - low) / (high - low)
+            middle = obj["y"] + obj["h"] // 2
+            pygame.draw.rect(screen, (60, 60, 60), (obj["x"], middle - 3, obj["w"], 6))
+            pygame.draw.rect(screen, color, (obj["x"], middle - 3, int(obj["w"] * share), 6))
+            knob = (int(obj["x"] + obj["w"] * share), middle)
+            pygame.draw.circle(screen, (240, 240, 240) if self._dragging == name else color, knob, 9)
+            label = self._font(20).render(format_value(obj["value"]), True, (200, 200, 200))
+            screen.blit(label, (obj["x"] + obj["w"] + 12, middle - label.get_height() // 2))
+        elif kind == "checkbox":
+            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+            pygame.draw.rect(screen, (23, 23, 23), rect)
+            pygame.draw.rect(screen, color if obj["checked"] else (110, 110, 110), rect, 2)
+            if obj["checked"]:
+                pygame.draw.lines(screen, color, False, [(rect.x + 5, rect.centery), (rect.x + 10, rect.bottom - 6),
+                                                         (rect.right - 5, rect.y + 6)], 3)
+            label = font.render(obj["label"], True, (229, 229, 229))
+            screen.blit(label, (rect.right + 8, rect.centery - label.get_height() // 2))
+
+    def _render_overlay(self):
+        """draw 2d objects (shapes, pictures, buttons, textboxes...) flat on top of the 3d scene."""
+        if not any(name == "uibtn" or (isinstance(obj, dict) and obj.get("type") in self._FLAT_KINDS
+                                       and obj["type"] != "text" and not obj.get("hidden"))
+                   for name, obj in self.objects.items()):
+            return
+        surface = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+        self._draw_objects(surface, overlay=True)
+        self._blit_gl_surface(surface)
+
+    def _blit_gl_surface(self, surface):
+        """show a see-through pygame surface over the whole 3d window."""
+        width, height = surface.get_size()
+        if self._overlay_texture is None:
+            self._overlay_texture = glGenTextures(1)
+        glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT | GL_COLOR_BUFFER_BIT)
+        glDisable(GL_DEPTH_TEST)
+        glDisable(GL_LIGHTING)
+        glEnable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, width, height, 0, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+        try:
+            glBindTexture(GL_TEXTURE_2D, self._overlay_texture)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         pygame.image.tobytes(surface, "RGBA", True))
+            glColor4f(1, 1, 1, 1)
+            glBegin(GL_QUADS)
+            glTexCoord2f(0, 1)
+            glVertex2f(0, 0)
+            glTexCoord2f(1, 1)
+            glVertex2f(width, 0)
+            glTexCoord2f(1, 0)
+            glVertex2f(width, height)
+            glTexCoord2f(0, 0)
+            glVertex2f(0, height)
+            glEnd()
+        finally:
+            glPopMatrix()
+            glMatrixMode(GL_PROJECTION)
+            glPopMatrix()
+            glMatrixMode(GL_MODELVIEW)
+            glPopAttrib()
 
     def _render_3d(self):
         if self._gl_clear != self.background:
@@ -2545,6 +3313,7 @@ class GublanRuntime:
                 gluSphere(quadric, obj["radius"], 24, 16)
                 gluDeleteQuadric(quadric)
             glPopMatrix()
+        self._render_overlay()
         self._render_3d_text()
 
     @staticmethod
@@ -2566,7 +3335,7 @@ class GublanRuntime:
             return ("circle", float(obj["x"]), float(obj["y"]), abs(float(obj["r"])))
         if kind == "sphere":
             return ("circle", float(obj["x"]), float(obj["y"]), abs(float(obj["radius"])))
-        if kind in ("box", "button"):
+        if kind in ("box", "button", "textbox", "slider", "checkbox"):
             return ("rect", float(obj["x"]), float(obj["y"]), float(obj["w"]), float(obj["h"]))
         if kind == "cube":
             size = float(obj["size"])
@@ -2632,22 +3401,29 @@ class GublanRuntime:
 
     # ----- dialogs ---------------------------------------------------------------
     def _draw_dialog(self, message, value="", is_input=False, cursor=None, anchor=None, caret_visible=True):
-        self.render()
-        width, height = self.screen.get_size()
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 190))
-        self.screen.blit(overlay, (0, 0))
+        if self.mode == "3d":
+            # 3d windows can't be drawn on directly: draw the dialog on a see-through layer over the scene
+            self._render_3d()
+            target = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
+            target.fill((0, 0, 0, 190))
+        else:
+            self._render_2d()
+            target = self.screen
+            overlay = pygame.Surface(target.get_size(), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 190))
+            target.blit(overlay, (0, 0))
+        width, height = target.get_size()
         left = max(10, (width - 450) // 2)
         top = max(10, (height - 160) // 2)
         bounds = pygame.Rect(left, top, min(450, width - 20), 160)
-        pygame.draw.rect(self.screen, (38, 38, 38), bounds)
-        pygame.draw.rect(self.screen, (148, 182, 108), bounds, 2)
+        pygame.draw.rect(target, (38, 38, 38), bounds)
+        pygame.draw.rect(target, (148, 182, 108), bounds, 2)
         font = self._font(26)
         prompt = font.render(message[:64], True, (229, 229, 229))
-        self.screen.blit(prompt, (left + 20, top + 25))
+        target.blit(prompt, (left + 20, top + 25))
         if is_input:
             entry_rect = pygame.Rect(left + 20, top + 75, bounds.width - 40, 38)
-            pygame.draw.rect(self.screen, (23, 23, 23), entry_rect)
+            pygame.draw.rect(target, (23, 23, 23), entry_rect)
             cursor = len(value) if cursor is None else cursor
             text_left = entry_rect.x + 8
             visible_width = entry_rect.width - 16
@@ -2661,29 +3437,31 @@ class GublanRuntime:
                     max(text_left, selection_left), entry_rect.y + 7,
                     max(0, min(entry_rect.right - 2, selection_right) - max(text_left, selection_left)), 24
                 )
-                pygame.draw.rect(self.screen, (75, 96, 57), selection)
-            self.screen.set_clip(entry_rect)
+                pygame.draw.rect(target, (75, 96, 57), selection)
+            target.set_clip(entry_rect)
             entry = font.render(value, True, (229, 229, 229))
-            self.screen.blit(entry, (text_left - offset, entry_rect.y + 7))
+            target.blit(entry, (text_left - offset, entry_rect.y + 7))
             caret_x = text_left + prefix_width - offset
             if caret_visible:
-                pygame.draw.line(self.screen, (148, 182, 108), (caret_x, entry_rect.y + 5),
+                pygame.draw.line(target, (148, 182, 108), (caret_x, entry_rect.y + 5),
                                  (caret_x, entry_rect.y + 32), 2)
-            self.screen.set_clip(None)
+            target.set_clip(None)
             hint = "enter to accept  |  esc to cancel  |  ctrl+a selects all"
         else:
             hint = "press any key or click to continue"
-        self.screen.blit(self._font(22).render(hint, True, (170, 170, 170)), (left + 20, top + 128))
+        target.blit(self._font(22).render(hint, True, (170, 170, 170)), (left + 20, top + 128))
+        if target is not self.screen:
+            self._blit_gl_surface(target)
         pygame.display.flip()
 
     def _show_popup(self, message):
-        if not self.screen or self.mode != "2d":
+        if not self.screen:
             if self.onpopup:
                 self.onpopup(message)
                 if not self.running or self.shouldstop():
                     raise _Stop()
                 return
-            raise ValueError("add 'mode 2d' before showing a popup")
+            raise ValueError("add 'mode 2d' or 'mode 3d' before showing a popup")
         pygame.event.clear()
         self._draw_dialog(message)
         while self.running and not self.shouldstop():
@@ -2748,13 +3526,13 @@ class GublanRuntime:
         return value, cursor, anchor, None
 
     def _ask_input(self, message):
-        if not self.screen or self.mode != "2d":
+        if not self.screen:
             if self.oninput:
                 answer = self.oninput(message)
                 if not self.running or self.shouldstop():
                     raise _Stop()
                 return "" if answer is None else str(answer)
-            raise ValueError("add 'mode 2d' before asking for input")
+            raise ValueError("add 'mode 2d' or 'mode 3d' before asking for input")
         pygame.event.clear()
         value = ""
         cursor = 0
@@ -2788,8 +3566,9 @@ class GublanRuntime:
                     )
             return ""
         finally:
-            pygame.key.stop_text_input()
-            pygame.key.set_repeat()
+            if self._focus is None:  # a textbox that has the typing cursor keeps getting letters
+                pygame.key.stop_text_input()
+                pygame.key.set_repeat()
 
     # ----- helpers for commands ---------------------------------------------------
     def _name(self, token):
@@ -2839,7 +3618,11 @@ class GublanRuntime:
         surface = self._image_cache.get(path)
         if surface is None:
             try:
-                surface = pygame.image.load(path).convert_alpha()
+                surface = pygame.image.load(path)
+                try:
+                    surface = surface.convert_alpha()
+                except pygame.error:  # a 3d (opengl) window has no 2d pixel format to convert to
+                    surface = surface.convert_alpha(pygame.Surface((1, 1), pygame.SRCALPHA))
             except (OSError, pygame.error) as err:
                 raise ValueError(f"could not load {what} '{relative_path}': {str(err).lower()}") from err
             self._image_cache[path] = surface
@@ -2868,6 +3651,8 @@ class GublanRuntime:
 
     def _set_target(self, target, value):
         if re.fullmatch(r"[A-Za-z_]\w*", target):
+            if target in self.constants:
+                raise ValueError(f"'{target}' is a constant (made with const), so it can't be changed")
             self.vars[target] = value
             return
         node = parse_expression(target)
@@ -2894,8 +3679,22 @@ class GublanRuntime:
             if field == "color":
                 obj["color"] = value
                 return
-            if field == "text" and obj["type"] == "text":
+            if field == "text" and obj["type"] in ("text", "textbox"):
                 obj["text"] = format_value(value)
+                if obj["type"] == "textbox":
+                    obj["cursor"], obj["anchor"] = len(obj["text"]), None
+                return
+            if field in ("hint", "label") and field in obj:
+                obj[field] = format_value(value)
+                return
+            if field == "value" and obj["type"] == "slider":
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"{name}.value must be a number")
+                low, high = sorted((obj["min"], obj["max"]))
+                obj["value"] = max(low, min(high, value))
+                return
+            if field == "checked" and obj["type"] == "checkbox":
+                obj["checked"] = self._truthy(value)
                 return
             if field in ("w", "h", "r", "size") or (field == "r" and obj["type"] == "sphere"):
                 current = {f: self._object_field(name, f) for f in ("w", "h") if obj["type"] in ("sprite", "image", "box", "button")}
@@ -2937,6 +3736,8 @@ class GublanRuntime:
         kind = obj["type"]
         if kind in ("box", "button"):
             obj["w"], obj["h"] = width, height
+        elif kind in ("textbox", "slider"):
+            obj["w"] = width
         elif kind == "circle":
             obj["r"] = width
         elif kind == "cube":
@@ -2985,7 +3786,7 @@ class GublanRuntime:
         amount = self._eval_value(raw, statement.parts[2:])
 
         def store(value):
-            if compound:
+            if compound or name in self.constants:
                 self._set_target(name, value)
             else:
                 self.vars[name] = value
@@ -3115,6 +3916,8 @@ class GublanRuntime:
         if len(statement.parts) == 2:
             if name in self.objects and name != "uibtn":
                 obj = self.objects.pop(name)
+                if self._focus == name:
+                    self._set_focus(None)
                 if isinstance(obj, dict) and obj.get("texture") is not None and self.mode == "3d":
                     try:
                         glDeleteTextures([obj["texture"]])
@@ -3577,8 +4380,8 @@ class GublanRuntime:
 
     def _c_image(self, statement):
         parts = statement.parts
-        if not self.screen or self.mode != "2d":
-            raise ValueError("add 'mode 2d' before showing an image")
+        if not self.screen:
+            raise ValueError("add 'mode 2d' or 'mode 3d' before showing an image")
         self.objects[self._name(parts[1])] = {
             "type": "image",
             "x": self._num(parts[3], "image x"), "y": self._num(parts[4], "image y"),
@@ -3590,8 +4393,8 @@ class GublanRuntime:
         parts = statement.parts
         if len(parts) != 7:
             raise ValueError("use: sprite <name> <path> <x> <y> <width> <height>")
-        if not self.screen or self.mode != "2d":
-            raise ValueError("add 'mode 2d' before showing a sprite")
+        if not self.screen:
+            raise ValueError("add 'mode 2d' or 'mode 3d' before showing a sprite")
         source = self._load_image(parts[2], "sprite")
         width, height = int(self._num(parts[5], "sprite width")), int(self._num(parts[6], "sprite height"))
         if width <= 0 or height <= 0:
@@ -3639,7 +4442,7 @@ class GublanRuntime:
     def _c_move(self, statement):
         parts = statement.parts
         obj = self._object(parts[1], ("box", "circle", "cube", "sphere", "text", "image", "sprite", "line",
-                                      "button"), "move")
+                                      "button", "textbox", "slider", "checkbox"), "move")
         if len(parts) == 3:
             offset = self.val(parts[2])
             if isinstance(offset, Vector2):
@@ -3700,10 +4503,9 @@ class GublanRuntime:
             target_position = tuple(self.val(part) for part in parts[2:5])
             duration = self.val(parts[5])
         else:
-            if obj["type"] not in ("box", "circle", "text", "image", "sprite", "line", "button"):
+            if obj["type"] not in ("box", "circle", "text", "image", "sprite", "line", "button", "textbox",
+                                   "slider", "checkbox"):
                 raise ValueError(f"object '{parts[1]}' cannot be animated")
-            if self.mode != "2d" and not (self.mode == "3d" and obj["type"] == "text"):
-                raise ValueError("animate 2d objects in 2d mode")
             if len(parts) != 5:
                 raise ValueError("animate a 2d object with: animate <object> <x> <y> <seconds>")
             target_position = tuple(self.val(part) for part in parts[2:4])
@@ -3720,7 +4522,7 @@ class GublanRuntime:
     def _c_key(self, statement):
         self._require_screen("check the keyboard")
         keycode = self._keycode(statement.parts[2])
-        self.vars[statement.parts[1]] = 1 if pygame.key.get_pressed()[keycode] else 0
+        self.vars[statement.parts[1]] = 1 if pygame.key.get_pressed()[keycode] and not self._typing() else 0
 
     def _c_keypressed(self, statement):
         self._require_screen("check the keyboard")
@@ -3808,6 +4610,259 @@ class GublanRuntime:
         self.http_requests += 1
         self.last_http_request = now
         self.vars[statement.parts[2]] = public_https_get(statement.parts[1])
+
+    # ----- 1.0.5: constants, errors, tests ---------------------------------------------
+    def _c_const(self, statement):
+        match = _SET_RE.match(statement.rest)
+        if not match or not re.fullmatch(r"[A-Za-z_]\w*", match.group(1)):
+            raise ValueError("write constants as: const name = value")
+        name, raw_value = match.groups()
+        self.constants.discard(name)
+        self.vars[name] = self._eval_value(raw_value, split_command(raw_value))
+        self.constants.add(name)
+
+    def _c_throw(self, statement):
+        raise ValueError(self._text(statement.parts[1:]))
+
+    def _c_assert(self, statement):
+        if self._condition(statement):
+            return
+        details = []
+        try:
+            node = parse_condition(statement.rest)
+            for name in sorted({item.id for item in ast.walk(node) if isinstance(item, ast.Name)}):
+                if name in self.vars and not isinstance(self.vars[name], GublanLambda):
+                    details.append(f"{name} is {format_value(self.vars[name])[:60]}")
+        except (SyntaxError, ValueError):
+            pass
+        raise ValueError(f"assert failed: {statement.rest}" + (f" ({', '.join(details)})" if details else ""))
+
+    def _c_use(self, statement):
+        """use lines are swapped for the module's code before the program starts."""
+
+    def run_tests(self, source, base_dir=None, only=None):
+        """run every test block on its own, each with a fresh start. returns a list of results:
+        {"name", "passed", "message", "line", "file", "seconds"}."""
+        if base_dir is not None:
+            self.base_dir = os.path.abspath(base_dir)
+        self.reset()
+        results = []
+        try:
+            mapped = self._expand_includes_mapped(source, self.base_dir)
+            self._compile(mapped)
+        except ValueError as err:
+            return [{"name": "loading the program", "passed": False, "message": str(err), "line": None,
+                     "file": None, "seconds": 0.0}]
+        except GublanError as err:
+            statement = err.statement
+            return [{"name": "loading the program", "passed": False, "message": err.message,
+                     "line": statement.line if statement else None, "file": statement.file if statement else None,
+                     "seconds": 0.0}]
+        program, functions, tests = self._prog, self.functions, self.tests
+        for name, start, end in tests:
+            if only and name != only:
+                continue
+            self.reset()
+            self._prog, self.functions, self.tests = program, functions, tests
+            self.running = True
+            started = time.perf_counter()
+            result = {"name": name, "passed": True, "message": "", "line": program[start].line,
+                      "file": program[start].file}
+            try:
+                self._exec(start + 1, end)
+            except GublanError as err:
+                result.update(passed=False, message=err.message)
+                if err.statement is not None:
+                    result.update(line=err.statement.line, file=err.statement.file)
+            except _Return:
+                pass
+            except _Kill:
+                pass
+            except _Stop:
+                result.update(passed=False, message="stopped")
+                results.append(result)
+                break
+            except RecursionError:
+                result.update(passed=False, message="functions are calling each other too deeply")
+            finally:
+                result["seconds"] = round(time.perf_counter() - started, 4)
+                if self.screen:
+                    pygame.quit()
+                    self.screen = None
+            results.append(result)
+        self.running = False
+        return results
+
+    # ----- 1.0.5: textboxes, sliders and checkboxes --------------------------------------
+    def _c_textbox(self, statement):
+        parts = statement.parts
+        name = self._name(parts[1])
+        x, y = self._num(parts[2], "textbox x"), self._num(parts[3], "textbox y")
+        width = self._num(parts[4], "textbox width")
+        if width <= 0:
+            raise ValueError("textbox width must be greater than zero")
+        size = self.text_size
+        previous = self.objects.get(name)
+        keep = isinstance(previous, dict) and previous.get("type") == "textbox"
+        self.objects[name] = {
+            "type": "textbox", "x": x, "y": y, "w": width, "h": max(24, int(size * 1.25) + 8), "size": size,
+            "hint": self._label(parts[5:]) if len(parts) > 5 else "",
+            "text": previous["text"] if keep else "", "cursor": previous["cursor"] if keep else 0,
+            "anchor": None, "submitted": False, "color": self.activecolor,
+        }
+
+    def _c_slider(self, statement):
+        parts = statement.parts
+        if len(parts) not in (7, 8):
+            raise ValueError("use: slider <name> <x> <y> <width> <min> <max> [start]")
+        name = self._name(parts[1])
+        x, y = self._num(parts[2], "slider x"), self._num(parts[3], "slider y")
+        width = self._num(parts[4], "slider width")
+        low, high = self._num(parts[5], "slider min"), self._num(parts[6], "slider max")
+        if width <= 0:
+            raise ValueError("slider width must be greater than zero")
+        if low == high:
+            raise ValueError("a slider needs a min and max that are different")
+        previous = self.objects.get(name)
+        if len(parts) == 8:
+            value = self._num(parts[7], "slider start")
+        elif isinstance(previous, dict) and previous.get("type") == "slider":
+            value = previous["value"]
+        else:
+            value = low
+        self.objects[name] = {
+            "type": "slider", "x": x, "y": y, "w": width, "h": 24, "min": low, "max": high,
+            "value": max(min(low, high), min(max(low, high), value)), "color": self.activecolor,
+            "whole": all(isinstance(v, int) and not isinstance(v, bool) for v in (low, high)),
+        }
+
+    def _c_checkbox(self, statement):
+        parts = statement.parts
+        name = self._name(parts[1])
+        previous = self.objects.get(name)
+        self.objects[name] = {
+            "type": "checkbox", "x": self._num(parts[2], "checkbox x"), "y": self._num(parts[3], "checkbox y"),
+            "w": 24, "h": 24, "label": self._label(parts[4:]), "size": self.text_size,
+            "checked": bool(previous.get("checked")) if isinstance(previous, dict) and
+            previous.get("type") == "checkbox" else False, "color": self.activecolor,
+        }
+
+    def _c_focus(self, statement):
+        target = self._name(statement.parts[1])
+        if target == "none":
+            self._set_focus(None)
+            return
+        self._object(target, ("textbox",), "focus")
+        self._set_focus(target)
+
+    def _set_focus(self, name):
+        if name == self._focus:
+            return
+        self._focus = name
+        if self.screen is None:
+            return
+        try:
+            if name:
+                pygame.key.start_text_input()
+                pygame.key.set_repeat(400, 35)
+            else:
+                pygame.key.stop_text_input()
+                pygame.key.set_repeat()
+        except pygame.error:
+            pass
+
+    def _typing(self):
+        """true while the player is typing into a textbox, so keys don't also move the game."""
+        return self._focus is not None and self._focus in self.objects
+
+
+# --------------------------------------------------------------------------
+# plugins: extra commands and functions
+# --------------------------------------------------------------------------
+
+class CommandContext:
+    """what a plugin command gets when it runs."""
+
+    def __init__(self, runtime, statement):
+        self.runtime = runtime
+        self.words = [str(part) for part in statement.parts[1:]]
+        self.rest = statement.rest
+
+    @property
+    def values(self):
+        """each word after the command, as a value (variables are looked up, numbers become numbers)."""
+        return [self.runtime._val_text(part) for part in self.words]
+
+    @property
+    def text(self):
+        """the words after the command as text, with {braces} filled in."""
+        return self.runtime._label(self.words)
+
+    def get(self, name, default=None):
+        return self.runtime.vars.get(name, default)
+
+    def set(self, name, value):
+        self.runtime._set_target(name, value)
+
+    def print(self, *values):
+        self.runtime.onlog(" ".join(format_value(value) for value in values))
+
+
+def register_command(name, run, usage=None, summary="", example=None, category="plugins", min_parts=1):
+    """add a command. run(context) is called with a CommandContext each time a line uses it."""
+    if not re.fullmatch(r"[a-z][a-z0-9]{1,30}", name or ""):
+        raise ValueError("command names are 2 to 31 lowercase letters or digits, starting with a letter")
+    if name in COMMAND_SPECS and name not in _PLUGIN_COMMANDS:
+        raise ValueError(f"'{name}' is already a gublan command")
+    if not callable(run):
+        raise ValueError("run must be a function")
+    if category not in CATEGORY_ORDER:
+        category = "plugins"
+    spec = (category, usage or name, max(1, int(min_parts)), summary or "a command added by a plugin.",
+            example or name)
+    COMMAND_SPECS[name] = spec
+    GUBLANCOMMANDS.add(name)
+    COMMAND_USAGE[name] = spec[1]
+    if spec[2] > 1:
+        COMMAND_MIN_ARGS[name] = spec[2]
+    COMMAND_CATEGORY[name], COMMAND_SUMMARY[name], COMMAND_EXAMPLE[name] = spec[0], spec[3], spec[4]
+    _PLUGIN_COMMANDS[name] = run
+
+
+def register_function(name, function, description=""):
+    """add an expression function: name(values...) calls function(*values)."""
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{1,30}", name or ""):
+        raise ValueError("function names are 2 to 31 lowercase letters, digits or _")
+    if name in EXPRESSION_FUNCTIONS and name not in _PLUGIN_FUNCTIONS:
+        raise ValueError(f"'{name}' is already a gublan function")
+    if not callable(function):
+        raise ValueError("function must be callable")
+    EXPRESSION_FUNCTIONS[name] = description or f"{name}(...) a function added by a plugin"
+    _PLUGIN_FUNCTIONS[name] = function
+
+
+def plugin_names():
+    return sorted(_PLUGIN_COMMANDS), sorted(_PLUGIN_FUNCTIONS)
+
+
+def remove_plugin_command(name):
+    """take away a command a plugin added. built-in commands can't be removed."""
+    if name not in _PLUGIN_COMMANDS:
+        return False
+    del _PLUGIN_COMMANDS[name]
+    for table in (COMMAND_SPECS, COMMAND_USAGE, COMMAND_MIN_ARGS, COMMAND_CATEGORY, COMMAND_SUMMARY,
+                  COMMAND_EXAMPLE):
+        table.pop(name, None)
+    GUBLANCOMMANDS.discard(name)
+    return True
+
+
+def remove_plugin_function(name):
+    if name not in _PLUGIN_FUNCTIONS:
+        return False
+    del _PLUGIN_FUNCTIONS[name]
+    EXPRESSION_FUNCTIONS.pop(name, None)
+    return True
 
 
 def run_standalone(source, base_dir, title=None, console=False, save_name=None):

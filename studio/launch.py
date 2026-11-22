@@ -42,6 +42,10 @@ def _splash(root):
 
 def launch(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("--mcp", "mcp"):
+        # GublanStudio.exe --mcp [project folder]: be an mcp server for ai helpers instead of opening a window
+        import gublanmcp
+        return gublanmcp.serve(argv[1] if len(argv) > 1 else None)
     theme.enable_dpi_awareness()
     root = tk.Tk()
     root.withdraw()
