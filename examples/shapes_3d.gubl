@@ -1,0 +1,17 @@
+// shapes 3d: a spinning cube with a moon that glides past it
+mode 3d
+vec3 camera_position 0 0 0
+camera camera_position
+
+color moss
+cube core 0 0 -7 1.5
+color orange
+sphere moon 2 0 -7 0.7
+animate moon 2 1 -8 0.6
+
+angle = 0
+forever
+    spin core angle
+    angle += 90 * dt
+    frame
+end

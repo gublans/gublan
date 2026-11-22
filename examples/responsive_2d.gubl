@@ -1,0 +1,31 @@
+// responsive 2d: arrow keys move the square, hold the mouse to recolour it, hold the button to lift it
+window 640 360 responsive 2d
+mode 2d
+background #141414
+
+color moss
+box player 80 160 40 40
+button lift 20 20 130 40 lift
+color gray
+text hud 170 30 arrow keys move. hold the mouse to paint.
+speed = 240
+
+forever
+    if keydown("left")
+        move player {-speed * dt} 0
+    end
+    if keydown("right")
+        move player {speed * dt} 0
+    end
+    if lift = 1
+        move player 0 {-speed * dt}
+    end
+
+    mousebutton held left
+    if held
+        paint player orange
+    else
+        paint player moss
+    end
+    frame
+end

@@ -1,0 +1,25 @@
+// maps and vectors: values that hold other values
+vec2 start 40 80
+vec2 velocity 3 1
+next_position = start + velocity
+print next position: {next_position.x}, {next_position.y}
+
+// the command way to use a map
+map inventory
+put inventory coins 4
+has inventory coins owns_coins
+if owns_coins
+    lookup inventory coins coin_count
+    print you have {coin_count} coins
+end
+
+// the expression way
+player = {"name": "sam", "hp": 10}
+player.hp -= 3
+print {player.name} has {player.hp} hp left
+
+bag = ["sword", "shield"]
+bag = bag + ["map"]
+for item in bag
+    print in the bag: {item}
+end

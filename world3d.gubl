@@ -1,0 +1,12 @@
+// world 3d: a yellow cube that keeps turning
+mode 3d
+print spin 3d
+deg = 0
+color yellow
+cube core 0 0 -6 1.6
+
+forever
+    spin core deg
+    deg += 150 * dt
+    frame
+end

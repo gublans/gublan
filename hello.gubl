@@ -1,0 +1,17 @@
+mode 2d
+print hi
+set x = 60
+set ui = ok
+ui button destroy
+
+loop 90
+    clear
+    color green
+    box block x 170 55 55
+    add x 4
+    if ui = destroy
+    then kill
+    end
+    wait 0.03
+end
+print done
