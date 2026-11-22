@@ -121,7 +121,7 @@ def cmd_translate(path, language, folder=None):
 
 def cmd_mcp(folder=None):
     import gublanmcp
-    return gublanmcp.serve(folder or os.getcwd())
+    return gublanmcp.serve(folder)
 
 
 def cmd_docs():

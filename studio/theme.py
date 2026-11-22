@@ -1150,3 +1150,180 @@ class ScrollFrame(tk.Frame):
 
     def to_top(self):
         self.canvas.yview_moveto(0)
+
+
+# ----- switching themes while the studio is open ------------------------------------------------------------------
+_FG_FIRST = ("TEXT", "MUTED", "DIM", "MOSS_LIGHT", "MOSS", "SELECT_TEXT", "ACCENT_TEXT", "NUMBER", "ERROR")
+_BG_FIRST = ("BG", "PANEL", "PANEL_ALT", "EDITOR_BG", "FIELD_BG", "CODE_BG", "HOVER", "BORDER", "SELECT")
+_FG_OPTIONS = ("foreground", "activeforeground", "selectforeground", "disabledforeground", "insertbackground")
+_BG_OPTIONS = ("background", "activebackground", "highlightbackground", "highlightcolor", "selectbackground",
+               "troughcolor", "readonlybackground", "inactiveselectbackground", "selectcolor", "disabledbackground")
+_ITEM_OPTIONS = ("fill", "outline", "activefill", "activeoutline", "disabledfill", "disabledoutline")
+_TAG_OPTIONS = ("foreground", "background", "selectbackground", "selectforeground", "underlinefg", "overstrikefg")
+
+
+def _palette():
+    values = {name: str(globals()[name]).lower() for name in COLOR_NAMES}
+    values.update({f"syntax:{key}": str(value).lower() for key, value in SYNTAX.items()})
+    values.update({f"category:{key}": str(value).lower() for key, value in CATEGORY_COLORS.items()})
+    return values
+
+
+def _color_map(old, new, first):
+    """old colour -> new colour. when two names shared a colour, the names in `first` win."""
+    mapping = {}
+    for name in list(first) + [name for name in old if name not in first]:
+        if name in old and old[name] not in mapping:
+            mapping[old[name]] = new[name]
+    return {key: value for key, value in mapping.items() if key != value}
+
+
+def switch_theme(root, name, modules=None):
+    """change the theme without restarting: swap every widget's old palette colours for the new ones.
+
+    returns False when there is no theme with that name. anything that mixes its own shades keeps the old
+    ones until it is drawn again; a restart always gives the cleanest result.
+    """
+    old = _palette()
+    if not apply_theme(name):
+        return False
+    new = _palette()
+    general = _color_map(old, new, ())
+    if not general:
+        return True
+    maps = {"fg": _color_map(old, new, _FG_FIRST), "bg": _color_map(old, new, _BG_FIRST), "any": general}
+    _update_names(old, new, modules)
+    setup_styles(root)
+    _recolor_tree(root, maps)
+    square_window(root, caption=BG)
+    return True
+
+
+def _update_names(old, new, modules=None):
+    """modules that did `from .theme import BG, ...` hold their own copies of the colours, and so do default
+    arguments (flat_entry's bg=PANEL_ALT). bring both up to date so new widgets get the new look."""
+    lookup = {old[name]: new[name] for name in COLOR_NAMES}
+    targets = modules if modules is not None else [module for key, module in list(sys.modules.items())
+                                                   if module is not None and (key == "studio" or
+                                                                              key.startswith("studio."))]
+    for module in targets:
+        space = vars(module)
+        for name in COLOR_NAMES:
+            if isinstance(space.get(name), str) and module is not sys.modules[__name__]:
+                space[name] = new[name]
+        for value in list(space.values()):
+            functions = [value]
+            if isinstance(value, type) and getattr(value, "__module__", "") == module.__name__:
+                functions = [item for item in vars(value).values() if callable(item)]
+            for function in functions:
+                _fix_defaults(function, lookup)
+
+
+def _fix_defaults(function, lookup):
+    code_owner = getattr(function, "__func__", function)
+    defaults = getattr(code_owner, "__defaults__", None)
+    if defaults and any(isinstance(item, str) and item.lower() in lookup for item in defaults):
+        try:
+            code_owner.__defaults__ = tuple(lookup.get(item.lower(), item) if isinstance(item, str) else item
+                                            for item in defaults)
+        except (AttributeError, TypeError):
+            pass
+    keywords = getattr(code_owner, "__kwdefaults__", None)
+    if keywords:
+        for key, item in list(keywords.items()):
+            if isinstance(item, str) and item.lower() in lookup:
+                keywords[key] = lookup[item.lower()]
+
+
+def _swap(value, mapping):
+    if not isinstance(value, str) or not value.startswith("#"):
+        return None
+    return mapping.get(value.lower())
+
+
+def _recolor_tree(widget, maps):
+    stack = [widget]
+    while stack:
+        current = stack.pop()
+        try:
+            _recolor(current, maps)
+            stack.extend(current.winfo_children())
+        except tk.TclError:
+            continue
+
+
+def _recolor(widget, maps):
+    changes = {}
+    for option in _FG_OPTIONS + _BG_OPTIONS:
+        try:
+            value = widget.cget(option)
+        except (tk.TclError, ValueError):
+            continue
+        swapped = _swap(str(value), maps["fg" if option in _FG_OPTIONS else "bg"])
+        if swapped:
+            changes[option] = swapped
+    if changes:
+        try:
+            widget.configure(**changes)
+        except tk.TclError:
+            pass
+    for attribute in ("parent_bg", "bg_color", "base_bg", "rest_bg"):
+        value = getattr(widget, attribute, None)
+        swapped = _swap(value, maps["bg"])
+        if swapped:
+            setattr(widget, attribute, swapped)
+    if isinstance(widget, tk.Toplevel):
+        try:
+            if not widget.wm_overrideredirect():
+                square_window(widget)
+        except tk.TclError:
+            pass
+    if isinstance(widget, tk.Canvas):
+        _recolor_canvas(widget, maps["any"])
+    elif isinstance(widget, tk.Text):
+        _recolor_tags(widget, maps["any"])
+    hook = getattr(widget, "theme_changed", None)
+    if callable(hook):
+        try:
+            hook()
+        except Exception:  # noqa: BLE001 - one widget must not stop the rest
+            pass
+    elif isinstance(widget, (BracketButton, Toggle)):
+        try:
+            widget.draw()
+        except tk.TclError:
+            pass
+
+
+def _recolor_canvas(canvas, mapping):
+    for item in canvas.find_all():
+        changes = {}
+        for option in _ITEM_OPTIONS:
+            try:
+                swapped = _swap(canvas.itemcget(item, option), mapping)
+            except tk.TclError:
+                continue
+            if swapped:
+                changes[option] = swapped
+        if changes:
+            try:
+                canvas.itemconfigure(item, **changes)
+            except tk.TclError:
+                pass
+
+
+def _recolor_tags(text, mapping):
+    for tag in text.tag_names():
+        changes = {}
+        for option in _TAG_OPTIONS:
+            try:
+                swapped = _swap(str(text.tag_cget(tag, option)), mapping)
+            except tk.TclError:
+                continue
+            if swapped:
+                changes[option] = swapped
+        if changes:
+            try:
+                text.tag_configure(tag, **changes)
+            except tk.TclError:
+                pass

@@ -18,7 +18,7 @@ from tkinter import filedialog
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
 
 from . import blocks as blocks_module
-from . import collab, config, exporter, plugins, theme, updater, version
+from . import collab, config, exporter, guard, plugins, textfiles, theme, updater, version
 from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
 from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, McpDialog, SettingsDialog, SpriteEditor,
@@ -35,6 +35,20 @@ from .theme import (BG, BORDER, DEBUG_LINE, DIM, EDITOR_BG, ERROR, HOVER, MOSS_D
 APP_NAME = "gublan studio"
 CODE_TYPES = [("gublan programs", "*.gubl *.gub *.txt"), ("all files", "*.*")]
 FOREIGN = (".py", ".pyw", ".js", ".mjs", ".lua")
+RECOVERY_MS = 15000
+WATCH_MS = 1500
+BINARY_TYPES = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".wav", ".ogg", ".mp3", ".flac", ".exe", ".ico",
+                ".dll", ".zip", ".7z", ".rar", ".pdf", ".ttf", ".otf", ".mp4", ".avi", ".mov", ".pyc", ".obj",
+                ".glb", ".fbx", ".blend")
+
+
+def disk_stamp(path):
+    """(modified time, size) of a file, to notice when something else changes it. None if it is gone."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return info.st_mtime_ns, info.st_size
 CONSOLE_COMMANDS = {name for name, spec in COMMAND_SPECS.items() if spec[0] in ("basics", "lists and maps")} | {
     "call", "vec2", "vec3"}
 
@@ -78,6 +92,8 @@ class Document:
             name = f"untitled {Document.counter}"
         self.untitled_name = name
         self.view = "code"
+        self.encoding = "utf-8"
+        self.disk_stamp = None
         self.diagnostics = []
         self.analysed_version = -1
         self.analysis_job = None
@@ -196,6 +212,8 @@ class GublanStudio:
         self.live = None
         self.live_status = None
         self.root.report_callback_exception = self.report_error
+        guard.install(root, self.report_error)
+        self.crashed_last_time = guard.mark_running()
         theme.MOTION = bool(self.settings.get("animations", True))
         self._build_window()
         self.plugins = plugins.load_plugins(self.settings, app=self)
@@ -206,6 +224,9 @@ class GublanStudio:
         self.root.after(1200, self._after_update)
         self.root.after(5000, self._check_for_updates)
         self.root.after(900, self._report_plugins)
+        self.root.after(1500, self._offer_recovery)
+        self.root.after(RECOVERY_MS, self._save_recovery)
+        self.root.after(WATCH_MS, self._watch_files)
         self.presence.refresh()
         self.root.protocol("WM_DELETE_WINDOW", self.exit)
 
@@ -450,6 +471,7 @@ class GublanStudio:
                 {"label": "save", "command": self.save, "shortcut": "ctrl+s", "enabled": doc is not None},
                 {"label": "save as...", "command": self.save_as, "shortcut": "ctrl+shift+s", "enabled": doc is not None},
                 ("save all", self.save_all, ""),
+                {"label": "reload from disk", "command": self.reload_from_disk, "enabled": bool(doc and doc.path)},
                 "-",
                 {"label": "export program...", "command": self.open_export, "shortcut": "ctrl+shift+b",
                  "enabled": doc is not None},
@@ -556,6 +578,8 @@ class GublanStudio:
                 "-",
                 ("welcome page", self.show_welcome_tab, ""),
                 ("open the command list file", self.open_command_docs, ""),
+                "-",
+                ("report a problem (crash and error logs)", self.open_problem_report, ""),
                 "-",
                 ("check for updates", lambda: self._check_for_updates(manual=True), ""),
                 ("what's new", self.open_release_notes, ""),
@@ -993,6 +1017,9 @@ class GublanStudio:
         doc = self.current
         if doc is None:
             return
+        if view != "code" and textfiles.too_big_for_blocks(doc.editor.get()):
+            self.flash("this file is too big for the blocks view. it stays as code.")
+            view = "code"
         if doc.view != view:
             doc.set_view(view)
         self.update_view_buttons()
@@ -1100,7 +1127,7 @@ class GublanStudio:
             except Exception as err:  # noqa: BLE001 - the checker must never take the editor down
                 items = [{"line": None, "severity": "warning", "message": f"the checker had a problem: {err}"}]
             try:
-                self.root.after(0, lambda: self._analysed(doc, version, items))
+                guard.call_soon(self._analysed, doc, version, items)
             except (RuntimeError, tk.TclError):
                 pass
 
@@ -1176,31 +1203,61 @@ class GublanStudio:
             # the converter is a modal window; opening it before the main window is on screen blocks start-up
             self.when_shown(lambda: self.open_converter(path))
             return None
-        if extension in (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".wav", ".ogg", ".mp3", ".exe", ".ico"):
+        if extension in BINARY_TYPES:
             reveal(path)
             return None
-        try:
-            with open(path, "r", encoding="utf-8-sig") as handle:
-                text = handle.read()
-        except UnicodeDecodeError:
-            with open(path, "r", encoding="latin-1") as handle:
-                text = handle.read()
-        except OSError as err:
-            message(self.root, "open", f"could not open {os.path.basename(path)}: {str(err).lower()}", "error")
+        text = self._read_for_editor(path)
+        if text is None:
             return None
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text, encoding = text
         # an untouched empty untitled tab is replaced by the file
         current = self.current
         replace = current if current and not current.path and not current.dirty and not current.editor.get() \
             else None
         doc = self.new_tab(text, path=path)
+        doc.encoding = encoding
+        doc.disk_stamp = disk_stamp(path)
         if replace is not None:
             self.close_tab(replace, ask_first=False)
             self.select(doc)
         config.add_recent(self.settings, path)
+        if encoding not in ("utf-8", "ascii"):
+            self.flash(f"{os.path.basename(path)} is {encoding} text. saving it will store it as utf-8.")
         if not self.settings.get("folder"):
             self.side_panels["files"].set_folder(os.path.dirname(path))
         return doc
+
+    def _read_for_editor(self, path):
+        """(text, encoding) for a file the editor can show, or None after telling the user why not."""
+        name = os.path.basename(path)
+        size = textfiles.size_of(path)
+        if size > textfiles.REFUSE_ABOVE:
+            if confirm(self.root, "open", f"{name} is {textfiles.describe_size(size)}. that is far too big for "
+                       "the code editor. show it in its folder instead?", yes="show in folder", no="cancel"):
+                reveal(path)
+            return None
+        if size > textfiles.ASK_ABOVE and not confirm(
+                self.root, "open", f"{name} is {textfiles.describe_size(size)}. big files make the editor slow "
+                "(gublan programs are usually a few kb). open it anyway?", yes="open it", no="cancel"):
+            return None
+        try:
+            text, encoding = textfiles.read(path)
+        except textfiles.NotText as err:
+            if confirm(self.root, "open", f"{name} can't be shown in the code editor: {err}. show it in its "
+                       "folder instead?", yes="show in folder", no="cancel"):
+                reveal(path)
+            return None
+        except (OSError, LookupError, ValueError) as err:
+            message(self.root, "open", f"could not open {name}: {str(err).lower()}", "error")
+            return None
+        except MemoryError:
+            message(self.root, "open", f"{name} is too big to open.", "error")
+            return None
+        if textfiles.longest_line(text) > textfiles.LONG_LINE and not confirm(
+                self.root, "open", f"{name} has a very long line (more than {textfiles.LONG_LINE} characters). "
+                "the editor will be slow with it. open it anyway?", yes="open it", no="cancel"):
+            return None
+        return text, encoding
 
     def save(self, doc=None):
         doc = doc or self.current
@@ -1243,6 +1300,8 @@ class GublanStudio:
             message(self.root, "save", f"could not save {os.path.basename(path)}: {str(err).lower()}", "error")
             return False
         doc.editor.mark_saved()
+        doc.encoding = "utf-8"
+        doc.disk_stamp = disk_stamp(path)
         self._paint_tab(doc)
         self.update_title()
         self.flash(f"saved {os.path.basename(path)}")
@@ -1361,14 +1420,7 @@ class GublanStudio:
         """called by tkinter when a button, key or timer callback raises. keeps the studio alive and tells the user."""
         import traceback
         details = "".join(traceback.format_exception(kind, value, trace))
-        try:
-            os.makedirs(config.settings_folder(), exist_ok=True)
-            with open(os.path.join(config.settings_folder(), "errors.log"), "a", encoding="utf-8") as handle:
-                handle.write(time.strftime("%Y-%m-%d %H:%M:%S ") + details + "\n")
-        except OSError:
-            pass
-        if sys.stderr is not None:  # the windowed exe has no console
-            sys.stderr.write(details)
+        guard.log_error(details)
         now = time.monotonic()
         if now - getattr(self, "_last_error_shown", 0.0) < 4.0:
             return
@@ -1421,8 +1473,10 @@ class GublanStudio:
 
     def open_mcp(self):
         doc = self.current
-        folder = (doc.folder if doc is not None and doc.folder else None) or self.settings.get("folder") or \
-            os.getcwd()
+        folder = (doc.folder if doc is not None and doc.folder else None) or self.settings.get("folder")
+        if not folder:
+            import gublanmcp
+            folder = gublanmcp.default_folder()
         dialog = McpDialog(self.root, folder, settings=self.settings)
         dialog.bind("<Destroy>", lambda e: config.save(self.settings) if e.widget is dialog else None, add="+")
         dialog.show(width=px(760), height=px(520), modal=False)
@@ -1448,6 +1502,7 @@ class GublanStudio:
                               "the game:\n    test adding works\n        assert 1 + 1 == 2\n    end", "info")
             return
         base_dir = doc.folder or self.settings.get("folder") or os.getcwd()
+        base_dir, fetchfile = self._live_files(doc, base_dir)
         if self.settings.get("clear_output", True):
             self.output.clear()
         self.output.write(f"running the tests in {doc.name}", "info")
@@ -1458,14 +1513,14 @@ class GublanStudio:
 
         def work():
             runtime = GublanRuntime(onlog=lambda *_: None, base_dir=base_dir, oninput=lambda _prompt: "",
-                                    onpopup=lambda _text: None, save_name=name + "_tests")
+                                    onpopup=lambda _text: None, save_name=name + "_tests", fetchfile=fetchfile)
             try:
                 results = runtime.run_tests(source, base_dir)
             except Exception as err:  # noqa: BLE001 - shown in the output instead of crashing the studio
                 results = [{"name": "running the tests", "passed": False, "line": None, "file": None,
                             "message": f"{type(err).__name__}: {err}", "seconds": 0.0}]
             try:
-                self.root.after(0, lambda: self._tests_finished(doc, results))
+                guard.call_soon(self._tests_finished, doc, results)
             except (tk.TclError, RuntimeError):
                 pass
 
@@ -1545,7 +1600,7 @@ class GublanStudio:
             result, error = output, str(err)
         except Exception as err:  # noqa: BLE001 - shown to the user instead of crashing the worker
             result, error = output, f"{type(err).__name__}: {err}"
-        self.root.after(0, self.exportfinished, result, error)
+        guard.call_soon(self.exportfinished, result, error)
 
     def exportfinished(self, output, error):
         dialog = self.export_dialog
@@ -1605,6 +1660,7 @@ class GublanStudio:
                 self.flash(f"line {first.get('line') or '?'}: {lower(first['message'])}")
                 return
         base_dir = doc.folder or self.settings.get("folder") or os.getcwd()
+        base_dir, fetchfile = self._live_files(doc, base_dir)
         if self.settings.get("clear_output", True):
             self.output.clear()
         self.output.cancel_question()
@@ -1623,7 +1679,8 @@ class GublanStudio:
         runtime = GublanRuntime(onlog=self._from_log, shouldstop=self.stop_event.is_set, waitstep=self._waitstep,
                                 base_dir=base_dir, onerror=self._from_error, hold_window=True,
                                 oninput=self._from_input, onpopup=self._from_popup,
-                                onpresence=self._from_presence, save_name=os.path.splitext(doc.name)[0])
+                                onpresence=self._from_presence, save_name=os.path.splitext(doc.name)[0],
+                                fetchfile=fetchfile)
         self.active_runtime = runtime
         self.run_wall_started = time.time()
         self.presence.told_off = False
@@ -1644,6 +1701,19 @@ class GublanStudio:
     @staticmethod
     def _is_text_program(source):
         return not exporter.uses_window(source)
+
+    def _live_files(self, doc, base_dir):
+        """(folder, fetchfile) for running a program. a program shared by a live session host runs in a
+        temporary folder and gets its pictures, sounds and included files from the host's computer."""
+        live = self.live
+        if live is None or live.is_host or not live.active or live.host_files is None:
+            return base_dir, None
+        shared = live.guest_file_for(doc)
+        if shared is None:
+            return base_dir, None
+        # self.stop_event is replaced when the run starts, so look it up each time
+        return live.host_files.folder_for(shared.id), live.host_files.fetcher(
+            shared.id, log=self._from_log, shouldstop=lambda: self.stop_event.is_set())
 
     def _run_worker(self, runtime, source, base_dir):
         try:
@@ -2025,6 +2095,9 @@ class GublanStudio:
     def apply_settings(self, settings, save=True):
         self.settings = settings
         theme.MOTION = bool(settings.get("animations", True))
+        wanted = str(settings.get("theme") or theme.DEFAULT_THEME).lower()
+        if hasattr(self, "tab_strip") and wanted != theme.THEME_NAME and theme.theme_spec(wanted) is not None:
+            self.switch_theme(wanted)
         for doc in self.docs:
             doc.editor.settings = settings
             doc.editor.apply_settings(settings)
@@ -2051,6 +2124,27 @@ class GublanStudio:
     def toast(self, text, kind="info", seconds=3.5):
         return theme.toast(self.root, text, kind, seconds)
 
+    def switch_theme(self, name):
+        """show a new theme straight away (1.0.5 needed a restart for it)."""
+        try:
+            switched = theme.switch_theme(self.root, name)
+        except Exception as err:  # noqa: BLE001 - a half-painted window is better than a crash
+            guard.log_error(f"switching to the {name} theme: {type(err).__name__}: {err}")
+            self.toast("the new theme shows fully after a restart", "warning")
+            return False
+        if not switched:
+            self.flash(f"there is no theme called {name}")
+            return False
+        for doc in self.docs:
+            try:
+                self._paint_tab(doc)
+            except tk.TclError:
+                pass
+        self.set_state(self._state[0])
+        self.presence.refresh()
+        self.flash(f"theme: {name}")
+        return True
+
     def restart(self):
         """close and open gublan studio again (for a new theme)."""
         import subprocess
@@ -2062,7 +2156,8 @@ class GublanStudio:
                 command = [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                                         "gublanide.py")]
             try:
-                subprocess.Popen(command, close_fds=True)  # noqa: S603 - starts this same program again
+                # a clean environment, or the new copy reuses this one's unpacked files and crashes when they go
+                subprocess.Popen(command, close_fds=True, env=guard.clean_environment())  # noqa: S603
             except OSError:
                 pass
 
@@ -2134,6 +2229,7 @@ class GublanStudio:
         if not answer:
             return
         session = collab.LiveSession(self, answer["name"], host=True)
+        session.share_files = bool(self.settings.get("live_share_files", True))
         try:
             session.start_host(answer["port"])
         except OSError as err:
@@ -2444,6 +2540,157 @@ class GublanStudio:
             self._show_empty()
         self.set_state("ready", MOSS_LIGHT)
 
+    # ----- files changed by something else ---------------------------------------------------------------------
+    def _watch_files(self):
+        """notice files changed outside the studio (an ai helper, another editor, git) and load the new text."""
+        try:
+            if not getattr(self, "_watch_busy", False) and self.settings.get("reload_changed_files", True):
+                self._watch_busy = True
+                try:
+                    for doc in list(self.docs):
+                        self._check_on_disk(doc)
+                finally:
+                    self._watch_busy = False
+        except Exception as err:  # noqa: BLE001 - the watcher must never break the studio
+            guard.log_error(f"watching files: {type(err).__name__}: {err}")
+        finally:
+            try:
+                self.root.after(WATCH_MS, self._watch_files)
+            except tk.TclError:
+                pass
+
+    def _check_on_disk(self, doc):
+        if doc not in self.docs or not doc.path or doc.disk_stamp is None:
+            return
+        stamp = disk_stamp(doc.path)
+        if stamp == doc.disk_stamp:
+            return
+        if stamp is None:
+            doc.disk_stamp = None
+            self.flash(f"{doc.name} was moved or deleted outside the studio. save puts it back.", seconds=8)
+            return
+        doc.disk_stamp = stamp
+        try:
+            text, encoding = textfiles.read(doc.path)
+        except (OSError, textfiles.NotText, LookupError, ValueError, MemoryError):
+            return
+        if text == doc.editor.get() or (text.endswith("\n") and text[:-1] == doc.editor.get()):
+            if doc.dirty:
+                doc.editor.mark_saved()
+                self._paint_tab(doc)
+            return
+        if doc.dirty:
+            answer = confirm(self.root, "changed outside the studio",
+                             f"{doc.name} was changed by another program, and you have unsaved changes too. "
+                             "load the new version from the disk (your changes are lost), or keep yours?",
+                             yes="keep mine", no="load from disk")
+            if answer is not False:
+                return
+        self.reload(doc, text, encoding)
+        self.flash(f"reloaded {doc.name}: it was changed outside the studio")
+
+    def reload_from_disk(self):
+        doc = self.current
+        if doc is None or not doc.path:
+            return
+        if doc.dirty and not confirm(self.root, "reload", f"throw away your changes to {doc.name} and load it "
+                                     "from the disk again?", yes="reload", no="cancel", danger=True):
+            return
+        if self.reload(doc):
+            self.flash(f"reloaded {doc.name}")
+
+    def reload(self, doc, text=None, encoding=None):
+        """load a document's file again (file > reload from disk, or when another program changed it)."""
+        doc = doc or self.current
+        if doc is None or not doc.path:
+            return False
+        if text is None:
+            result = self._read_for_editor(doc.path)
+            if result is None:
+                return False
+            text, encoding = result
+        doc.editor.replace_all_text(text)
+        doc.editor.mark_saved()
+        doc.encoding = encoding or doc.encoding
+        doc.disk_stamp = disk_stamp(doc.path)
+        if doc.blocks is not None and doc.view != "code":
+            doc.sync_blocks()
+        self.on_changed(doc)
+        return True
+
+    # ----- crashes and unsaved work ------------------------------------------------------------------------------
+    def _save_recovery(self):
+        """copy every program with unsaved changes to the recovery folder, so a crash never loses work."""
+        try:
+            items = [{"name": doc.name, "path": doc.path, "text": doc.editor.get()} for doc in self.docs
+                     if doc.dirty and not getattr(doc, "live_file", None)]
+            guard.save_recovery(items)
+        except Exception as err:  # noqa: BLE001 - never let the safety net itself break things
+            guard.log_error(f"saving recovery copies: {err}")
+        finally:
+            try:
+                self.root.after(RECOVERY_MS, self._save_recovery)
+            except tk.TclError:
+                pass
+
+    def _offer_recovery(self):
+        items = guard.load_recovery()
+        if not items:
+            if self.crashed_last_time:
+                self.toast("gublan studio closed unexpectedly last time. help > report a problem shows why.",
+                           "warning", 7)
+            return
+        names = ", ".join(str(item.get("name") or "untitled") for item in items[:4])
+        if len(items) > 4:
+            names += " and more"
+        answer = confirm(self.root, "restore unsaved work",
+                         f"gublan studio closed before you saved {names}. open the unsaved copies?",
+                         yes="restore", no="throw away")
+        if answer:
+            for item in items:
+                self.restore_copy(item)
+        guard.clear_recovery()
+
+    def restore_copy(self, item):
+        """open a recovered program: over the same file's tab when it is open, otherwise in a new tab."""
+        path = item.get("path")
+        text = item.get("text", "")
+        doc = None
+        if path and os.path.isfile(path):
+            doc = self.open_path(path)
+        if doc is not None:
+            if doc.editor.get() != text:
+                doc.editor.replace_all_text(text)
+        else:
+            name = item.get("name") or "recovered"
+            doc = self.new_tab(text, name=f"{name} (recovered)")
+            doc.editor.saved_version = -1  # not saved anywhere yet
+        self.on_changed(doc)
+        return doc
+
+    def open_problem_report(self):
+        """show the end of the error and crash logs, with a button that opens the folder they are in."""
+        folder = config.settings_folder()
+        parts = []
+        for name in ("crash.log", "errors.log"):
+            try:
+                with open(os.path.join(folder, name), "r", encoding="utf-8", errors="replace") as handle:
+                    text = handle.read()[-6000:].strip()
+            except OSError:
+                text = ""
+            if name == "crash.log":
+                text = "\n".join(line for line in text.splitlines()
+                                 if not line.startswith("--- gublan studio started"))
+            parts.append(f"===== {name} =====\n{text.strip() or 'nothing here. good.'}")
+        details = (f"gublan studio {version.VERSION}, python {sys.version.split()[0]}, "
+                   f"{sys.platform}{' (exe)' if getattr(sys, 'frozen', False) else ''}\n\n" + "\n\n".join(parts))
+        answer = confirm(self.root, "report a problem",
+                         "these are the last problems gublan studio wrote down. select them in the box below "
+                         "and copy them into a bug report, or open the folder to send the files.",
+                         yes="open the folder", no="close", details=details)
+        if answer:
+            self._open_folder(folder)
+
     def exit(self, after_exit=None, relaunch=False):
         dirty = [doc for doc in self.docs if doc.dirty]
         if dirty:
@@ -2477,6 +2724,9 @@ class GublanStudio:
             if relaunch:
                 return False
         self.presence.close()
+        guard.clear_recovery()
+        guard.mark_closed()
+        guard.uninstall()
         if after_exit:
             after_exit()
         self.root.destroy()

@@ -44,7 +44,7 @@ def _version():
         from studio.version import VERSION
         return VERSION
     except Exception:  # noqa: BLE001 - the server works without the studio package
-        return "1.0.5"
+        return "1.0.6"
 
 
 class ToolError(Exception):
@@ -455,6 +455,7 @@ TOOLS = [
 class Server:
     def __init__(self, folder):
         self.project = Project(folder)
+        self.note = ""
         self.protocol = DEFAULT_PROTOCOL
         self.handlers = {tool["name"]: getattr(self, "tool_" + tool["name"]) for tool in TOOLS}
 
@@ -500,7 +501,8 @@ class Server:
         return {"protocolVersion": self.protocol,
                 "capabilities": {"tools": {"listChanged": False}, "resources": {"listChanged": False}},
                 "serverInfo": {"name": SERVER_NAME, "title": "gublan studio", "version": _version()},
-                "instructions": INSTRUCTIONS + f"\nthe project folder is {self.project.root}"}
+                "instructions": INSTRUCTIONS + f"\nthe project folder is {self.project.root}" +
+                                (f" ({self.note})" if self.note else "")}
 
     def call_tool(self, name, arguments):
         handler = self.handlers.get(name)
@@ -877,15 +879,109 @@ def _std_streams():
     return stdin, stdout
 
 
+def clean_folder(folder):
+    """a folder typed or pasted by a person: no quotes, no trailing slash, ~ and %appdata% filled in."""
+    folder = str(folder or "").strip().strip('"').strip("'").strip()
+    if not folder:
+        return ""
+    folder = os.path.normpath(os.path.expandvars(os.path.expanduser(folder)))
+    return os.path.abspath(folder)
+
+
+def _studio_folder():
+    """the project folder open in gublan studio last time, if there is one."""
+    try:
+        from gublancore import user_folder
+        with open(os.path.join(user_folder(), "settings.json"), "r", encoding="utf-8") as handle:
+            folder = json.load(handle).get("folder") or ""
+    except (OSError, ValueError, AttributeError, ImportError):
+        return ""
+    return folder if folder and os.path.isdir(folder) else ""
+
+
+def _has_programs(folder, limit=400):
+    try:
+        for count, name in enumerate(os.listdir(folder)):
+            if count > limit:
+                return False
+            if name.lower().endswith((".gubl", ".gub")):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def default_folder():
+    """where the server works when the ai app doesn't say. apps often start servers in their own install folder
+    (or c:\\windows\\system32), which is never the right place."""
+    here = os.getcwd()
+    if _has_programs(here):
+        return here
+    studio = _studio_folder()
+    if studio:
+        return studio
+    folder = os.path.join(documents_folder(), "Gublan")
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError:
+        return here
+    return folder
+
+
+def documents_folder():
+    """the user's documents folder (windows can move it to another drive or to onedrive)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            buffer = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buffer) == 0 and os.path.isdir(buffer.value):
+                return buffer.value
+        except (AttributeError, OSError):
+            pass
+    documents = os.path.join(os.path.expanduser("~"), "Documents")
+    return documents if os.path.isdir(documents) else os.path.expanduser("~")
+
+
+def pick_folder(folder=None):
+    """(the folder to serve, a note about why it isn't the one asked for or '')."""
+    wanted = clean_folder(folder)
+    if wanted and os.path.isfile(wanted):
+        return os.path.dirname(wanted), ""
+    if wanted and os.path.isdir(wanted):
+        return wanted, ""
+    chosen = default_folder()
+    if wanted:
+        return chosen, f"there is no folder {wanted}, so the project folder is {chosen} instead"
+    return chosen, ""
+
+
+def _protect_stdout(stdout):
+    """keep the json-rpc stream to ourselves: anything else that writes to the process's stdout (c libraries,
+    programs started by a tool) goes to stderr instead. gives back the stream to answer on."""
+    try:
+        number = stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        return stdout
+    if number != 1:
+        return stdout
+    try:
+        private = os.dup(1)
+        target = sys.stderr.fileno() if sys.stderr is not None else os.open(os.devnull, os.O_WRONLY)
+        os.dup2(target, 1)
+        return os.fdopen(private, "wb", buffering=0)
+    except (OSError, ValueError, AttributeError):
+        return stdout
+
+
 def serve(folder=None):
     """read json-rpc messages from stdin, one per line, and answer on stdout until stdin closes."""
-    folder = os.path.abspath(folder or os.getcwd())
-    if not os.path.isdir(folder):
-        print(f"there is no folder {folder}", file=sys.stderr)
-        return 1
+    folder, note = pick_folder(folder)
     stdin, stdout = _std_streams()
+    stdout = _protect_stdout(stdout)
     # everything else (print, pygame's hello, gublan's own output) goes to stderr so stdout stays clean
     sys.stdout = sys.stderr if sys.stderr is not None else open(os.devnull, "w", encoding="utf-8")
+    if note:
+        print(note, file=sys.stderr)
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     here = os.path.dirname(os.path.abspath(__file__))
     if here not in sys.path:
@@ -898,6 +994,7 @@ def serve(folder=None):
     except ImportError:
         pass
     server = Server(folder)
+    server.note = note
     print(f"gublan mcp server {_version()} for {server.project.root}", file=sys.stderr)
 
     def send(reply):
@@ -935,20 +1032,105 @@ def client_config(folder, frozen=None):
     return {"mcpServers": {"gublan": {"command": command, "args": args}}}
 
 
+APPS = ("claude code", "claude desktop", "cursor", "vs code")
+OLD_APP_NAMES = {"claude desktop / cursor": "claude desktop"}
+
+
 def client_snippets(folder):
     """ready-to-paste setup for the common ai apps: {label: (where it goes, text)}"""
     server = client_config(folder)["mcpServers"]["gublan"]
     command, args = server["command"], server["args"]
     quoted = " ".join(f'"{part}"' if " " in part else part for part in [command] + args)
+    desktop = ", ".join(_short_home(path) for path in claude_desktop_files()[:1])
     return {
-        "claude code": ("run this in a terminal (or save the project file below)",
-                        f"claude mcp add gublan -- {quoted}"),
-        "claude desktop / cursor": ("add this to claude_desktop_config.json or .cursor/mcp.json",
-                                    json.dumps({"mcpServers": {"gublan": server}}, indent=2)),
+        "claude code": ("run this in a terminal (works in every folder), or save .mcp.json in the project",
+                        f"claude mcp add --scope user gublan -- {quoted}"),
+        "claude desktop": (f"\"add it for me\" puts this in {desktop}. restart claude desktop after.",
+                           json.dumps({"mcpServers": {"gublan": server}}, indent=2)),
+        "cursor": ("\"add it for me\" puts this in ~/.cursor/mcp.json (every project). restart cursor after.",
+                   json.dumps({"mcpServers": {"gublan": server}}, indent=2)),
         "vs code": ("save this as .vscode/mcp.json in the project",
                     json.dumps({"servers": {"gublan": {"type": "stdio", "command": command, "args": args}}},
                                indent=2)),
     }
+
+
+def _short_home(path):
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.lower().startswith(home.lower()) else path
+
+
+def claude_desktop_files():
+    """where claude desktop keeps its settings. the microsoft store version keeps them in its own package
+    folder, so look for both. the first one is used when none exist yet."""
+    found = []
+    if os.name == "nt":
+        roaming = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+        found.append(os.path.join(roaming, "Claude", "claude_desktop_config.json"))
+        packages = os.path.join(os.environ.get("LOCALAPPDATA") or "", "Packages")
+        try:
+            for name in sorted(os.listdir(packages)):
+                if name.lower().startswith("claude_"):
+                    folder = os.path.join(packages, name, "LocalCache", "Roaming", "Claude")
+                    if os.path.isdir(folder):
+                        found.append(os.path.join(folder, "claude_desktop_config.json"))
+        except OSError:
+            pass
+    elif sys.platform == "darwin":
+        found.append(os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json"))
+    else:
+        found.append(os.path.expanduser("~/.config/Claude/claude_desktop_config.json"))
+    return found
+
+
+def app_config_files(app, folder):
+    """(path, top-level key, server entry) for each settings file "add it for me" writes for an app."""
+    server = client_config(folder)["mcpServers"]["gublan"]
+    if app == "claude desktop":
+        files = claude_desktop_files()
+        existing = [path for path in files if os.path.isdir(os.path.dirname(path))]
+        return [(path, "mcpServers", server) for path in (existing or files[:1])]
+    if app == "cursor":
+        return [(os.path.join(os.path.expanduser("~"), ".cursor", "mcp.json"), "mcpServers", server)]
+    if app == "vs code":
+        return [(os.path.join(folder, ".vscode", "mcp.json"), "servers",
+                 {"type": "stdio", "command": server["command"], "args": server["args"]})]
+    return [(os.path.join(folder, ".mcp.json"), "mcpServers", server)]
+
+
+def add_to_config(path, key, server, name="gublan"):
+    """put the gublan server into an ai app's settings file, keeping everything else in it. the old file is
+    kept next to it as .bak. raises ValueError when the file is there but isn't json we can safely change."""
+    data = {}
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            text = handle.read()
+        if text.strip():
+            try:
+                data = json.loads(text)
+            except ValueError as err:
+                raise ValueError(f"{path} is not valid json ({err}). fix it or add the text by hand") from None
+            if not isinstance(data, dict):
+                raise ValueError(f"{path} doesn't hold a json object. add the text by hand")
+        with open(path + ".bak", "w", encoding="utf-8") as handle:
+            handle.write(text)
+    servers = data.get(key)
+    if not isinstance(servers, dict):
+        servers = {}
+    servers[name] = server
+    data[key] = servers
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary = path + ".tmp"
+    with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.replace(temporary, path)
+    return path
+
+
+def install(app, folder):
+    """add the server to an app's settings. gives back the files written."""
+    return [add_to_config(path, key, server) for path, key, server in app_config_files(app, folder)]
 
 
 def self_test(folder, timeout=30):
@@ -956,8 +1138,14 @@ def self_test(folder, timeout=30):
     import subprocess
     server = client_config(folder)["mcpServers"]["gublan"]
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    environment = None
+    try:  # a clean environment, like an ai app gives it (the exe must not reuse this copy's unpacked files)
+        from studio import updater
+        environment = updater.installer_environment()
+    except Exception:  # noqa: BLE001
+        environment = None
     process = subprocess.Popen([server["command"]] + server["args"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, creationflags=flags)
+                               stderr=subprocess.PIPE, creationflags=flags, env=environment)
     try:
         messages = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
                      "params": {"protocolVersion": DEFAULT_PROTOCOL, "capabilities": {},
@@ -965,7 +1153,10 @@ def self_test(folder, timeout=30):
                     {"jsonrpc": "2.0", "method": "notifications/initialized"},
                     {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}]
         data = "".join(json.dumps(message) + "\n" for message in messages).encode("utf-8")
-        output, _errors = process.communicate(data, timeout=timeout)
+        output, errors = process.communicate(data, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise OSError(f"the server did not answer within {timeout} seconds") from None
     except Exception:
         process.kill()
         raise
@@ -975,9 +1166,11 @@ def self_test(folder, timeout=30):
             reply = json.loads(line)
         except ValueError:
             raise OSError(f"the server wrote something that is not json: {line[:80]}") from None
-        replies[reply.get("id")] = reply
+        if isinstance(reply, dict):
+            replies[reply.get("id")] = reply
     if 2 not in replies or "result" not in replies[2]:
-        raise OSError("the server did not answer")
+        said = errors.decode("utf-8", errors="replace").strip().splitlines()
+        raise OSError("the server did not answer" + (f": {said[-1][:200]}" if said else ""))
     return [tool["name"] for tool in replies[2]["result"]["tools"]]
 
 

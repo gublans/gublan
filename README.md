@@ -23,13 +23,68 @@ JavaScript, and Lua.
 - **Convert existing code:** translate Python, JavaScript, and Lua code, including pygame, p5.js, LÖVE, and
   canvas games, into Gublan.
 - **Export projects:** package a Gublan game as a Windows executable, or export it as Python, JavaScript, or Lua.
-- **Code together:** host a live session on your computer so others on your network can edit with you.
+- **Code together:** host a live session on your computer so others on your network can edit with you. Guests
+  can run shared programs with the host's pictures, sounds, and music.
 - **AI helpers:** connect Claude, Copilot, Cursor, or another MCP client to read, write, check, run, test, and
-  screenshot your project.
-- **Make it yours:** choose a theme or write your own, and add commands with plugins and modules.
+  screenshot your project. Gublan Studio can add itself to Claude Desktop and Cursor for you.
+- **Make it yours:** choose a theme or write your own, and add commands with plugins and modules. Themes switch
+  instantly.
+- **Your work is safe:** unsaved programs are copied every few seconds and offered back if the studio ever
+  closes unexpectedly.
 - **Save between runs:** `save` and `load` keep high scores and settings after a program closes.
 - **Discord status:** show what you're making on Discord. You can change the wording, pictures and
   button, or turn it off. Programs can set their own status with `presence`.
+
+## What's new in 1.0.6
+
+**Fewer crashes**
+
+- Gublan Studio no longer crashes at random while it checks your code, runs tests, exports, converts code, or
+  tests the MCP server. Background work used to hand its results to the window in a way Tk doesn't allow from
+  other threads. It now goes through a safe queue. Python's memory clean-up also runs only on the window's
+  thread, which stops another rare crash.
+- Choosing a theme no longer crashes the studio. Themes now switch instantly, without a restart. Restarting
+  (for a theme, a plugin change, or an update) also no longer crashes the installed app.
+- If the studio ever closes unexpectedly, the next start offers to restore every program you hadn't saved.
+  Unsaved programs are copied to the settings folder every 15 seconds.
+- **Help > Report a problem** shows the latest entries from `errors.log` and `crash.log`, ready to copy into a bug
+  report.
+
+**Opening files**
+
+- Pictures, sounds, archives, and other binary files open in their folder instead of loading into the editor as
+  text.
+- Files saved as UTF-16 (Notepad's "Unicode") or Windows-1252 now open correctly. They are saved as UTF-8.
+- Gublan Studio asks before opening files larger than 2 MB or with very long lines, and offers to show files
+  larger than 40 MB in their folder instead.
+- Files too large for the blocks view stay in code view instead of freezing the window.
+- When another program changes an open file, such as an AI helper, another editor, or git, Gublan Studio
+  reloads it. If you also have unsaved changes, it asks which version to keep. **File > Reload from disk**
+  reloads a file manually. You can turn off automatic reloading in `settings.json` with `reload_changed_files`.
+
+**Live sessions**
+
+- Guests can run shared programs that use pictures, sounds, music, included files, and modules from the host's
+  computer. The studio downloads each file the first time a program needs it and keeps it for the rest of the
+  session. If the file changes on the host, the guest downloads it again.
+- Only files inside the folder of the host's saved program can be shared, and only pictures, sounds, music,
+  fonts, 3D models, and Gublan, text, JSON, or CSV files up to 64 MB. The host can turn file sharing off when
+  starting a session.
+- Hosts and guests both need 1.0.6 to share files. Editing together still works with 1.0.5.
+
+**AI helpers (MCP)**
+
+- **Tools > Connect an AI helper** has separate choices for Claude Code, Claude Desktop, Cursor, and VS Code.
+  **Add it to Claude Desktop** and **Add it to Cursor** write the app's settings file for you, keep everything
+  already in it, and save the old file as `.bak`. This includes the Microsoft Store version of Claude Desktop,
+  which keeps its settings in a different folder.
+- The Claude Code command now uses `--scope user`, so it works from any folder.
+- The server starts even when an AI app passes a folder with quotes, a trailing slash, or a folder that doesn't
+  exist. If an app starts the server without a folder, it uses the current folder when it contains Gublan
+  programs, then the project last opened in Gublan Studio, then `Documents\Gublan`. It no longer uses the
+  app's own install folder.
+- Output from libraries and programs started by tools can't mix with the server's messages anymore.
+- **Test it** shows the server's own error message when it fails to start.
 
 ## What's new in 1.0.5
 
@@ -171,13 +226,22 @@ py gublancli.py docs
 
 `translate` accepts `python`, `javascript`, or `lua`. `mcp` starts the MCP server for a project folder. To use
 it from an MCP client such as Claude Code, add a server that runs `py gublancli.py mcp <folder>`. The installed
-app can run it with `GublanStudio.exe --mcp <folder>`.
+app can run it with `GublanStudio.exe --mcp <folder>`. The easiest setup is **Tools > Connect an AI helper**,
+which writes the configuration for Claude Desktop, Cursor, VS Code, or a Claude Code project for you.
+
+If an AI helper says the server failed to start, open **Tools > Connect an AI helper** and press **Test it**.
+For Claude Desktop, quit it completely (including from the system tray) after adding the server, then open it
+again.
 
 ## Live sessions
 
 One person starts a session with **Tools > Code together > Start a live session**. Then **How to join** copies
 the address, port, and join code. Others choose **Join a live session** and enter their name, the address, and
 the code. A session holds up to 16 people, including the host, and every open file is shared.
+
+When a guest runs a shared program, the guest's studio downloads each picture, sound, music file, include, and
+module the program uses from the folder of the host's saved program. Copies are kept in a temporary folder until
+the session ends. Only files inside that folder are shared, and the host can turn this off in the start window.
 
 Live sessions use port 47800 by default. You can change the port when you start a session. Windows may ask
 whether to allow Gublan Studio through the firewall. To join from outside your network, the host must forward
@@ -187,11 +251,13 @@ the port on their router.
 
 These files live in the Gublan Studio settings folder (`%APPDATA%\GublanStudio`):
 
-| Folder | Contents |
+| Folder or file | Contents |
 | --- | --- |
 | `themes\` | JSON themes. Each theme can extend a built-in theme with `base` and override `colors` and `syntax`. |
 | `plugins\` | Python plugins with a `setup(api)` function. `hello.py` is an example. |
 | `modules\` | `.gubl` files that any program can load with `use`. |
+| `recovery\` | Copies of unsaved programs, used to restore them after a crash. |
+| `errors.log`, `crash.log` | Problems the studio recorded. **Help > Report a problem** shows them. |
 
 A program's own `modules` folder takes priority over your settings folder, and both take priority over the
 built-in modules.
@@ -215,7 +281,7 @@ To release a new version:
 1. Change `VERSION` in [`studio/version.py`](studio/version.py). This is the only place the version is written.
 2. Run `build.ps1`.
 3. Push the source to GitHub.
-4. Create a public release whose tag is exactly the new version, for example `1.0.5`. Don't add a `v` prefix.
+4. Create a public release whose tag is exactly the new version, for example `1.0.6`. Don't add a `v` prefix.
 5. Attach `dist\GublanStudioSetup.exe` to the release without renaming it.
 
 The installer will not build if its version doesn't match `VERSION`. The updater looks for that exact installer
@@ -244,7 +310,7 @@ py -m unittest discover -s tests
 | `gublanmcp.py` | MCP server for AI helpers |
 | `modules/` | Built-in modules for `use` |
 | `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
-| `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`) and plugins (`plugins.py`) |
+| `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`), plugins (`plugins.py`), crash protection and recovery (`guard.py`), and file reading (`textfiles.py`) |
 | `gublancli.py` | Command-line interface |
 | `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
 | `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |

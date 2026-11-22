@@ -283,22 +283,46 @@ to join: join a live session, type your name (you need one to join), the address
 
 everyone's cursor shows in their own colour with their name. who is here lists everyone and send a
 message chats with them. when the session ends, everyone's tabs stay open, so nothing is lost.
-people outside your network need the port (47800 unless you changed it) let through the router."""),
+people outside your network need the port (47800 unless you changed it) let through the router.
+
+pictures, sounds and music come from the host's computer. when a guest runs a shared program, every
+image, sound, music and include file it needs is fetched from the folder the host's program is saved
+in, and kept until the session ends. only files inside that folder are shared, and the host can turn
+it off when starting the session. the host has to save the program first, so it has a folder."""),
 
     ("ai helpers", """tools > connect an ai helper (mcp) shows how to connect claude, copilot, cursor and other ai
 helpers to your project. they can read and write files, check code, run programs and tests, take
 screenshots of the game window and look up commands.
 
+for claude desktop and cursor, choose the app and press "add it to ...": gublan studio puts itself in
+that app's settings file (it keeps a .bak copy of the old one). then quit the app completely and
+open it again. for claude code and vs code, "save in the project" writes the project's settings file.
+"test it" starts the server the same way the ai app does and tells you if it works.
+
 the server only works inside the project folder. you can start it yourself with:
-py gublancli.py mcp my project folder"""),
+py gublancli.py mcp my project folder
+
+when the helper changes a file you have open, gublan studio loads the new version by itself. if you
+changed it too, it asks which one to keep."""),
 
     ("themes and plugins", """tools > settings, under look, picks a theme: moss, midnight, ember, paper or contrast.
-themes are json files, so you can make your own in the themes folder. the same section turns
-the animations off.
+the new colours show straight away, no restart needed. themes are json files, so you can make your
+own in the themes folder. the same section turns the animations off.
 
 plugins are python files that add commands, functions and menu items. switch them on in settings,
 then put them in the plugins folder. hello.py shows how one works. only use plugins you trust,
 because they can do anything a program on your computer can."""),
+
+    ("when something goes wrong", """gublan studio copies your unsaved programs every few seconds. if it ever closes without
+asking, the next time it opens it offers to bring them back.
+
+help > report a problem shows the last errors and crashes it wrote down, ready to copy into a bug
+report. the files are errors.log and crash.log in the settings folder.
+
+files: pictures, sounds and other files that are not text open in their folder instead of the
+editor. very big files ask first, and files saved as utf-16 (notepad's "unicode") or windows-1252
+open correctly and are saved as utf-8. when another program changes a file you have open, it is
+loaded again (file > reload from disk does it by hand)."""),
 
     ("keyboard shortcuts", """f5 run or continue      shift+f5 stop        f10 step         f9 breakpoint
 ctrl+s save            ctrl+o open          ctrl+n new       ctrl+w close tab

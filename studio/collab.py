@@ -13,14 +13,24 @@ how edits stay in step:
     asks for a fresh copy, so a rare mix-up never lasts.
 
 messages are json, one per line, over tcp.
+
+files from the host's computer (1.0.6): a guest who runs a shared program has no copy of its pictures, sounds,
+music or included files. when the program needs one, the guest asks the host for it ("asset"); the host sends
+it in pieces ("asset_data") if it is inside that program's folder and is a media or code file. the guest keeps a
+copy in a temporary folder and only downloads it again when the host's copy changes.
 """
 
+import base64
 import hmac
 import json
+import os
 import queue
 import secrets
+import shutil
 import socket
+import tempfile
 import threading
+import time
 import zlib
 
 PROTOCOL = "gublan-live/1"
@@ -31,6 +41,12 @@ MAX_HISTORY = 4000
 MAX_NAME = 24
 CODE_LETTERS = "abcdefghjkmnpqrstuvwxyz23456789"
 COLORS = ("#e0a050", "#6fb3e0", "#d77fb3", "#9fd36f", "#e07070", "#b39ae0", "#5fd0c0", "#e0d060")
+FEATURES = ("assets",)
+ASSET_TYPES = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".tga", ".wav", ".ogg", ".mp3", ".flac", ".opus",
+               ".gubl", ".gub", ".txt", ".json", ".csv", ".ttf", ".otf", ".obj", ".mtl")
+MAX_ASSET = 64 * 1024 * 1024
+ASSET_CHUNK = 384 * 1024
+ASSET_WAIT = 20.0  # seconds without a piece of the file before a guest gives up
 
 
 # ----- edits ------------------------------------------------------------------------------------------------
@@ -157,10 +173,11 @@ def local_addresses():
 class Connection:
     """one tcp connection: a thread reads lines into the inbox, another writes the outbox."""
 
-    def __init__(self, sock, inbox, key):
+    def __init__(self, sock, inbox, key, intercept=None):
         self.sock = sock
         self.inbox = inbox
         self.key = key
+        self.intercept = intercept  # called on the reader thread; True means "handled, don't queue it"
         self.outbox = queue.Queue()
         self.closed = False
         threading.Thread(target=self._read, daemon=True).start()
@@ -196,6 +213,8 @@ class Connection:
                 except (ValueError, UnicodeDecodeError):
                     break
                 if isinstance(message, dict):
+                    if self.intercept is not None and self.intercept(message):
+                        continue
                     self.inbox.put((self.key, message))
         except OSError:
             pass
@@ -211,6 +230,203 @@ class Connection:
             except OSError:
                 self.inbox.put((self.key, {"type": "_closed"}))
                 return
+
+
+# ----- files from the host -------------------------------------------------------------------------------------
+def clean_relative(path):
+    """a relative path a program asked for, with / separators, or None if it tries to leave its folder."""
+    path = str(path or "").strip().strip('"').strip("'").replace("\\", "/")
+    if not path or path.startswith("/") or ":" in path or len(path) > 260:
+        return None
+    parts = [part for part in path.split("/") if part not in ("", ".")]
+    if not parts or any(part == ".." for part in parts):
+        return None
+    return "/".join(parts)
+
+
+def file_checksum(path):
+    value = 0
+    with open(path, "rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                return value & 0xFFFFFFFF
+            value = zlib.crc32(block, value)
+
+
+def host_path(folder, relative):
+    """the real file for a guest's request, or (None, why not)."""
+    relative = clean_relative(relative)
+    if relative is None:
+        return None, "only files inside the program's folder can be shared"
+    if os.path.splitext(relative)[1].lower() not in ASSET_TYPES:
+        return None, "only pictures, sounds, music and gublan files can be shared"
+    root = os.path.realpath(folder)
+    path = os.path.realpath(os.path.join(root, *relative.split("/")))
+    try:
+        inside = os.path.commonpath([root, path]) == root
+    except ValueError:
+        inside = False
+    if not inside:
+        return None, "only files inside the program's folder can be shared"
+    if not os.path.isfile(path):
+        return None, "the host doesn't have that file either"
+    if os.path.getsize(path) > MAX_ASSET:
+        return None, f"it is bigger than {MAX_ASSET // (1024 * 1024)} mb"
+    return path, ""
+
+
+class HostFiles:
+    """guest side: fetch the files a running program needs from the host and keep copies of them.
+
+    fetch() is called by the program's thread and waits; the answer is put together on the network thread.
+    """
+
+    def __init__(self, session):
+        self.session = session
+        self.root = None  # the temporary folder, made the first time a program runs
+        self.lock = threading.Lock()
+        self.pending = {}
+        self.counter = 0
+
+    def folder_for(self, file_id):
+        with self.lock:
+            if self.root is None:
+                self.root = tempfile.mkdtemp(prefix="gublan-live-")
+        folder = os.path.join(self.root, "".join(ch for ch in str(file_id) if ch.isalnum()) or "file")
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def fetcher(self, file_id, log=None, shouldstop=None):
+        """the runtime's fetchfile hook for one shared file: relative path -> local copy (or None)."""
+        checked = {}
+
+        def fetch(relative):
+            if "assets" not in self.session.host_features:
+                if log is not None and None not in checked:
+                    checked[None] = None
+                    log(f"[live] {self.session.host_name}'s gublan studio is older than 1.0.6, so it can't share "
+                        "its pictures, sounds and included files")
+                return None
+            relative = clean_relative(relative)
+            if relative is None:
+                return None
+            if relative not in checked:
+                checked[relative] = self.fetch(file_id, relative, log=log, shouldstop=shouldstop)
+            return checked[relative]
+
+        return fetch
+
+    def fetch(self, file_id, relative, log=None, shouldstop=None):
+        session = self.session
+        if not session.active or session.link is None or "assets" not in session.host_features:
+            return None
+        relative = clean_relative(relative)
+        if relative is None:
+            return None
+        local = os.path.join(self.folder_for(file_id), *relative.split("/"))
+        have = None
+        if os.path.isfile(local):
+            try:
+                have = file_checksum(local)
+            except OSError:
+                have = None
+        with self.lock:
+            self.counter += 1
+            request = self.counter
+            entry = {"event": threading.Event(), "status": None, "reason": "", "pieces": {}, "count": 0,
+                     "size": 0, "crc": None, "heard": time.monotonic()}
+            self.pending[request] = entry
+        session.link.send({"type": "asset", "req": request, "file": file_id, "path": relative, "have": have})
+        try:
+            told = False
+            while not entry["event"].wait(0.1):
+                if not session.active or (shouldstop is not None and shouldstop()):
+                    return local if have is not None else None
+                if time.monotonic() - entry["heard"] > ASSET_WAIT:
+                    if log:
+                        log(f"[live] the host did not send {relative} in time")
+                    return local if have is not None else None
+                if not told and log and time.monotonic() - entry["heard"] > 0.6:
+                    told = True
+                    log(f"[live] getting {relative} from {session.host_name}...")
+        finally:
+            with self.lock:
+                self.pending.pop(request, None)
+        status = entry["status"]
+        if status == "same":
+            return local
+        if status != "ok":
+            if log and entry["reason"]:
+                log(f"[live] {session.host_name} can't share {relative}: {entry['reason']}")
+            return None
+        data = b"".join(entry["pieces"][index] for index in range(entry["count"]))
+        if len(data) != entry["size"] or (zlib.crc32(data) & 0xFFFFFFFF) != entry["crc"]:
+            if log:
+                log(f"[live] {relative} arrived broken. run again to try once more.")
+            return None
+        os.makedirs(os.path.dirname(local), exist_ok=True)
+        temporary = local + ".part"
+        with open(temporary, "wb") as handle:
+            handle.write(data)
+        os.replace(temporary, local)
+        return local
+
+    def receive(self, message):
+        """network thread: one piece of an answer. returns True when the message was an answer."""
+        if message.get("type") != "asset_data":
+            return False
+        with self.lock:
+            entry = self.pending.get(message.get("req"))
+        if entry is None:
+            return True
+        entry["heard"] = time.monotonic()
+        status = message.get("status")
+        if status != "ok":
+            entry["status"], entry["reason"] = status, str(message.get("reason", ""))[:200]
+            entry["event"].set()
+            return True
+        try:
+            index, count = int(message.get("index", 0)), max(1, int(message.get("count", 1)))
+            entry["pieces"][index] = base64.b64decode(message.get("data", ""))
+            entry["count"], entry["size"], entry["crc"] = count, int(message.get("size", 0)), message.get("crc")
+        except (TypeError, ValueError):
+            entry["status"], entry["reason"] = "broken", "a piece of the file was broken"
+            entry["event"].set()
+            return True
+        if len(entry["pieces"]) >= count:
+            entry["status"] = "ok"
+            entry["event"].set()
+        return True
+
+    def clean_up(self):
+        with self.lock:
+            for entry in self.pending.values():
+                entry["event"].set()
+            root, self.root = self.root, None
+        if root:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def send_file(connection, request, path, have):
+    """host side, on a worker thread: send one file to a guest in pieces."""
+    try:
+        crc = file_checksum(path)
+        if have is not None and have == crc:
+            connection.send({"type": "asset_data", "req": request, "status": "same"})
+            return 0
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError as err:
+        connection.send({"type": "asset_data", "req": request, "status": "missing",
+                         "reason": str(err).lower()[:200]})
+        return 0
+    count = max(1, -(-len(data) // ASSET_CHUNK))
+    for index in range(count):
+        piece = data[index * ASSET_CHUNK:(index + 1) * ASSET_CHUNK]
+        connection.send({"type": "asset_data", "req": request, "status": "ok", "index": index, "count": count,
+                         "size": len(data), "crc": crc, "data": base64.b64encode(piece).decode("ascii")})
+    return len(data)
 
 
 # ----- shared state for one file -----------------------------------------------------------------------------
@@ -254,6 +470,10 @@ class LiveSession:
         self.poll_job = None
         self.on_end = None
         self.host_name = "the host"
+        self.host_features = ()
+        self.share_files = True  # host: answer guests' requests for pictures, sounds and included files
+        self.sent = set()  # host: (person, path) already mentioned in the output
+        self.host_files = None if host else HostFiles(self)
 
     # ----- starting -----------------------------------------------------------------------------------------
     def start_host(self, port=DEFAULT_PORT, code=None):
@@ -284,7 +504,7 @@ class LiveSession:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.code = code
         self.port = int(port)
-        self.link = Connection(sock, self.inbox, "host")
+        self.link = Connection(sock, self.inbox, "host", intercept=self.host_files.receive)
         self.link.send({"type": "hello", "protocol": PROTOCOL, "name": self.name, "code": code})
 
     def begin_polling(self):
@@ -484,6 +704,7 @@ class LiveSession:
             for shared in self.files.values():
                 self.flush(shared)
             connection.send({"type": "welcome", "you": key, "name": name, "host": self.name,
+                             "features": list(FEATURES) if self.share_files else [],
                              "people": self._people_list(),
                              "files": [{"file": shared.id, "name": shared.name, "text": shared.shadow,
                                         "seq": shared.seq} for shared in self.files.values()]})
@@ -533,6 +754,51 @@ class LiveSession:
             if text.strip():
                 self._broadcast({"type": "chat", "from": person["name"], "text": text}, skip=key)
                 self.app.live_message(f"{person['name']}: {text}", "chat")
+        elif kind == "asset":
+            self._host_asset(key, person, connection, message)
+
+    def folder_of(self, shared):
+        """host: the folder a shared program's files come from (its own folder, or the open project folder)."""
+        doc = shared.doc
+        folder = getattr(doc, "folder", None) if doc is not None else None
+        if not folder:
+            settings = getattr(self.app, "settings", None) or {}
+            folder = settings.get("folder") or None
+        return folder if folder and os.path.isdir(folder) else None
+
+    def _host_asset(self, key, person, connection, message):
+        request = message.get("req")
+        if not isinstance(request, int):
+            raise ValueError("a broken file request")
+        shared = self.files.get(message.get("file"))
+
+        def refuse(reason):
+            connection.send({"type": "asset_data", "req": request, "status": "refused", "reason": reason})
+
+        if not self.share_files:
+            return refuse("the host turned off sharing files")
+        if shared is None:
+            return refuse("that program is no longer shared")
+        folder = self.folder_of(shared)
+        if folder is None:
+            return refuse("the host hasn't saved this program yet, so it has no folder")
+        path, why = host_path(folder, message.get("path"))
+        if path is None:
+            return refuse(why)
+        have = message.get("have") if isinstance(message.get("have"), int) else None
+        relative = clean_relative(message.get("path"))
+        note = (key, relative)
+        if note not in self.sent:
+            self.sent.add(note)
+            self.app.live_message(f"sending {relative} to {person['name']}")
+        threading.Thread(target=send_file, args=(connection, request, path, have), daemon=True).start()
+
+    def guest_file_for(self, doc):
+        """guest: the shared file shown in a tab (None for your own programs)."""
+        for shared in self.files.values():
+            if shared.doc is doc:
+                return shared
+        return None
 
     def _refuse(self, key, reason):
         connection = self.connections.get(key)
@@ -564,6 +830,9 @@ class LiveSession:
             self.me = message["you"]
             self.name = message.get("name", self.name)
             self.host_name = message.get("host", "the host")
+            features = message.get("features")
+            self.host_features = tuple(item for item in features if isinstance(item, str)) \
+                if isinstance(features, list) else ()
             self._set_people(message.get("people", []))
             for item in message.get("files", []):
                 self._guest_file(item)
@@ -705,6 +974,8 @@ class LiveSession:
                     pass
         elif self.link is not None:
             self.link.close()
+        if self.host_files is not None:
+            self.host_files.clean_up()
         if reason:
             self.app.live_message(reason)
         if self.on_end:

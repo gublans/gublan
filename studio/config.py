@@ -28,6 +28,7 @@ DEFAULTS = {
     "show_variables_on_run": True,
     "focus_window_on_run": True,
     "autosave": False,
+    "reload_changed_files": True,
     "restore_session": True,
     "show_welcome": True,
     "side_panel": "files",
@@ -70,6 +71,7 @@ DEFAULTS = {
     "disabled_plugins": [],
     "live_name": "",
     "live_port": 47800,
+    "live_share_files": True,
     "live_address": "",
 }
 

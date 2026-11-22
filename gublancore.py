@@ -1290,8 +1290,12 @@ MAX_SAVED_NAMES = 1000
 
 class GublanRuntime:
     def __init__(self, onlog=None, ondebug=None, shouldstop=None, waitstep=None, base_dir=None,
-                 onerror=None, hold_window=False, oninput=None, onpopup=None, onpresence=None, save_name=None):
+                 onerror=None, hold_window=False, oninput=None, onpopup=None, onpresence=None, save_name=None,
+                 fetchfile=None):
         self.onlog = onlog or print
+        # fetchfile(relative path) -> a local path or None. gublan studio sets it for a program shared in a live
+        # session, so pictures, sounds and included files come from the host's computer
+        self.fetchfile = fetchfile
         self.ondebug = ondebug
         self.onerror = onerror
         self.oninput = oninput
@@ -2427,6 +2431,11 @@ class GublanRuntime:
                 if len(parts) != 2:
                     raise ValueError(f"{where}: write it as use <module-name>")
                 path = find_module(str(parts[1]), base_dir)
+                if path is None and self.fetchfile is not None:
+                    for candidate in (f"modules/{parts[1]}.gubl", f"{parts[1]}.gubl"):
+                        path = self._fetched(candidate, base_dir)
+                        if path:
+                            break
                 if path is None:
                     raise ValueError(f"{where}: there is no module named '{parts[1]}'. modules are .gubl files in "
                                      "a modules folder")
@@ -2440,6 +2449,9 @@ class GublanRuntime:
                     raise ValueError(f"{where}: use include <relative-script-path>")
                 include_path = " ".join(parts[1:])
                 path = os.path.realpath(os.path.join(base_dir, include_path))
+                fetched = self._fetched(include_path.strip('"').strip("'"), base_dir)
+                if fetched:
+                    path = os.path.realpath(fetched)
             if path in include_stack:
                 raise ValueError(f"{where}: '{include_path}' creates a recursive include")
             try:
@@ -3604,8 +3616,22 @@ class GublanRuntime:
             return format_value(value)
         return str(token)
 
+    def _fetched(self, relative_path, base_dir=None):
+        """ask fetchfile for a file (a live session guest gets it from the host). None when there is no copy."""
+        if self.fetchfile is None:
+            return None
+        relative = str(relative_path)
+        if base_dir is not None and os.path.abspath(base_dir) != self.base_dir:
+            relative = os.path.relpath(os.path.join(base_dir, relative), self.base_dir)
+        try:
+            path = self.fetchfile(relative.replace(os.sep, "/"))
+        except Exception:  # noqa: BLE001 - a network problem is reported as "not found"
+            return None
+        return path if path and os.path.isfile(path) else None
+
     def _media_path(self, relative_path, what):
         path = os.path.abspath(os.path.join(self.base_dir, relative_path))
+        path = self._fetched(relative_path) or path
         if not os.path.isfile(path):
             raise ValueError(f"{what} file '{relative_path}' was not found")
         return path

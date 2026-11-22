@@ -238,6 +238,11 @@ class CodeEditor(tk.Frame):
         self.text.bind("<Configure>", lambda _e: self._schedule("gutter", 0, self.draw_gutter), add="+")
 
     # ----- setup ---------------------------------------------------------------------
+    def theme_changed(self):
+        """the theme changed while the studio is open (see theme.switch_theme)."""
+        self._configure_tags()
+        self._schedule("gutter", 0, self.draw_gutter)
+
     def _configure_tags(self):
         text = self.text
         text.tag_configure("currentline", background=ACTIVE_LINE)

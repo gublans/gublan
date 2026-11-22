@@ -747,7 +747,7 @@ class AssetsPanel(tk.Frame):
         extension = os.path.splitext(path)[1].lower()
         size = os.path.getsize(path) if os.path.exists(path) else 0
         info = f"{os.path.basename(path)}\n{size // 1024 if size >= 1024 else size} {'kb' if size >= 1024 else 'bytes'}"
-        if extension in (".png", ".gif"):
+        if extension in (".png", ".gif") and size <= 8 * 1024 * 1024:
             try:
                 image = tk.PhotoImage(file=path)
                 width, height = image.width(), image.height()
@@ -760,11 +760,16 @@ class AssetsPanel(tk.Frame):
                     image = image.zoom(zoom, zoom)
                 self.preview_image = image
                 self.preview_label.configure(image=image, text="", compound="center")
-                Tooltip(self.preview_label, f"{info}\n{width} x {height} pixels")
+                # one tooltip, updated (1.0.5 added a new one for every picture clicked)
+                if getattr(self, "preview_tip", None) is None:
+                    self.preview_tip = Tooltip(self.preview_label, "")
+                self.preview_tip.text = lower(f"{info}\n{width} x {height} pixels")
                 return
             except tk.TclError:
                 pass
         self.preview_label.configure(image="", text=info, fg=MUTED)
+        if getattr(self, "preview_tip", None) is not None:
+            self.preview_tip.text = ""
 
     def code_for(self, path):
         relative = self.relative(path)

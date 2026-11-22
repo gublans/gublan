@@ -468,6 +468,10 @@ class BlocksView(tk.Frame):
         self.on_change(source)
 
     # ----- rendering ------------------------------------------------------------------------
+    def theme_changed(self):
+        """the theme changed while the studio is open: draw the blocks again in the new colours."""
+        self.render()
+
     def render(self):
         top = self.scroll.canvas.yview()[0]
         for child in self.list.winfo_children():

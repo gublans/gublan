@@ -10,7 +10,7 @@ from tkinter import filedialog, ttk
 
 from gublancore import COMMAND_SPECS
 
-from . import config, exporter, theme
+from . import config, exporter, guard, theme
 from .editor import line_tokens
 from .templates import TEMPLATES
 from .theme import (
@@ -79,6 +79,18 @@ class Dialog(tk.Toplevel):
 
     def cancel(self):
         self.close(None)
+
+
+def from_thread(widget, func, *args):
+    """hand a worker thread's result to the tk thread (calling widget.after from a thread can crash tcl)."""
+    def call():
+        try:
+            alive = widget.winfo_exists()
+        except tk.TclError:
+            alive = False
+        if alive:
+            func(*args)
+    guard.call_soon(call)
 
 
 def message(parent, title, text, kind="info", details=None):
@@ -232,6 +244,7 @@ class SettingsDialog(Dialog):
         self._heading(page, "look")
         names = theme.theme_names()
         self.theme_var = tk.StringVar(value=self.settings.get("theme", theme.DEFAULT_THEME))
+        self._first_theme = self.theme_var.get()
         for start in range(0, len(names), 5):
             row = tk.Frame(page, bg=PANEL)
             row.pack(fill="x", pady=px(2))
@@ -247,7 +260,7 @@ class SettingsDialog(Dialog):
         self.theme_about.pack(fill="x", pady=(px(2), 0))
         row = tk.Frame(page, bg=PANEL)
         row.pack(fill="x", pady=(px(4), px(4)))
-        self.restart_button = BracketButton(row, "restart to see it", command=self._restart, kind="accent", size=9,
+        self.restart_button = BracketButton(row, "restart for a clean redraw", command=self._restart, size=9,
                                             bg=PANEL)
         self.themes_button = BracketButton(row, "open the themes folder", command=self._themes_folder, size=9,
                                            bg=PANEL)
@@ -263,9 +276,9 @@ class SettingsDialog(Dialog):
         name = self.theme_var.get()
         spec = theme.theme_spec(name) or {}
         about = spec.get("about") or ("your own theme" if name not in theme.BUILTIN_THEMES else "")
-        waiting = name != theme.THEME_NAME
-        self.theme_about.configure(text=about + ("  the new look shows after a restart." if waiting else ""))
-        if waiting and self.app is not None:
+        changed = name != getattr(self, "_first_theme", name)
+        self.theme_about.configure(text=about + ("  a few shades only change after a restart." if changed else ""))
+        if changed and self.app is not None:
             self.restart_button.pack(side="left", padx=(0, px(8)), before=self.themes_button)
         else:
             self.restart_button.pack_forget()
@@ -301,8 +314,13 @@ class SettingsDialog(Dialog):
         if not found:
             tk.Label(page, text="no plugins yet. the folder button adds an example to copy.", bg=PANEL, fg=DIM,
                      font=ui_font(9), anchor="w").pack(fill="x", padx=(px(24), 0))
-        BracketButton(page, "open the plugins folder", command=self._plugins_folder, size=9, bg=PANEL).pack(
-            anchor="w", pady=(px(6), 0))
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=(px(6), 0))
+        BracketButton(row, "open the plugins folder", command=self._plugins_folder, size=9, bg=PANEL).pack(
+            side="left")
+        if self.app is not None:
+            BracketButton(row, "restart now", command=self._restart, size=9, bg=PANEL).pack(side="left",
+                                                                                             padx=(px(8), 0))
 
     def _plugin_on(self, key, on):
         disabled = [name for name in self.settings.get("disabled_plugins", []) if name != key]
@@ -564,7 +582,7 @@ class ConvertDialog(Dialog):
             except Exception as err:  # noqa: BLE001 - shown to the user
                 result, error = None, f"{type(err).__name__}: {err}"
             try:
-                self.after(0, self._finished, result, error)
+                from_thread(self, self._finished, result, error)
             except (tk.TclError, RuntimeError):
                 pass
 
@@ -794,6 +812,9 @@ class LiveDialog(Dialog):
             self._field(body, "code", self.code, "six letters and numbers", mono=True)
         self._field(body, "port", self.port, "47800 unless the host changed it", mono=True, width=8)
         if host:
+            self.share_files = tk.BooleanVar(value=bool(settings.get("live_share_files", True)))
+            Toggle(body, "let people use pictures, sounds and included files from my program's folder",
+                   self.share_files, bg=PANEL).pack(anchor="w", pady=(px(8), 0))
             tk.Label(body, text="windows may ask if gublan studio can use the network the first time. allow it "
                                 "on private networks so people can reach you.",
                      bg=PANEL, fg=DIM, font=ui_font(8), justify="left", anchor="w",
@@ -841,6 +862,8 @@ class LiveDialog(Dialog):
             self.settings["live_address"] = address
         self.settings["live_name"] = name
         self.settings["live_port"] = port
+        if self.host:
+            self.settings["live_share_files"] = bool(self.share_files.get())
         config.save(self.settings)
         self.close(answer)
 
@@ -874,9 +897,9 @@ class McpDialog(Dialog):
         row.pack(fill="x", pady=(0, px(6)))
         tk.Label(row, text="for", bg=PANEL, fg=MUTED, font=ui_font(10)).pack(side="left")
         names = list(gublanmcp.client_snippets(folder))
-        self.app_name = tk.StringVar(value=self.settings.get("mcp_app", names[0]))
-        if self.app_name.get() not in names:
-            self.app_name.set(names[0])
+        chosen = self.settings.get("mcp_app", names[0])
+        chosen = gublanmcp.OLD_APP_NAMES.get(chosen, chosen)
+        self.app_name = tk.StringVar(value=chosen if chosen in names else names[0])
         Segmented(row, [(name, name) for name in names], self.app_name, bg=PANEL, size=9,
                   command=lambda *_: self.refresh()).pack(side="left", padx=px(10))
         self.where_label = tk.Label(self.body, text="", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w")
@@ -892,8 +915,8 @@ class McpDialog(Dialog):
         self.status.pack(fill="x", pady=(px(8), 0))
 
         self.add_button("close", self.cancel, kind="ghost")
-        self.add_button("copy", self.copy, kind="accent", icon_name="copy")
-        self.save_button = self.add_button("save in the project", self.save_project_file, icon_name="save")
+        self.add_button("copy", self.copy, icon_name="copy")
+        self.save_button = self.add_button("add it for me", self.save_project_file, kind="accent", icon_name="save")
         self.add_button("test it", self.test, side="left")
         self.refresh()
 
@@ -903,16 +926,20 @@ class McpDialog(Dialog):
         if folder:
             self.folder.set(os.path.normpath(folder))
 
+    def chosen_folder(self):
+        return self.gublanmcp.clean_folder(self.folder.get()) or self.gublanmcp.default_folder()
+
     def refresh(self):
         name = self.app_name.get()
         self.settings["mcp_app"] = name
-        where, text = self.gublanmcp.client_snippets(self.folder.get().strip() or os.getcwd())[name]
+        where, text = self.gublanmcp.client_snippets(self.chosen_folder())[name]
         self.where_label.configure(text=where)
         self.snippet.configure(state="normal")
         self.snippet.delete("1.0", "end")
         self.snippet.insert("1.0", text)
         self.snippet.configure(state="disabled")
-        self.save_button.set_enabled(name != "claude desktop / cursor")
+        in_project = name in ("claude code", "vs code")
+        self.save_button.configure_text("save in the project" if in_project else f"add it to {name}")
 
     def copy(self):
         self.clipboard_clear()
@@ -920,41 +947,28 @@ class McpDialog(Dialog):
         self.status.configure(text="copied. paste it into the ai app's settings, then restart the app.",
                               fg=MOSS_LIGHT)
 
-    def project_file(self):
-        """(path, text) of the settings file that sits in the project for the chosen app."""
-        folder = self.folder.get().strip()
-        config_json = self.gublanmcp.client_config(folder)
-        if self.app_name.get() == "vs code":
-            server = config_json["mcpServers"]["gublan"]
-            data = {"servers": {"gublan": {"type": "stdio", "command": server["command"], "args": server["args"]}}}
-            return os.path.join(folder, ".vscode", "mcp.json"), data
-        return os.path.join(folder, ".mcp.json"), config_json
-
     def save_project_file(self):
-        import json
-        folder = self.folder.get().strip()
+        """add the server to the chosen app's settings (claude desktop, cursor) or the project's file."""
+        folder = self.gublanmcp.clean_folder(self.folder.get())
         if not folder or not os.path.isdir(folder):
             self.status.configure(text="choose a project folder that exists first", fg=ERROR)
             return
-        path, data = self.project_file()
+        name = self.app_name.get()
         try:
-            existing = {}
-            if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as handle:
-                    existing = json.load(handle)
-            key = "servers" if "servers" in data else "mcpServers"
-            existing.setdefault(key, {}).update(data[key])
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(existing, handle, indent=2)
-                handle.write("\n")
+            written = self.gublanmcp.install(name, folder)
         except (OSError, ValueError) as err:
-            self.status.configure(text=f"could not save {os.path.basename(path)}: {lower(str(err))}", fg=ERROR)
+            self.status.configure(text=f"could not save it: {lower(str(err))}", fg=ERROR)
             return
-        self.status.configure(text=f"saved {path}. the ai app finds it when it opens this folder.", fg=MOSS_LIGHT)
+        files = ", ".join(written)
+        if name in ("claude code", "vs code"):
+            text = f"saved {files}. the ai app finds it when it opens this folder."
+        else:
+            text = (f"added gublan to {files} (the old file is kept as .bak). quit {name} completely (also from "
+                    "the tray) and open it again.")
+        self.status.configure(text=text, fg=MOSS_LIGHT)
 
     def test(self):
-        folder = self.folder.get().strip()
+        folder = self.gublanmcp.clean_folder(self.folder.get())
         if not folder or not os.path.isdir(folder):
             self.status.configure(text="choose a project folder that exists first", fg=ERROR)
             return
@@ -968,7 +982,7 @@ class McpDialog(Dialog):
             except Exception as err:  # noqa: BLE001 - shown in the dialog
                 text, colour = f"the server did not start: {lower(str(err))}", ERROR
             try:
-                self.after(0, lambda: self.winfo_exists() and self.status.configure(text=text, fg=colour))
+                from_thread(self, lambda: self.status.configure(text=text, fg=colour))
             except (tk.TclError, RuntimeError):
                 pass
 
@@ -1124,7 +1138,7 @@ class ExportDialog(Dialog):
             else:
                 text, ok = "pyinstaller is not installed. it builds the .exe.", False
         try:
-            self.after(0, self._tool_checked, text, ok, broken)
+            from_thread(self, self._tool_checked, text, ok, broken)
         except (tk.TclError, RuntimeError):
             pass
 
@@ -1157,7 +1171,7 @@ class ExportDialog(Dialog):
             except OSError as err:
                 output, failed = str(err), True
             try:
-                self.after(0, self._installed, output, failed)
+                from_thread(self, self._installed, output, failed)
             except (tk.TclError, RuntimeError):
                 pass
 
@@ -1204,7 +1218,7 @@ class ExportDialog(Dialog):
 
     def report(self, status):
         try:
-            self.after(0, lambda: self.log.configure(text=lower(status), fg=MUTED))
+            from_thread(self, lambda: self.log.configure(text=lower(status), fg=MUTED))
         except (tk.TclError, RuntimeError):
             pass
 
