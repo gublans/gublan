@@ -54,6 +54,11 @@ fps 60
 score = 0
 lives = 3
 rocks = 6
+// the best score is saved on this computer, so it is still there next time
+load best best 0
+// shows on your discord profile while the discord app is open
+presence details dodging rocks
+presence timer
 
 color moss
 box player 300 440 40 14
@@ -68,7 +73,7 @@ for i = 0 to rocks - 1
 end
 
 color white
-text hud 12 10 score 0   lives 3
+text hud 12 10 score 0   lives 3   best {best}
 
 while lives > 0
     if keydown("left")
@@ -93,11 +98,17 @@ while lives > 0
         end
     end
 
-    text hud 12 10 score {score}   lives {lives}
+    text hud 12 10 score {score}   lives {lives}   best {max(best, score)}
+    presence state score {score}, {lives} lives left
     frame
 end
 
-popup game over! you scored {score}
+if score > best
+    save best score
+    popup a new best score: {score}!
+else
+    popup game over! you scored {score}. your best is {best}
+end
 """
 
 PLATFORMER = """// platformer: run with the arrow keys and jump with space. grab the coins.

@@ -206,7 +206,7 @@ def program_text(source, title, console):
 
 
 def core_folder():
-    """the folder that holds gublancore.py, for pyinstaller's --paths."""
+    """the folder that holds gublancore.py (and gublanpresence.py next to it), for pyinstaller's --paths."""
     if getattr(sys, "frozen", False):
         bundled = getattr(sys, "_MEIPASS", "")
         if os.path.isfile(os.path.join(bundled, "gublancore.py")):
@@ -249,7 +249,7 @@ def pyinstaller_command(python, name, script_path, build_dir, plan, console, one
         "--console" if console else "--noconsole",
         "--name", name, "--distpath", staged, "--workpath", os.path.join(build_dir, "work"),
         "--specpath", build_dir, "--paths", core_folder(), "--hidden-import", "gublancore",
-        "--collect-all", "OpenGL",
+        "--hidden-import", "gublanpresence", "--collect-all", "OpenGL",
     ]
     for module in ("tkinter", "numpy", "PIL", "matplotlib", "IPython", "pytest", "studio", "gublanconvert"):
         command.extend(["--exclude-module", module])

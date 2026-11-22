@@ -151,6 +151,30 @@ negative z is in front of the camera. camera x y z moves it."""),
 
 wav, ogg and mp3 files work."""),
 
+    ("saving", """save keeps a value on this computer, so it is still there the next time the program runs.
+load reads it back, with a value to use when nothing was saved yet.
+
+    load best best 0
+    // the game goes here
+    if score > best
+        save best score
+    end
+
+forget best deletes one saved value and forget all deletes every one. inside expressions,
+load("best", 0) and saved("best") work too. each program keeps its own saved values."""),
+
+    ("your discord status", """while the discord app is open, gublan studio shows what you are making on your discord
+profile. tools > settings, under discord, changes the words, the picture and the button, or turns it off.
+
+your programs can show their own status with presence while they run:
+
+    presence details exploring the caves
+    presence state level {level} of 5
+    presence timer
+    presence button https://example.com play it too
+
+exported games do the same for everyone who plays them. presence clear removes it."""),
+
     ("finding mistakes", """problems are underlined while you type and listed in the problems panel.
 hover a line to read what is wrong.
 

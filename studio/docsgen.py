@@ -19,6 +19,35 @@ CATEGORY_TITLES = {
     "input": "keyboard, mouse and questions",
     "sound": "sound and music",
     "web": "the web",
+    "saving": "saving values between runs",
+    "discord": "your discord status",
+}
+
+# a few words under a category heading, for ideas that need more than one command's summary
+CATEGORY_NOTES = {
+    "saving": "saved values are kept in a small file for each program (on windows in `%APPDATA%\\Gublan\\saves`), "
+              "so a high score or the level someone reached is still there next time. inside expressions, "
+              "`load(\"name\", default)` gives a saved value and `saved(\"name\")` checks for one.",
+    "discord": """while the discord app is open, `presence` lines change the status on your discord profile. in gublan
+studio they replace the studio's own status while the program runs (settings, under discord, turns this off).
+exported games show it too. discord updates every few seconds, so setting it often is fine.
+
+| line | what it shows |
+| --- | --- |
+| `presence details <text...>` | the first line of the status |
+| `presence state <text...>` | the second line |
+| `presence image <picture> [hover text...]` | the big picture: a picture's https address, or the name of one uploaded to your discord application |
+| `presence smallimage <picture> [hover text...]` | the small round picture in the corner of the big one |
+| `presence button <https-address> <label...>` | a button other people can click. two at most |
+| `presence party <players> <most-players>` | how full the group is, like (1 of 4) |
+| `presence timer` | how long since this line ran. `presence timer off` hides it |
+| `presence countdown <seconds>` | the time left |
+| `presence app <application id>` | use your own discord application instead of gublan studio's |
+| `presence clear` | remove everything the program set |
+
+a part written without values is removed, like `presence state`. the status says the program is playing gublan
+studio unless you make your own application at https://discord.com/developers/applications and use its id with
+`presence app`: then it shows your game's name and the pictures you upload there.""",
 }
 
 INTRO = """# gublan commands
@@ -194,6 +223,12 @@ print {double(21)}""",
 end
 call add_up 2 3
 print {result}""",
+    "presence": """presence details exploring the caves
+presence state level 1 of 5
+presence timer
+presence button https://github.com/gublans/gublan get gublan""",
+    "load": """load best highscore 0
+print the best score so far is {highscore}""",
 }
 
 
@@ -231,6 +266,12 @@ SETUP = {
     "keypressed": "mode 2d",
     "mouse": "mode 2d",
     "mousebutton": "mode 2d",
+    "insert": "list fruit apple pear",
+    "remove": "list fruit apple pear",
+    "shuffle": "list fruit apple pear",
+    "sort": "list scores 30 10 20",
+    "cursor": "mode 2d",
+    "save": "score = 120",
 }
 
 
@@ -262,6 +303,9 @@ def commands_markdown():
             continue
         lines.append(f"## {CATEGORY_TITLES.get(category, category)}")
         lines.append("")
+        if category in CATEGORY_NOTES:
+            lines.append(CATEGORY_NOTES[category])
+            lines.append("")
         for name, (_cat, usage, _min_args, summary, example) in entries:
             lines.append(f"### `{name}`")
             lines.append("")

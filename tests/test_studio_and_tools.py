@@ -117,8 +117,9 @@ class UpdaterTests(unittest.TestCase):
                 "browser_download_url": "https://github.com/gublans/gublan/releases/download/v1.2.0/GublanStudioSetup.exe",
             }],
         }
-        self.assertEqual(updater.latest_release_from_payload(payload, "1.1.9"),
-                         ("v1.2.0", payload["assets"][0]["browser_download_url"]))
+        release = updater.latest_release_from_payload(payload, "1.1.9")
+        self.assertEqual((release.tag, release.url), ("v1.2.0", payload["assets"][0]["browser_download_url"]))
+        self.assertEqual(release.page, updater.RELEASES_PAGE)
         self.assertIsNone(updater.latest_release_from_payload(payload, "1.2.0"))
 
     def test_release_payload_rejects_missing_or_untrusted_installer(self):

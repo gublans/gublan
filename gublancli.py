@@ -24,7 +24,8 @@ def _read(path):
 def cmd_run(path):
     from gublancore import GublanRuntime
     runtime = GublanRuntime(base_dir=os.path.dirname(os.path.abspath(path)),
-                            oninput=lambda prompt: input(f"{prompt} "), onpopup=lambda text: print(text))
+                            oninput=lambda prompt: input(f"{prompt} "), onpopup=lambda text: print(text),
+                            save_name=os.path.splitext(os.path.basename(path))[0])
     runtime.run(_read(path))
     return 1 if runtime.last_error else 0
 

@@ -59,6 +59,8 @@ CATEGORY_COLORS = {
     "input": "#c2c79a",
     "sound": "#88a878",
     "web": "#8a9a80",
+    "saving": "#a8b27c",
+    "discord": "#8f9cc4",
     "comments": "#6b7266",
     "code": "#7d8a74",
 }

@@ -20,6 +20,9 @@ English-like commands, then run them in the built-in editor. Gublan Studio inclu
   problem checker.
 - **Convert existing code:** translate supported Python, JavaScript, and Lua code into Gublan.
 - **Export projects:** package a Gublan game as a Windows executable.
+- **Save between runs:** `save` and `load` keep high scores and settings after a program closes.
+- **Discord status:** show what you're making on Discord. You can change the wording, pictures and
+  button, or turn it off. Programs can set their own status with `presence`.
 
 ## Install on Windows
 
@@ -27,8 +30,9 @@ Download and run **`GublanStudioSetup.exe`** from the
 [GitHub Releases page](https://github.com/gublans/gublan/releases). The installer adds Gublan Studio to your
 user account and creates a Start menu shortcut. A desktop shortcut is optional.
 
-The installed app checks for a newer public GitHub release at startup and asks before downloading and running
-the update installer.
+The installed app checks for a newer public GitHub release at startup and asks before updating. When you
+agree, it downloads the update, closes, installs it, and opens the new version. You can choose to update when
+you close the app, skip a version, or turn off update checks in settings.
 
 ## Run from source
 
@@ -114,22 +118,32 @@ py gublancli.py docs
 
 ## Build the Windows installer
 
-From the project directory, install the build dependencies and Inno Setup 6. Then build the app and installer:
+From the project directory, install the build dependencies and [Inno Setup 6](https://jrsoftware.org/isdl.php).
+Then run the build script:
 
 ```powershell
 py -m pip install pyinstaller pygame-ce pyopengl
-$version = "1.0.3"
-py -m PyInstaller --noconfirm --distpath dist --workpath build\GublanStudio GublanStudio.spec
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" GublanStudio.iss
+powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-This creates **`dist\GublanStudioSetup.exe`**. Keep `$version` in sync with `VERSION` in
-[`studio/version.py`](studio/version.py).
+The script reads the version from `VERSION` in [`studio/version.py`](studio/version.py) and runs the tests.
+Then it builds the app, checks that the version is built into the exe, and creates
+**`dist\GublanStudioSetup.exe`**. To skip the tests, add `-SkipTests`.
 
-To publish a release, push the source to GitHub, create a public release tagged `$version`, and attach
-`dist\GublanStudioSetup.exe` without renaming it. The release tag, `VERSION`, and installer version must match.
-The updater looks for that exact installer filename in the latest public release. The first release must be
-published before the updater can find an update.
+To release a new version:
+
+1. Change `VERSION` in [`studio/version.py`](studio/version.py). This is the only place the version is written.
+2. Run `build.ps1`.
+3. Push the source to GitHub.
+4. Create a public release whose tag is exactly the new version, for example `1.0.4`. Don't add a `v` prefix.
+5. Attach `dist\GublanStudioSetup.exe` to the release without renaming it.
+
+The installer will not build if its version doesn't match `VERSION`. The updater looks for that exact installer
+filename in the latest public release.
+
+When a user updates from inside the app, the installer runs silently. It waits for Gublan Studio to close and
+then opens the new version. If an update fails, the app says so the next time it starts and shows the end of
+the installer's log.
 
 ## Tests
 
@@ -146,7 +160,8 @@ py -m unittest discover -s tests
 | --- | --- |
 | `gublancore.py` | Gublan language parser, analyzer, and runtime |
 | `gublanconvert.py` | Python, JavaScript, and Lua converter |
+| `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
 | `gublanide.py`, `studio/` | Gublan Studio editor |
 | `gublancli.py` | Command-line interface |
-| `GublanStudio.iss` | Windows installer definition |
+| `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
 | `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |

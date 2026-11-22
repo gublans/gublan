@@ -101,17 +101,23 @@ def message(parent, title, text, kind="info", details=None):
     return dialog.show(width=px(560) if details else None)
 
 
-def confirm(parent, title, text, yes="yes", no="cancel", third=None, danger=False):
+def confirm(parent, title, text, yes="yes", no="cancel", third=None, danger=False, details=None):
     """True for yes, False for no, the string "third" for the third button, None if closed."""
     dialog = Dialog(parent, title)
     tk.Label(dialog.body, text=lower(text), bg=PANEL, fg=TEXT, font=ui_font(10), justify="left",
              wraplength=px(440)).pack(anchor="w")
+    if details:
+        box = tk.Text(dialog.body, height=10, bg=EDITOR_BG, fg=MUTED, relief="flat", font=mono_font(9),
+                      highlightthickness=0, wrap="word", padx=px(8), pady=px(6))
+        box.insert("1.0", lower(details))
+        box.configure(state="disabled")
+        box.pack(fill="both", expand=True, pady=(px(12), 0))
     dialog.add_button(yes, lambda: dialog.close(True), kind="danger" if danger else "accent")
     if third:
         dialog.add_button(third, lambda: dialog.close("third"))
     dialog.add_button(no, lambda: dialog.close(False), kind="ghost")
     dialog.bind("<Return>", lambda _e: dialog.close(True))
-    return dialog.show(width=max(px(420), dialog.winfo_reqwidth()))
+    return dialog.show(width=max(px(560) if details else px(420), dialog.winfo_reqwidth()))
 
 
 def ask(parent, title, prompt, initial="", mono=False):
@@ -132,11 +138,14 @@ def ask(parent, title, prompt, initial="", mono=False):
 
 # ----- settings -----------------------------------------------------------------------------------------
 class SettingsDialog(Dialog):
-    def __init__(self, master, settings, on_apply):
+    def __init__(self, master, settings, on_apply, presence=None):
         super().__init__(master, "settings", resizable=True)
         self.settings = settings
         self.on_apply = on_apply
+        self.presence = presence
         self.vars = {}
+        self.text_vars = {}
+        self.text_jobs = {}
         scroll = ScrollFrame(self.body, bg=PANEL)
         scroll.pack(fill="both", expand=True)
         page = scroll.inner
@@ -185,9 +194,12 @@ class SettingsDialog(Dialog):
                           ("toolbar_labels", "show words on the toolbar buttons")):
             self._toggle(page, key, text)
 
+        self._discord_section(page)
+
         self._heading(page, "starting up")
         for key, text in (("restore_session", "reopen the programs that were open last time"),
-                          ("show_welcome", "show the welcome page when nothing is open")):
+                          ("show_welcome", "show the welcome page when nothing is open"),
+                          ("check_updates", "look for a new version of gublan studio when it starts")):
             self._toggle(page, key, text)
 
         tk.Label(page, text=f"settings are kept in {config.settings_path()}", bg=PANEL, fg=DIM, font=ui_font(8),
@@ -209,6 +221,117 @@ class SettingsDialog(Dialog):
     def _set(self, key, value):
         self.settings[key] = value
         self.on_apply(self.settings)
+        self._show_discord()
+
+    # ----- discord -----------------------------------------------------------------------------------------
+    DISCORD_TEXTS = (
+        ("discord_details", "first line"),
+        ("discord_state", "second line"),
+        ("discord_idle", "with nothing open"),
+        ("discord_image", "picture"),
+        ("discord_image_text", "picture hover text"),
+        ("discord_small_image", "small picture"),
+        ("discord_button_label", "button label"),
+        ("discord_button_url", "button link"),
+        ("discord_app_id", "application id"),
+    )
+
+    def _discord_section(self, page):
+        from .presence import PLACEHOLDERS
+        self._heading(page, "discord")
+        tk.Label(page, text="while the discord app is open, your discord profile can show what you are making.",
+                 bg=PANEL, fg=DIM, font=ui_font(9), anchor="w", justify="left", wraplength=px(520)).pack(
+            fill="x", pady=(0, px(4)))
+        for key, text in (("discord_presence", "show what i'm doing on my discord profile"),
+                          ("discord_show_file", "show the file name (otherwise it says 'a program')"),
+                          ("discord_show_time", "show how long i've been at it"),
+                          ("discord_programs", "let my programs change it with presence lines")):
+            self._toggle(page, key, text)
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=(px(6), px(4)))
+        tk.Label(row, text="shows as", bg=PANEL, fg=TEXT, font=ui_font(10)).pack(side="left")
+        self.discord_kind = tk.StringVar(value=self.settings.get("discord_activity", "playing"))
+        Segmented(row, [(kind, kind) for kind in ("playing", "watching", "listening", "competing")],
+                  self.discord_kind, command=lambda v: self._set("discord_activity", v), bg=PANEL,
+                  size=9).pack(side="left", padx=px(12))
+        for key, text in self.DISCORD_TEXTS:
+            self._text_setting(page, key, text)
+        words = " ".join("{" + name + "}" for name in PLACEHOLDERS)
+        tk.Label(page, text=f"words in braces are filled in: {words}", bg=PANEL, fg=DIM, font=ui_font(8),
+                 anchor="w", justify="left", wraplength=px(520)).pack(fill="x", pady=(px(4), 0))
+        tk.Label(page, text="a picture is an https address, or the name of a picture uploaded to your own discord "
+                            "application (then put its id in application id). an empty picture shows the gublan "
+                            "logo. buttons show to other people, not to you.",
+                 bg=PANEL, fg=DIM, font=ui_font(8), anchor="w", justify="left", wraplength=px(520)).pack(
+            fill="x", pady=(px(2), 0))
+        self.discord_preview = tk.Label(page, text="", bg=PANEL, fg=TEXT, font=ui_font(9), anchor="w",
+                                        justify="left", wraplength=px(520))
+        self.discord_preview.pack(fill="x", pady=(px(8), 0))
+        self.discord_status = tk.Label(page, text="", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w",
+                                       justify="left", wraplength=px(520))
+        self.discord_status.pack(fill="x")
+        BracketButton(page, "put the discord settings back", command=self._reset_discord, size=9,
+                      bg=PANEL).pack(anchor="w", pady=(px(6), 0))
+        self._watch_discord()
+
+    def _text_setting(self, parent, key, text):
+        row = tk.Frame(parent, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text=text, bg=PANEL, fg=TEXT, font=ui_font(10), width=16, anchor="w").pack(side="left")
+        variable = tk.StringVar(value=str(self.settings.get(key) or ""))
+        self.text_vars[key] = variable
+        entry = flat_entry(row, variable, width=36, mono=key in ("discord_app_id", "discord_button_url"))
+        entry.pack(side="left", fill="x", expand=True)
+        variable.trace_add("write", lambda *_a, k=key: self._text_changed(k))
+
+    def _text_changed(self, key):
+        job = self.text_jobs.pop(key, None)
+        if job is not None:
+            self.after_cancel(job)
+        self.text_jobs[key] = self.after(500, lambda: self._text_done(key))
+
+    def _text_done(self, key):
+        self.text_jobs.pop(key, None)
+        value = self.text_vars[key].get().strip()
+        if value != self.settings.get(key):
+            self._set(key, value)
+
+    def _reset_discord(self):
+        for key, value in config.DEFAULTS.items():
+            if not key.startswith("discord_"):
+                continue
+            self.settings[key] = value
+            if key in self.vars:
+                self.vars[key].set(bool(value))
+        for key, variable in self.text_vars.items():
+            variable.set(str(self.settings.get(key) or ""))
+        for job in list(self.text_jobs.values()):
+            self.after_cancel(job)
+        self.text_jobs.clear()
+        self.discord_kind.set(self.settings.get("discord_activity", "playing"))
+        self.on_apply(self.settings)
+        self._show_discord()
+
+    def _show_discord(self):
+        if self.presence is None or not hasattr(self, "discord_status"):
+            return
+        try:
+            on = self.settings.get("discord_presence", True)
+            self.discord_preview.configure(text=f"preview: {self.presence.preview()}" if on else "")
+            state, _text = self.presence.status()
+            color = {"connected": MOSS_LIGHT, "error": ERROR}.get(state, DIM)
+            self.discord_status.configure(text=f"status: {self.presence.status_text()}", fg=color)
+        except tk.TclError:
+            pass
+
+    def _watch_discord(self):
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._show_discord()
+        self.after(1000, self._watch_discord)
 
     def _choose_level(self, level):
         config.apply_level(self.settings, level)

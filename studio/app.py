@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog
 
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
@@ -23,6 +24,7 @@ from .blocks import BlocksView
 from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, SettingsDialog, SpriteEditor, WelcomePage,
                       ask, confirm, message)
 from .editor import CodeEditor
+from .presence import StudioPresence
 from .panels import (AssetsPanel, FilesPanel, HelpPanel, OutlinePanel, OutputPanel, ProblemsPanel,
                      VariablesPanel, reveal)
 from .templates import TEMPLATES, template
@@ -184,12 +186,20 @@ class GublanStudio:
         self.side_name = self.settings.get("side_panel", "files")
         self.bottom_name = self.settings.get("bottom_panel", "output")
         self.status_message_job = None
+        self.run_wall_started = 0.0
+        self.pending_installer = None
+        self.pending_release = None
+        self.update_busy = False
+        self.update_failed = False
+        self.presence = StudioPresence(self)
         self._build_window()
         self._bind_shortcuts()
         self.apply_settings(self.settings, save=False)
         self._restore(paths)
         self.root.after(40, self._poll)
+        self.root.after(1200, self._after_update)
         self.root.after(5000, self._check_for_updates)
+        self.presence.refresh()
         self.root.protocol("WM_DELETE_WINDOW", self.exit)
 
     # ----- window ----------------------------------------------------------------------------------------
@@ -514,6 +524,9 @@ class GublanStudio:
                 ("how much help", [{"label": name, "command": lambda n=name: self.set_level(n),
                                     "checked": self.settings.get("level") == name}
                                    for name in ("beginner", "standard", "expert")]),
+                {"label": "show my status on discord", "command": lambda: self.set_option(
+                    "discord_presence", not self.settings.get("discord_presence", True)),
+                 "checked": bool(self.settings.get("discord_presence", True))},
                 ("settings...", self.open_settings, "ctrl+,"),
             ],
             "help": [
@@ -524,6 +537,9 @@ class GublanStudio:
                 "-",
                 ("welcome page", self.show_welcome_tab, ""),
                 ("open the command list file", self.open_command_docs, ""),
+                "-",
+                ("check for updates", lambda: self._check_for_updates(manual=True), ""),
+                ("what's new", self.open_release_notes, ""),
                 ("about gublan studio", self.about, ""),
             ],
         }
@@ -933,6 +949,7 @@ class GublanStudio:
         self.empty_hint.place_forget()
 
     def update_title(self):
+        self.presence.refresh()
         doc = self.current
         if doc is None:
             self.root.title(APP_NAME)
@@ -955,6 +972,7 @@ class GublanStudio:
         if doc.view != view:
             doc.set_view(view)
         self.update_view_buttons()
+        self.presence.refresh()
 
     def toggle_blocks(self):
         doc = self.current
@@ -981,6 +999,7 @@ class GublanStudio:
     def on_cursor(self, doc, line, column):
         if doc is self.current:
             self.status_position.configure(text=f"line {line}, column {column + 1}")
+            self.presence.refresh()
 
     def on_symbols(self, doc):
         if doc is self.current and self.side_name == "outline" and self.side_visible():
@@ -1074,6 +1093,7 @@ class GublanStudio:
     def _show_problems(self, doc):
         if doc is not self.current:
             return
+        self.presence.refresh()
         self.problems.show(doc.diagnostics)
         errors = sum(1 for item in doc.diagnostics if item.get("severity", "error") == "error")
         warnings = len(doc.diagnostics) - errors
@@ -1317,7 +1337,8 @@ class GublanStudio:
                 return
             except tk.TclError:
                 self.settings_dialog = None
-        dialog = SettingsDialog(self.root, self.settings, lambda settings: self.apply_settings(settings))
+        dialog = SettingsDialog(self.root, self.settings, lambda settings: self.apply_settings(settings),
+                                presence=self.presence)
         self.settings_dialog = dialog
         dialog.bind("<Destroy>", lambda e: setattr(self, "settings_dialog", None) if e.widget is dialog else None,
                     add="+")
@@ -1355,9 +1376,13 @@ class GublanStudio:
             self.show_help(None)
 
     def about(self):
-        message(self.root, "about", f"{APP_NAME}\n\nmake games and programs with simple commands.\n\n"
+        message(self.root, "about", f"{APP_NAME} {version.VERSION}\n\nmake games and programs with simple commands.\n\n"
                                     f"python {sys.version.split()[0]}, tk {self.root.tk.call('info', 'patchlevel')}\n"
-                                    f"settings: {config.settings_path()}")
+                                    f"settings: {config.settings_path()}\n"
+                                    f"discord: {self.presence.status_text()}")
+
+    def open_release_notes(self):
+        webbrowser.open(updater.RELEASES_PAGE)
 
     # ----- export (used by the export window and the tests) -------------------------------------------------
     def buildscript_exe(self, source, output, python, base_dir=None, progress=None, options=None, **kwargs):
@@ -1449,8 +1474,12 @@ class GublanStudio:
         self.paused_line = None
         runtime = GublanRuntime(onlog=self._from_log, shouldstop=self.stop_event.is_set, waitstep=self._waitstep,
                                 base_dir=base_dir, onerror=self._from_error, hold_window=True,
-                                oninput=self._from_input, onpopup=self._from_popup)
+                                oninput=self._from_input, onpopup=self._from_popup,
+                                onpresence=self._from_presence, save_name=os.path.splitext(doc.name)[0])
         self.active_runtime = runtime
+        self.run_wall_started = time.time()
+        self.presence.told_off = False
+        self.presence.set_program(None, None)
         self.variables.previous = {}
         self.run_started = time.perf_counter()
         self.run_thread = threading.Thread(target=self._run_worker, args=(runtime, source, base_dir), daemon=True)
@@ -1496,6 +1525,9 @@ class GublanStudio:
         while not holder["event"].wait(0.05):
             if self.stop_event.is_set():
                 return
+
+    def _from_presence(self, application, activity):
+        self.queue.put(("presence", application, activity))
 
     def _waitstep(self, line):
         runtime = self.active_runtime
@@ -1607,6 +1639,15 @@ class GublanStudio:
             if runtime is not self.active_runtime:
                 return
             self._finished(runtime)
+        elif kind == "presence":
+            _kind, application, activity = item
+            if activity and not self.presence.program_allowed() and not self.presence.told_off:
+                self.presence.told_off = True
+                self.output.write("this program sets a discord status, but settings (under discord) keep it "
+                                  "hidden", "info")
+            self.presence.set_program(application, activity)
+        elif kind == "call":
+            item[1]()
 
     def _show_popup(self, text, holder):
         self.set_state("showing a message", NUMBER)
@@ -1617,6 +1658,7 @@ class GublanStudio:
 
     def _finished(self, runtime):
         self.run_active = False
+        self.presence.set_program(None, None)
         seconds = time.perf_counter() - self.run_started
         doc = self.run_doc
         if doc in self.docs:
@@ -1739,6 +1781,7 @@ class GublanStudio:
         for widget in self.status_widgets:
             widget.configure(bg=bg)
         self.status_state.configure(fg=TEXT if running else color)
+        self.presence.refresh()
 
     def update_run_controls(self):
         if not hasattr(self, "run_button"):
@@ -1845,6 +1888,7 @@ class GublanStudio:
         self.status_indent.configure(text=f"{settings.get('indent', 4)} spaces")
         if save:
             config.save(settings)
+        self.presence.refresh()
 
     def set_option(self, key, value):
         self.settings[key] = value
@@ -1868,57 +1912,159 @@ class GublanStudio:
         self.status_message_job = self.root.after(int(seconds * 1000),
                                                   lambda: self.status_message.configure(text=""))
 
-    def _check_for_updates(self):
-        if updater.is_installed_application():
-            threading.Thread(target=self._lookup_update, daemon=True).start()
-
-    def _lookup_update(self):
-        try:
-            release = updater.latest_release(version.VERSION)
-        except (OSError, ValueError) as error:
-            try:
-                self.root.after(0, lambda error=error: self.flash(f"update check failed: {error}"))
-            except tk.TclError:
-                pass
+    # ----- updates -------------------------------------------------------------------------------------
+    # the installer runs when gublan studio has closed: straight away with "update now" (and opens the new version
+    # afterwards), or whenever you next close gublan studio with "when i close".
+    def _after_update(self):
+        """tidy old downloads, and say whether the update that ran when gublan studio last closed worked."""
+        threading.Thread(target=updater.remove_old_downloads, daemon=True).start()
+        pending = self.settings.get("update_pending", "")
+        if not pending:
             return
-        if release:
-            try:
-                self.root.after(0, lambda: self._offer_update(*release))
-            except tk.TclError:
-                pass
-
-    def _offer_update(self, release_tag, download_url):
-        if not confirm(self.root, "update available", f"version {release_tag} is available. download and install it?",
-                       yes="install update", no="later"):
+        self.settings["update_pending"] = ""
+        config.save(self.settings)
+        try:
+            finished = not updater.is_newer(pending, version.VERSION)
+        except ValueError:
+            finished = True
+        if finished:
+            self.output.write(f"gublan studio was updated to {version.VERSION}", "good")
+            self.flash(f"updated to gublan studio {version.VERSION}", seconds=10)
             return
-        self.flash("downloading update...")
-        threading.Thread(target=self._download_update, args=(download_url,), daemon=True).start()
+        self.update_failed = True
+        message(self.root, "update",
+                f"the update to {pending.lstrip('vV')} didn't finish, so this is still {version.VERSION}. try again "
+                "with help > check for updates, or download the setup from the releases page on github.",
+                kind="warning", details=updater.read_update_log() or None)
 
-    def _download_update(self, download_url):
-        try:
-            installer = updater.download_installer(download_url)
-        except (OSError, ValueError) as error:
-            try:
-                self.root.after(0, lambda error=error: message(
-                    self.root, "update failed", str(error), kind="error"))
-            except tk.TclError:
-                pass
+    def _check_for_updates(self, manual=False):
+        if not updater.is_installed_application():
+            if manual:
+                message(self.root, "check for updates",
+                        f"this is gublan studio {version.VERSION} running from its own files, not the installed "
+                        "copy, so it can't update itself. use git pull, or install the newest setup from the "
+                        "releases page.", details=updater.RELEASES_PAGE)
             return
-        try:
-            self.root.after(0, lambda: self._install_update(installer))
-        except tk.TclError:
-            updater.remove_download(installer)
+        if not manual and (not self.settings.get("check_updates", True) or self.update_failed):
+            return
+        if self.update_busy:
+            if manual:
+                self.flash("already looking for updates")
+            return
+        if self.pending_installer:
+            if manual:
+                self._install_update()
+            return
+        self.update_busy = True
+        if manual:
+            self.flash("looking for updates...")
+        threading.Thread(target=self._lookup_update, args=(manual,), daemon=True).start()
 
-    def _install_update(self, installer):
-        message(self.root, "update ready", "Gublan Studio will close to run the installer.")
+    def _lookup_update(self, manual):
         try:
-            exited = self.exit(after_exit=lambda: updater.launch_installer(installer))
+            release, error = updater.latest_release(version.VERSION), None
+        except (OSError, ValueError) as err:
+            release, error = None, err
+        self.queue.put(("call", lambda: self._update_found(release, error, manual)))
+
+    def _update_found(self, release, error, manual):
+        self.update_busy = False
+        if error is not None:
+            if manual:
+                message(self.root, "check for updates", "couldn't reach github to look for updates.", kind="error",
+                        details=str(error))
+            else:
+                self.flash(f"update check failed: {error}")
+            return
+        if release is None:
+            if manual:
+                message(self.root, "check for updates", f"gublan studio {version.VERSION} is the newest version.")
+            return
+        if not manual and updater.same_version(release.tag, self.settings.get("skipped_update", "")):
+            return
+        self._offer_update(release)
+
+    def _offer_update(self, release):
+        newest = release.tag.lstrip("vV")
+        answer = confirm(self.root, "update available",
+                         f"gublan studio {newest} is out. you have {version.VERSION}.\n\nupdate now closes gublan "
+                         "studio (asking to save first), installs the update and opens it again. when i close "
+                         "downloads it now and installs it the next time you close gublan studio.",
+                         yes="update now", no="when i close", third="skip this version", details=release.notes)
+        if answer == "third":
+            self.settings["skipped_update"] = release.tag
+            config.save(self.settings)
+            self.flash(f"skipping {newest}. help > check for updates still finds it")
+            return
+        if answer is None:
+            return
+        self.update_busy = True
+        self.flash("downloading the update...", seconds=60)
+        threading.Thread(target=self._download_update, args=(release, answer is True), daemon=True).start()
+
+    def _download_update(self, release, install_now):
+        shown = [0.0]
+
+        def progress(done, total):
+            now = time.monotonic()
+            if now - shown[0] < 0.3:
+                return
+            shown[0] = now
+            text = (f"downloading the update... {done * 100 // total}%" if total
+                    else f"downloading the update... {done // (1024 * 1024)} mb")
+            self.queue.put(("call", lambda: self.flash(text, seconds=60)))
+
+        try:
+            installer, error = updater.download_installer(release.url, progress), None
+        except (OSError, ValueError) as err:
+            installer, error = None, err
+        self.queue.put(("call", lambda: self._downloaded(release, installer, error, install_now)))
+
+    def _downloaded(self, release, installer, error, install_now):
+        self.update_busy = False
+        if error is not None:
+            self.flash("")
+            message(self.root, "update failed", "the update couldn't be downloaded.", kind="error",
+                    details=str(error))
+            return
+        if self.pending_installer and self.pending_installer != installer:
+            updater.remove_download(self.pending_installer)
+        self.pending_installer, self.pending_release = installer, release
+        if install_now:
+            self.flash("")
+            self._install_update(asked=True)
+        else:
+            self.flash(f"gublan studio {release.tag.lstrip('vV')} installs when you close gublan studio", seconds=12)
+
+    def _install_update(self, asked=False):
+        """close gublan studio now and let the downloaded installer update it, then open the new version."""
+        if not self.pending_installer or not os.path.isfile(self.pending_installer):
+            self.pending_installer = self.pending_release = None
+            return
+        newest = self.pending_release.tag.lstrip("vV") if self.pending_release else "the update"
+        if not asked and confirm(self.root, "update ready",
+                                 f"gublan studio {newest} is downloaded. close gublan studio and install it now?",
+                                 yes="install now", no="when i close") is not True:
+            return
+        self.exit(relaunch=True)
+
+    def _start_installer(self, relaunch):
+        """run the downloaded installer as gublan studio closes. returns False if it couldn't start."""
+        installer, release = self.pending_installer, self.pending_release
+        if not installer or not os.path.isfile(installer):
+            return True
+        self.settings["update_pending"] = release.tag if release else "?"
+        config.save(self.settings)
+        try:
+            updater.launch_installer(installer, relaunch=relaunch)
         except OSError as error:
-            message(self.root, "update failed", str(error), kind="error")
+            self.settings["update_pending"] = ""
+            config.save(self.settings)
+            self.pending_installer = self.pending_release = None
             updater.remove_download(installer)
-            return
-        if not exited:
-            updater.remove_download(installer)
+            message(self.root, "update failed", "the installer couldn't start.", kind="error", details=str(error))
+            return False
+        return True
 
     # ----- session -------------------------------------------------------------------------------------
     def _restore(self, paths):
@@ -1942,7 +2088,7 @@ class GublanStudio:
             self._show_empty()
         self.set_state("ready", MOSS_LIGHT)
 
-    def exit(self, after_exit=None):
+    def exit(self, after_exit=None, relaunch=False):
         dirty = [doc for doc in self.docs if doc.dirty]
         if dirty:
             names = ", ".join(doc.name for doc in dirty[:4]) + (" and more" if len(dirty) > 4 else "")
@@ -1969,6 +2115,10 @@ class GublanStudio:
         if self.bottom_visible() and self.bottom.winfo_height() > 60:
             self.settings["bottom_height"] = unpx(self.bottom.winfo_height())
         config.save(self.settings)
+        if self.pending_installer and not self._start_installer(relaunch):
+            if relaunch:
+                return False
+        self.presence.close()
         if after_exit:
             after_exit()
         self.root.destroy()

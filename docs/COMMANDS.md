@@ -132,10 +132,30 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 | `values(map)` | list of the values in a map |
 | `indexof(list, value)` | position of a value, or -1 |
 | `overlap(a, b)` | true when two objects or [x, y, w, h] rectangles overlap |
+| `chance(percent)` | true about that many times out of 100 |
+| `shuffle(list)` | a copy of a list in a random order |
+| `unique(list)` | a copy of a list without repeats |
+| `count(list-or-text, value)` | how many times a value appears |
+| `average(list)` | the average of a list of numbers |
+| `startswith(text, start)` | true if the text begins with start |
+| `endswith(text, ending)` | true if the text finishes with ending |
+| `pad(value, width, fill)` | text filled on the left up to a width: pad(7, 3, 0) is 007 |
+| `decimals(x, digits)` | a number as text with that many digits after the point |
+| `wrap(x, low, high)` | wrap x around so it stays from low up to high |
+| `remap(x, low1, high1, low2, high2)` | move a number from one range into another |
+| `approach(x, target, step)` | move x towards target by at most step |
+| `angleto(x1, y1, x2, y2)` | or angleto(a, b) the angle in degrees from one point to another |
+| `hsv(hue, saturation, value)` | a colour from a hue (0 to 360), saturation and value (0 to 1) |
+| `isnumber(x)` | true for a number, or text that looks like one |
+| `date()` | today's date as text, like 2026-11-22 |
+| `clock()` | the time of day as text, like 14:05 |
+| `now()` | seconds since 1970, for timing things between runs |
+| `saved("name")` | true if a value has been saved under that name |
+| `load("name", default)` | a saved value, or the default when nothing was saved |
 
 ## every command
 
-`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `break` `continue` `wait` `kill` `function` `call` `return` `include` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `box` `circle` `line` `text` `image` `sprite` `button` `ui` `vec2` `cube` `sphere` `spin` `camera` `vec3` `move` `place` `resize` `hide` `show` `animate` `touching` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `sound` `music` `stopmusic` `stopsounds` `volume` `get`
+`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `break` `continue` `wait` `kill` `function` `call` `return` `include` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `box` `circle` `line` `text` `image` `sprite` `button` `ui` `vec2` `cube` `sphere` `spin` `camera` `vec3` `move` `place` `resize` `hide` `show` `animate` `touching` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `get` `save` `load` `forget` `presence`
 
 ## basics: printing, variables and maths
 
@@ -637,6 +657,58 @@ box enemy 200 40 32 32
 delete enemy
 ```
 
+### `insert`
+
+put a value into a list at a position. the items after it move along by one.
+
+```text
+insert <list> <position> <value...>
+```
+
+```gublan
+list fruit apple pear
+insert fruit 0 lemon
+```
+
+### `remove`
+
+take the first matching value out of a list. nothing happens if it isn't there.
+
+```text
+remove <list> <value...>
+```
+
+```gublan
+list fruit apple pear
+remove fruit pear
+```
+
+### `shuffle`
+
+mix a list into a random order.
+
+```text
+shuffle <list>
+```
+
+```gublan
+list fruit apple pear
+shuffle fruit
+```
+
+### `sort`
+
+put a list in order, smallest first. add reverse for biggest first.
+
+```text
+sort <list> [reverse]
+```
+
+```gublan
+list scores 30 10 20
+sort scores reverse
+```
+
 ## the window and colours
 
 ### `mode`
@@ -1123,6 +1195,19 @@ popup <message...>
 popup you win
 ```
 
+### `cursor`
+
+show or hide the mouse pointer over the game window.
+
+```text
+cursor show|hide
+```
+
+```gublan
+mode 2d
+cursor hide
+```
+
 ## sound and music
 
 ### `sound`
@@ -1197,6 +1282,87 @@ get <https-url> <variable>
 
 ```gublan
 get https://example.com page
+```
+
+## saving values between runs
+
+saved values are kept in a small file for each program (on windows in `%APPDATA%\Gublan\saves`), so a high score or the level someone reached is still there next time. inside expressions, `load("name", default)` gives a saved value and `saved("name")` checks for one.
+
+### `save`
+
+keep a value on this computer, so it is still there the next time the program runs.
+
+```text
+save <name> <value...>
+```
+
+```gublan
+score = 120
+save best score
+```
+
+### `load`
+
+read a saved value into a variable. if nothing was saved under that name it gets the default, or 0.
+
+```text
+load <name> <variable> [default...]
+```
+
+```gublan
+load best highscore 0
+print the best score so far is {highscore}
+```
+
+### `forget`
+
+delete one saved value, or every saved value.
+
+```text
+forget <name>
+forget all
+```
+
+```gublan
+forget best
+```
+
+## your discord status
+
+while the discord app is open, `presence` lines change the status on your discord profile. in gublan
+studio they replace the studio's own status while the program runs (settings, under discord, turns this off).
+exported games show it too. discord updates every few seconds, so setting it often is fine.
+
+| line | what it shows |
+| --- | --- |
+| `presence details <text...>` | the first line of the status |
+| `presence state <text...>` | the second line |
+| `presence image <picture> [hover text...]` | the big picture: a picture's https address, or the name of one uploaded to your discord application |
+| `presence smallimage <picture> [hover text...]` | the small round picture in the corner of the big one |
+| `presence button <https-address> <label...>` | a button other people can click. two at most |
+| `presence party <players> <most-players>` | how full the group is, like (1 of 4) |
+| `presence timer` | how long since this line ran. `presence timer off` hides it |
+| `presence countdown <seconds>` | the time left |
+| `presence app <application id>` | use your own discord application instead of gublan studio's |
+| `presence clear` | remove everything the program set |
+
+a part written without values is removed, like `presence state`. the status says the program is playing gublan
+studio unless you make your own application at https://discord.com/developers/applications and use its id with
+`presence app`: then it shows your game's name and the pictures you upload there.
+
+### `presence`
+
+show what your program is doing on your discord profile while the discord app is open.
+
+```text
+presence details|state|image|smallimage|button|party|timer|countdown|app|clear [values...]
+```
+
+```gublan
+presence details exploring the caves
+presence state level 1 of 5
+presence timer
+presence button https://github.com/gublans/gublan get gublan
 ```
 
 ## colours

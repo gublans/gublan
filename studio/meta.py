@@ -31,6 +31,8 @@ CATEGORY_ABOUT = {
     "input": "keyboard, mouse and questions",
     "sound": "sound effects and music",
     "web": "reading text from the internet",
+    "saving": "keeping values between runs",
+    "discord": "your status on discord",
 }
 
 
@@ -67,7 +69,7 @@ _ASSIGN_RE = re.compile(r"^\s*(?:set\s+)?([A-Za-z_]\w*)\s*(?:=|\+=|-=|\*=|/=)(?!
 _CREATES_VARIABLE = {
     "random": 1, "time": 1, "calc": 1, "list": 1, "map": 1, "item": 3, "length": 2, "lookup": 3, "has": 3,
     "key": 1, "keypressed": 1, "mousebutton": 1, "input": 1, "touching": 1, "button": 1, "vec2": 1, "vec3": 1,
-    "get": 2, "for": 1,
+    "get": 2, "for": 1, "load": 2,
 }
 _CREATES_OBJECT = {"box": 1, "circle": 1, "line": 1, "text": 1, "image": 1, "sprite": 1, "cube": 1, "sphere": 1}
 

@@ -6,15 +6,18 @@ the studio can still pause, step and inspect every line.
 """
 
 import ast
+import colorsys
 import difflib
 import http.client
 import ipaddress
+import json
 import math
 import os
 import random
 import re
 import socket
 import ssl
+import sys
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -119,6 +122,15 @@ COMMAND_SPECS = {
             "set a variable to true if the map has that key.", "has inventory coins found"),
     "delete": ("lists and maps", "delete <object> | delete <list> <index> | delete <map> <key>", 2,
                "remove an object from the scene, an item from a list or a key from a map.", "delete enemy"),
+    "insert": ("lists and maps", "insert <list> <position> <value...>", 4,
+               "put a value into a list at a position. the items after it move along by one.",
+               "insert fruit 0 lemon"),
+    "remove": ("lists and maps", "remove <list> <value...>", 3,
+               "take the first matching value out of a list. nothing happens if it isn't there.",
+               "remove fruit pear"),
+    "shuffle": ("lists and maps", "shuffle <list>", 2, "mix a list into a random order.", "shuffle fruit"),
+    "sort": ("lists and maps", "sort <list> [reverse]", 2,
+             "put a list in order, smallest first. add reverse for biggest first.", "sort scores reverse"),
     # display
     "mode": ("display", "mode 2d|3d", 2, "open the 2d or 3d game window.", "mode 2d"),
     "window": ("display", "window <width> <height> [title...]", 3,
@@ -181,6 +193,8 @@ COMMAND_SPECS = {
     "input": ("input", "input <variable> <question...>", 3, "ask the player to type something.",
               "input name what is your name"),
     "popup": ("input", "popup <message...>", 2, "show a message and wait for a key or click.", "popup you win"),
+    "cursor": ("input", "cursor show|hide", 2, "show or hide the mouse pointer over the game window.",
+               "cursor hide"),
     # sound
     "sound": ("sound", "sound <path>", 2, "play a sound effect once.", "sound assets/jump.wav"),
     "music": ("sound", "music <path>", 2, "play looping background music.", "music assets/theme.ogg"),
@@ -190,11 +204,25 @@ COMMAND_SPECS = {
     # web
     "get": ("web", "get <https-url> <variable>", 3, "read text from a public https website.",
             "get https://example.com page"),
+    # saving
+    "save": ("saving", "save <name> <value...>", 3,
+             "keep a value on this computer, so it is still there the next time the program runs.",
+             "save best score"),
+    "load": ("saving", "load <name> <variable> [default...]", 3,
+             "read a saved value into a variable. if nothing was saved under that name it gets the default, "
+             "or 0.", "load best highscore 0"),
+    "forget": ("saving", "forget <name> | forget all", 2, "delete one saved value, or every saved value.",
+               "forget best"),
+    # discord
+    "presence": ("discord", "presence details|state|image|smallimage|button|party|timer|countdown|app|clear "
+                            "[values...]", 2,
+                 "show what your program is doing on your discord profile while the discord app is open.",
+                 "presence details exploring the caves"),
 }
 
 CATEGORY_ORDER = (
     "basics", "control", "functions", "lists and maps", "display", "2d", "3d",
-    "objects", "input", "sound", "web",
+    "objects", "input", "sound", "web", "saving", "discord",
 )
 
 GUBLANCOMMANDS = set(COMMAND_SPECS)
@@ -294,7 +322,31 @@ EXPRESSION_FUNCTIONS = {
     "values": "values(map) list of the values in a map",
     "indexof": "indexof(list, value) position of a value, or -1",
     "overlap": "overlap(a, b) true when two objects or [x, y, w, h] rectangles overlap",
+    "chance": "chance(percent) true about that many times out of 100",
+    "shuffle": "shuffle(list) a copy of a list in a random order",
+    "unique": "unique(list) a copy of a list without repeats",
+    "count": "count(list-or-text, value) how many times a value appears",
+    "average": "average(list) the average of a list of numbers",
+    "startswith": "startswith(text, start) true if the text begins with start",
+    "endswith": "endswith(text, ending) true if the text finishes with ending",
+    "pad": "pad(value, width, fill) text filled on the left up to a width: pad(7, 3, 0) is 007",
+    "decimals": "decimals(x, digits) a number as text with that many digits after the point",
+    "wrap": "wrap(x, low, high) wrap x around so it stays from low up to high",
+    "remap": "remap(x, low1, high1, low2, high2) move a number from one range into another",
+    "approach": "approach(x, target, step) move x towards target by at most step",
+    "angleto": "angleto(x1, y1, x2, y2) or angleto(a, b) the angle in degrees from one point to another",
+    "hsv": "hsv(hue, saturation, value) a colour from a hue (0 to 360), saturation and value (0 to 1)",
+    "isnumber": "isnumber(x) true for a number, or text that looks like one",
+    "date": "date() today's date as text, like 2026-11-22",
+    "clock": "clock() the time of day as text, like 14:05",
+    "now": "now() seconds since 1970, for timing things between runs",
+    "saved": "saved(\"name\") true if a value has been saved under that name",
+    "load": "load(\"name\", default) a saved value, or the default when nothing was saved",
 }
+
+PRESENCE_PARTS = ("details", "state", "image", "smallimage", "button", "party", "timer", "countdown", "app",
+                  "clear")
+_ASSIGNMENT_TOKENS = ("=", "+=", "-=", "*=", "/=")
 
 EXPRESSION_KEYWORDS = {"and", "or", "not", "true", "false", "none", "pi", "to", "step", "in", "all", "dt"}
 
@@ -479,7 +531,8 @@ def parse_line(raw):
         skip = 1 if first == "elif" else 2
         rest = text.split(None, skip)[skip] if len(parts) > skip else ""
         return ParsedLine("elseif", ["elseif"] + parts[skip:], rest)
-    if first not in GUBLANCOMMANDS:
+    if first not in GUBLANCOMMANDS or (len(parts) > 1 and parts[1] in _ASSIGNMENT_TOKENS and first != "set"
+                                       and not isinstance(parts[1], QuotedText)):
         assignment = _ASSIGN_RE.match(text)
         if assignment:
             target, operator, value = assignment.groups()
@@ -671,6 +724,33 @@ def _check_expression(text, condition=False):
         return str(err) if isinstance(err, ValueError) else "syntax"
 
 
+def _presence_problem(tokens):
+    what = str(tokens[0]).lower()
+    rest = tokens[1:]
+    if what not in PRESENCE_PARTS:
+        suggestion = difflib.get_close_matches(what, PRESENCE_PARTS, n=1, cutoff=0.5)
+        hint = f" did you mean '{suggestion[0]}'?" if suggestion else ""
+        return f"presence can set {', '.join(PRESENCE_PARTS)}.{hint}"
+    if what == "button" and rest:
+        address = str(rest[0])
+        if not (address.startswith(("https://", "http://", "{")) or address.isidentifier()):
+            return "the button needs a web address that starts with https://, then its label"
+        if len(rest) < 2:
+            return "give the button a label after its web address: presence button https://example.com play"
+    if what == "party" and len(rest) != 2:
+        return "use: presence party <players> <most-players>"
+    if what == "countdown" and len(rest) != 1:
+        return "use: presence countdown <seconds>"
+    if what == "timer" and rest and (len(rest) != 1 or rest[0] != "off"):
+        return "use: presence timer  or  presence timer off"
+    if what == "app" and (len(rest) != 1 or not (str(rest[0]).isdigit() or str(rest[0]).startswith("{")
+                                                 or str(rest[0]).isidentifier())):
+        return "use: presence app <discord application id>"
+    if what == "clear" and rest:
+        return "presence clear does not take anything else"
+    return None
+
+
 def analyze_source(source, warnings=False):
     """check a script without running it. returns a list of {line, severity, message}."""
     diagnostics = []
@@ -780,6 +860,23 @@ def analyze_source(source, warnings=False):
             )
         if command == "sprite" and len(parts) != 7:
             report(lineno, "use: sprite <name> <path> <x> <y> <width> <height>")
+        if command == "cursor" and len(parts) > 1 and parts[1] not in ("show", "hide"):
+            report(lineno, "use: cursor show  or  cursor hide")
+        if command == "cursor" and len(parts) > 2:
+            report(lineno, "use: cursor show  or  cursor hide")
+        if command == "shuffle" and len(parts) > 2:
+            report(lineno, "use: shuffle <list>")
+        if command == "sort" and len(parts) > 2 and (len(parts) != 3 or parts[2] != "reverse"):
+            report(lineno, "use: sort <list>  or  sort <list> reverse")
+        if command == "load" and len(parts) >= 3 and not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?",
+                                                                       str(parts[2])):
+            report(lineno, f"'{parts[2]}' is not a valid variable name. names start with a letter")
+        if command == "forget" and len(parts) > 2:
+            report(lineno, "use: forget <name>  or  forget all")
+        if command == "presence" and len(parts) >= 2:
+            problem = _presence_problem(parts[1:])
+            if problem:
+                report(lineno, problem)
         if command == "function":
             if len(parts) >= 2:
                 if not parts[1].isidentifier():
@@ -948,14 +1045,39 @@ _FLOW_COMMANDS = {
 }
 
 
+def saves_folder():
+    """where save/load keep their values: one small json file per program."""
+    override = os.environ.get("GUBLAN_SAVE_FOLDER")
+    if override:
+        return override
+    if sys.platform == "win32":
+        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Gublan", "saves")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "gublan", "saves")
+
+
+def save_file_name(name):
+    cleaned = re.sub(r"[^\w\- ]+", "_", os.path.splitext(str(name or ""))[0]).strip(" _")[:80]
+    return (cleaned or "untitled").lower() + ".json"
+
+
+MAX_SAVED_VALUE = 256 * 1024
+MAX_SAVED_NAMES = 1000
+
+
 class GublanRuntime:
     def __init__(self, onlog=None, ondebug=None, shouldstop=None, waitstep=None, base_dir=None,
-                 onerror=None, hold_window=False, oninput=None, onpopup=None):
+                 onerror=None, hold_window=False, oninput=None, onpopup=None, onpresence=None, save_name=None):
         self.onlog = onlog or print
         self.ondebug = ondebug
         self.onerror = onerror
         self.oninput = oninput
         self.onpopup = onpopup
+        # onpresence(application_id, activity) receives the program's discord status. without it the runtime
+        # talks to discord itself (exported games and the command line)
+        self.onpresence = onpresence
+        self.save_name = save_name
+        self._presence_client = None
         self.shouldstop = shouldstop or (lambda: False)
         self.waitstep = waitstep
         self.hold_window = hold_window
@@ -1003,6 +1125,14 @@ class GublanRuntime:
         self._last_pump = 0.0
         self._last_frame = time.perf_counter()
         self._gl_clear = (20, 20, 20)
+        self.cursor_visible = True
+        self.presence = {}
+        self.presence_app = ""
+        self._presence_sent = None
+        self._presence_warned = False
+        self._saves = None
+        self._saves_dirty = False
+        self._saves_written = 0.0
 
     # ----- values ----------------------------------------------------------
     def val(self, token):
@@ -1632,6 +1762,113 @@ class GublanRuntime:
             first, second = (self._rect_of(value) for value in args)
             return (first[0] < second[0] + second[2] and second[0] < first[0] + first[2]
                     and first[1] < second[1] + second[3] and second[1] < first[1] + first[3])
+        if name == "chance":
+            need(1)
+            return random.random() * 100 < number(args[0], "percent")
+        if name in ("shuffle", "unique", "average"):
+            need(1)
+            if not isinstance(args[0], list):
+                raise ValueError(f"{name}() needs a list")
+            if name == "shuffle":
+                mixed = list(args[0])
+                random.shuffle(mixed)
+                return mixed
+            if name == "unique":
+                kept = []
+                for item in args[0]:
+                    if item not in kept:
+                        kept.append(item)
+                return kept
+            if not args[0]:
+                raise ValueError("average() needs a list with numbers in it")
+            values = [number(item, "items") for item in args[0]]
+            return sum(values) / len(values)
+        if name == "count":
+            need(2)
+            container, item = args
+            if isinstance(container, str):
+                part = format_value(item)
+                return container.count(part) if part else 0
+            if isinstance(container, list):
+                return sum(1 for value in container if value == item)
+            raise ValueError("count() needs a list or text first")
+        if name in ("startswith", "endswith"):
+            need(2)
+            text, part = format_value(args[0]), format_value(args[1])
+            return text.startswith(part) if name == "startswith" else text.endswith(part)
+        if name == "pad":
+            if len(args) not in (2, 3):
+                raise ValueError("use pad(value, width) or pad(value, width, fill)")
+            width = int(number(args[1], "width"))
+            if width > 1000:
+                raise ValueError("pad() can make text up to 1000 letters long")
+            fill = format_value(args[2]) if len(args) == 3 else " "
+            if len(fill) != 1:
+                raise ValueError("pad() fills with a single letter or digit")
+            text = format_value(args[0])
+            if fill == "0" and text.startswith("-"):
+                return "-" + text[1:].rjust(width - 1, "0")
+            return text.rjust(width, fill)
+        if name == "decimals":
+            need(2)
+            digits = int(number(args[1], "digits"))
+            if not 0 <= digits <= 20:
+                raise ValueError("decimals() can show from 0 to 20 digits")
+            return f"{number(args[0]):.{digits}f}"
+        if name == "wrap":
+            need(3)
+            value, low, high = number(args[0]), number(args[1], "low"), number(args[2], "high")
+            if high <= low:
+                raise ValueError("wrap() needs high to be bigger than low")
+            return low + (value - low) % (high - low)
+        if name == "remap":
+            need(5)
+            value, low1, high1, low2, high2 = (number(item) for item in args)
+            if low1 == high1:
+                raise ValueError("remap() needs the first range to have two different ends")
+            return low2 + (value - low1) * (high2 - low2) / (high1 - low1)
+        if name == "approach":
+            need(3)
+            value, target, step = number(args[0]), number(args[1], "target"), abs(number(args[2], "step"))
+            return min(value + step, target) if value < target else max(value - step, target)
+        if name == "angleto":
+            if len(args) == 2 and all(isinstance(v, (Vector2, Vector3)) for v in args):
+                (x1, y1), (x2, y2) = self._components(args[0])[:2], self._components(args[1])[:2]
+            else:
+                need(4)
+                x1, y1, x2, y2 = (number(item) for item in args)
+            return math.degrees(math.atan2(y2 - y1, x2 - x1))
+        if name == "hsv":
+            need(3)
+            hue = number(args[0], "hue") % 360
+            saturation = max(0.0, min(1.0, number(args[1], "saturation")))
+            brightness = max(0.0, min(1.0, number(args[2], "value")))
+            return [int(round(channel * 255)) for channel in colorsys.hsv_to_rgb(hue / 360, saturation, brightness)]
+        if name == "isnumber":
+            need(1)
+            value = args[0]
+            if isinstance(value, bool):
+                return False
+            if isinstance(value, (int, float)):
+                return True
+            return isinstance(value, str) and bool(re.fullmatch(r"\s*-?(?:\d+\.?\d*|\.\d+)\s*", value))
+        if name in ("date", "clock", "now"):
+            if args:
+                raise ValueError(f"{name}() does not take any values")
+            if name == "now":
+                return time.time()
+            return time.strftime("%Y-%m-%d" if name == "date" else "%H:%M")
+        if name == "saved":
+            need(1)
+            return self._save_key(args[0]) in self._saves_data()
+        if name == "load":
+            if len(args) not in (1, 2):
+                raise ValueError('use load("name") or load("name", default)')
+            saves = self._saves_data()
+            key = self._save_key(args[0])
+            if key in saves:
+                return self._restored(saves[key])
+            return args[1] if len(args) == 2 else 0
         raise ValueError(f"there is no function named '{name}'")
 
     def _rect_of(self, value):
@@ -1771,6 +2008,8 @@ class GublanRuntime:
         except RecursionError:
             self._report(GublanError("functions are calling each other too deeply", self.current))
         finally:
+            self._flush_saves(quiet=True)
+            self._close_presence()
             if self.screen:
                 pygame.quit()
                 self.screen = None
@@ -2078,6 +2317,7 @@ class GublanRuntime:
             glLightfv(GL_LIGHT0, GL_DIFFUSE, (0.85, 0.85, 0.85, 1.0))
             self._gl_clear = None
         pygame.display.set_caption(caption)
+        pygame.mouse.set_visible(self.cursor_visible)
         self.text_font = self._font(self.text_size)
         self.vars["screen_width"], self.vars["screen_height"] = width, height
         self._last_frame = time.perf_counter()
@@ -2905,6 +3145,282 @@ class GublanRuntime:
         else:
             raise ValueError(f"'{name}' is not a list or map")
 
+    def _list_named(self, token):
+        name = str(token)
+        items = self.vars.get(name)
+        if not isinstance(items, list):
+            raise ValueError(f"list '{name}' does not exist yet")
+        return items
+
+    def _value_from(self, tokens):
+        return self.val(tokens[0]) if len(tokens) == 1 else self._val_text(" ".join(str(t) for t in tokens))
+
+    def _c_insert(self, statement):
+        items = self._list_named(statement.parts[1])
+        index = self.val(statement.parts[2])
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("list positions must be whole numbers")
+        if not -len(items) <= index <= len(items):
+            raise ValueError(f"position {index} is past the end (length {len(items)})")
+        items.insert(index, self._value_from(statement.parts[3:]))
+
+    def _c_remove(self, statement):
+        items = self._list_named(statement.parts[1])
+        value = self._value_from(statement.parts[2:])
+        if value in items:
+            items.remove(value)
+
+    def _c_shuffle(self, statement):
+        random.shuffle(self._list_named(statement.parts[1]))
+
+    def _c_sort(self, statement):
+        items = self._list_named(statement.parts[1])
+        extra = statement.parts[2:]
+        if extra and (len(extra) != 1 or extra[0] != "reverse"):
+            raise ValueError("use: sort <list>  or  sort <list> reverse")
+        try:
+            items.sort(reverse=bool(extra))
+        except TypeError as err:
+            raise ValueError("sort needs a list of all numbers or all text") from err
+
+    # ----- saving --------------------------------------------------------------------------------------------
+    def _save_path(self):
+        return os.path.join(saves_folder(), save_file_name(self.save_name))
+
+    def _save_key(self, value):
+        key = value if isinstance(value, str) else format_value(value)
+        key = key.strip()
+        if not key:
+            raise ValueError("give the saved value a name")
+        if len(key) > 100:
+            raise ValueError("saved names can be at most 100 letters long")
+        return key
+
+    def _saves_data(self):
+        if self._saves is None:
+            self._saves = {}
+            try:
+                with open(self._save_path(), "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                if isinstance(data, dict):
+                    self._saves = data
+            except (OSError, ValueError):
+                pass
+        return self._saves
+
+    def _flush_saves(self, quiet=False):
+        if not self._saves_dirty or self._saves is None:
+            return
+        path = self._save_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            temporary = path + ".tmp"
+            with open(temporary, "w", encoding="utf-8") as handle:
+                json.dump(self._saves, handle, indent=1, ensure_ascii=False)
+            os.replace(temporary, path)
+        except OSError as err:
+            if not quiet:
+                raise ValueError(f"could not save: {str(err).lower()}") from err
+            self.onlog(f"could not save: {str(err).lower()}")
+            return
+        self._saves_dirty = False
+        self._saves_written = time.monotonic()
+
+    def _saves_changed(self):
+        self._saves_dirty = True
+        # write at most once a second; whatever is left is written when the program ends
+        if time.monotonic() - self._saves_written >= 1.0:
+            self._flush_saves()
+
+    def _storable(self, value, depth=0):
+        if depth > 32:
+            raise ValueError("that value is nested too deeply to save")
+        if value is None or isinstance(value, (bool, str)):
+            return value
+        if isinstance(value, (int, float)):
+            if not math.isfinite(value):
+                raise ValueError("only finite numbers can be saved")
+            return value
+        if isinstance(value, list):
+            return [self._storable(item, depth + 1) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._storable(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, Vector2):
+            return {"$vec2": [value.x, value.y]}
+        if isinstance(value, Vector3):
+            return {"$vec3": [value.x, value.y, value.z]}
+        raise ValueError(f"can't save {kind_of(value)} values")
+
+    def _restored(self, value):
+        if isinstance(value, list):
+            return [self._restored(item) for item in value]
+        if isinstance(value, dict):
+            if len(value) == 1 and ("$vec2" in value or "$vec3" in value):
+                parts = value.get("$vec2") or value.get("$vec3")
+                if isinstance(parts, list) and len(parts) in (2, 3):
+                    return (Vector2 if len(parts) == 2 else Vector3)(*parts)
+            return {key: self._restored(item) for key, item in value.items()}
+        return value
+
+    def _c_save(self, statement):
+        key = self._save_key(self._name(statement.parts[1]))
+        stored = self._storable(self._value_from(statement.parts[2:]))
+        if len(json.dumps(stored)) > MAX_SAVED_VALUE:
+            raise ValueError("a saved value can be at most 256 kb")
+        saves = self._saves_data()
+        if key not in saves and len(saves) >= MAX_SAVED_NAMES:
+            raise ValueError(f"a program can save at most {MAX_SAVED_NAMES} names")
+        saves[key] = stored
+        self._saves_changed()
+
+    def _c_load(self, statement):
+        key = self._save_key(self._name(statement.parts[1]))
+        saves = self._saves_data()
+        if key in saves:
+            value = self._restored(saves[key])
+        elif len(statement.parts) > 3:
+            value = self._value_from(statement.parts[3:])
+        else:
+            value = 0
+        self._set_target(statement.parts[2], value)
+
+    def _c_forget(self, statement):
+        saves = self._saves_data()
+        if len(statement.parts) == 2 and statement.parts[1] == "all":
+            if not saves:
+                return
+            saves.clear()
+        else:
+            key = self._save_key(self._name(statement.parts[1]))
+            if key not in saves:
+                return
+            del saves[key]
+        self._saves_changed()
+
+    # ----- discord status ------------------------------------------------------------------------------------
+    def presence_activity(self):
+        """the discord activity built from the presence lines that have run, or None."""
+        state = self.presence
+        activity = {key: state[key] for key in ("details", "state") if state.get(key)}
+        assets = {key: state[key] for key in ("large_image", "large_text", "small_image", "small_text")
+                  if state.get(key)}
+        if assets:
+            activity["assets"] = assets
+        timestamps = {key: state[key] for key in ("start", "end") if state.get(key)}
+        if timestamps:
+            activity["timestamps"] = timestamps
+        if state.get("party"):
+            activity["party"] = {"id": "gublan-party", "size": list(state["party"])}
+        if state.get("buttons"):
+            activity["buttons"] = [dict(button) for button in state["buttons"]]
+        return activity or None
+
+    def _c_presence(self, statement):
+        parts = statement.parts
+        problem = _presence_problem(parts[1:])
+        if problem:
+            raise ValueError(problem)
+        what, rest = str(parts[1]).lower(), parts[2:]
+        state = self.presence
+        if what in ("details", "state"):
+            text = self._text(rest).strip() if rest else ""
+            if text:
+                state[what] = text[:128]
+            else:
+                state.pop(what, None)
+        elif what in ("image", "smallimage"):
+            size = "large" if what == "image" else "small"
+            if not rest:
+                state.pop(f"{size}_image", None)
+                state.pop(f"{size}_text", None)
+            else:
+                state[f"{size}_image"] = format_value(self._val_text(rest[0])).strip()
+                hover = self._text(rest[1:]).strip() if len(rest) > 1 else ""
+                if hover:
+                    state[f"{size}_text"] = hover[:128]
+                else:
+                    state.pop(f"{size}_text", None)
+        elif what == "button":
+            if not rest:
+                state.pop("buttons", None)
+            else:
+                address = format_value(self._val_text(rest[0])).strip()
+                if not address.lower().startswith(("https://", "http://")) or " " in address:
+                    raise ValueError("the button needs a web address that starts with https://")
+                label = self._text(rest[1:]).strip()[:32]
+                buttons = [button for button in state.get("buttons", []) if button["label"] != label]
+                if len(buttons) >= 2:
+                    raise ValueError("discord shows at most two buttons. use presence button to remove them")
+                buttons.append({"label": label, "url": address})
+                state["buttons"] = buttons
+        elif what == "party":
+            players, most = int(self._num(rest[0], "players")), int(self._num(rest[1], "most players"))
+            if players < 1 or most < players:
+                raise ValueError("use presence party <players> <most-players>, like presence party 1 4")
+            state["party"] = (players, most)
+        elif what == "timer":
+            state.pop("end", None)
+            if rest:
+                state.pop("start", None)
+            else:
+                state["start"] = int(time.time())
+        elif what == "countdown":
+            seconds = self._num(rest[0], "countdown seconds")
+            state.pop("start", None)
+            if seconds > 0:
+                state["end"] = int(time.time() + seconds)
+            else:
+                state.pop("end", None)
+        elif what == "app":
+            application = format_value(self._val_text(rest[0])).strip()
+            if not (application.isdigit() and 15 <= len(application) <= 22):
+                raise ValueError("a discord application id is a long number from the discord developer portal")
+            self.presence_app = application
+        elif what == "clear":
+            state.clear()
+        self._send_presence()
+
+    def _send_presence(self):
+        activity = self.presence_activity()
+        sent = (self.presence_app, activity)
+        if sent == self._presence_sent:
+            return
+        self._presence_sent = sent
+        if self.onpresence is not None:
+            self.onpresence(self.presence_app, activity)
+            return
+        client = self._presence_client
+        if client is None:
+            if activity is None:
+                return
+            try:
+                from gublanpresence import DEFAULT_APPLICATION_ID, PresenceClient
+            except ImportError:
+                if not self._presence_warned:
+                    self._presence_warned = True
+                    self.onlog("discord status is not available in this copy of gublan")
+                return
+            client = self._presence_client = PresenceClient(self.presence_app or DEFAULT_APPLICATION_ID)
+        if self.presence_app:
+            client.set_application(self.presence_app)
+        client.update(activity)
+
+    def _close_presence(self):
+        client, self._presence_client = self._presence_client, None
+        if client is not None:
+            try:
+                client.close(timeout=1.5)
+            except Exception:  # noqa: BLE001 - discord going away never stops a program from closing
+                pass
+
+    def _c_cursor(self, statement):
+        choice = str(statement.parts[1]).lower()
+        if choice not in ("show", "hide") or len(statement.parts) > 2:
+            raise ValueError("use: cursor show  or  cursor hide")
+        self.cursor_visible = choice == "show"
+        if self.screen is not None:
+            pygame.mouse.set_visible(self.cursor_visible)
+
     def _c_mode(self, statement):
         if statement.parts[1] not in ("2d", "3d"):
             raise ValueError("choose either 2d or 3d")
@@ -3294,7 +3810,7 @@ class GublanRuntime:
         self.vars[statement.parts[2]] = public_https_get(statement.parts[1])
 
 
-def run_standalone(source, base_dir, title=None, console=False):
+def run_standalone(source, base_dir, title=None, console=False, save_name=None):
     """entry point for exported executables.
 
     window programs show errors in a message box. console programs (exported with a
@@ -3328,6 +3844,7 @@ def run_standalone(source, base_dir, title=None, console=False):
     runtime = GublanRuntime(
         onlog=log, onerror=error, base_dir=base_dir, hold_window=True,
         oninput=ask if console else None, onpopup=popup if console else None,
+        save_name=save_name or title or os.path.basename(os.path.abspath(base_dir)),
     )
     if title:
         runtime.window_title = title
