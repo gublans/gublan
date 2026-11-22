@@ -17,7 +17,7 @@ from tkinter import filedialog
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
 
 from . import blocks as blocks_module
-from . import config, exporter, theme
+from . import config, exporter, theme, updater, version
 from .blocks import BlocksView
 from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, SettingsDialog, SpriteEditor, WelcomePage,
                       ask, confirm, message)
@@ -188,6 +188,7 @@ class GublanStudio:
         self.apply_settings(self.settings, save=False)
         self._restore(paths)
         self.root.after(40, self._poll)
+        self.root.after(5000, self._check_for_updates)
         self.root.protocol("WM_DELETE_WINDOW", self.exit)
 
     # ----- window ----------------------------------------------------------------------------------------
@@ -1883,6 +1884,58 @@ class GublanStudio:
         self.status_message_job = self.root.after(int(seconds * 1000),
                                                   lambda: self.status_message.configure(text=""))
 
+    def _check_for_updates(self):
+        if updater.is_installed_application():
+            threading.Thread(target=self._lookup_update, daemon=True).start()
+
+    def _lookup_update(self):
+        try:
+            release = updater.latest_release(version.VERSION)
+        except (OSError, ValueError) as error:
+            try:
+                self.root.after(0, lambda error=error: self.flash(f"update check failed: {error}"))
+            except tk.TclError:
+                pass
+            return
+        if release:
+            try:
+                self.root.after(0, lambda: self._offer_update(*release))
+            except tk.TclError:
+                pass
+
+    def _offer_update(self, release_tag, download_url):
+        if not confirm(self.root, "update available", f"version {release_tag} is available. download and install it?",
+                       yes="install update", no="later"):
+            return
+        self.flash("downloading update...")
+        threading.Thread(target=self._download_update, args=(download_url,), daemon=True).start()
+
+    def _download_update(self, download_url):
+        try:
+            installer = updater.download_installer(download_url)
+        except (OSError, ValueError) as error:
+            try:
+                self.root.after(0, lambda error=error: message(
+                    self.root, "update failed", str(error), kind="error"))
+            except tk.TclError:
+                pass
+            return
+        try:
+            self.root.after(0, lambda: self._install_update(installer))
+        except tk.TclError:
+            updater.remove_download(installer)
+
+    def _install_update(self, installer):
+        message(self.root, "update ready", "Gublan Studio will close to run the installer.")
+        try:
+            exited = self.exit(after_exit=lambda: updater.launch_installer(installer))
+        except OSError as error:
+            message(self.root, "update failed", str(error), kind="error")
+            updater.remove_download(installer)
+            return
+        if not exited:
+            updater.remove_download(installer)
+
     # ----- session -------------------------------------------------------------------------------------
     def _restore(self, paths):
         opened = False
@@ -1905,18 +1958,18 @@ class GublanStudio:
             self._show_empty()
         self.set_state("ready", MOSS_LIGHT)
 
-    def exit(self):
+    def exit(self, after_exit=None):
         dirty = [doc for doc in self.docs if doc.dirty]
         if dirty:
             names = ", ".join(doc.name for doc in dirty[:4]) + (" and more" if len(dirty) > 4 else "")
             answer = confirm(self.root, "exit", f"save changes to {names}?", yes="save all", no="cancel",
                              third="don't save")
             if answer is None or answer is False:
-                return
+                return False
             if answer is True:
                 for doc in dirty:
                     if not self.save(doc):
-                        return
+                        return False
         if self.running():
             self.stop()
             self.run_thread.join(timeout=1.5)
@@ -1932,7 +1985,10 @@ class GublanStudio:
         if self.bottom_visible() and self.bottom.winfo_height() > 60:
             self.settings["bottom_height"] = unpx(self.bottom.winfo_height())
         config.save(self.settings)
+        if after_exit:
+            after_exit()
         self.root.destroy()
+        return True
 
 
 def main(argv=None):

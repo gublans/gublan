@@ -16,7 +16,7 @@ if ROOT not in sys.path:
 
 import gublanconvert  # noqa: E402
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source  # noqa: E402
-from studio import blocks, docsgen, exporter, theme  # noqa: E402
+from studio import blocks, docsgen, exporter, theme, updater  # noqa: E402
 from studio.app import find_includes  # noqa: E402
 from studio.dialogs import _score  # noqa: E402
 from studio.editor import line_tokens  # noqa: E402
@@ -87,6 +87,7 @@ class ConverterTests(unittest.TestCase):
                 self.assertEqual(analyze_source(result.text), [])
                 self.assertEqual(run(result.text)[0], ["score 3", "5"])
 
+
     def test_language_is_detected_from_the_code(self):
         for language, code in self.SAMPLES.items():
             with self.subTest(language=language):
@@ -105,6 +106,30 @@ class ConverterTests(unittest.TestCase):
         self.assertGreater(result.todos, 0)
         self.assertIn("// todo", result.text)
         self.assertEqual([item for item in analyze_source(result.text) if item.get("severity") == "error"], [])
+
+
+class UpdaterTests(unittest.TestCase):
+    def test_release_payload_requires_a_newer_version_and_installer_asset(self):
+        payload = {
+            "tag_name": "v1.2.0",
+            "assets": [{
+                "name": "GublanStudioSetup.exe",
+                "browser_download_url": "https://github.com/gublans/gublan/releases/download/v1.2.0/GublanStudioSetup.exe",
+            }],
+        }
+        self.assertEqual(updater.latest_release_from_payload(payload, "1.1.9"),
+                         ("v1.2.0", payload["assets"][0]["browser_download_url"]))
+        self.assertIsNone(updater.latest_release_from_payload(payload, "1.2.0"))
+
+    def test_release_payload_rejects_missing_or_untrusted_installer(self):
+        with self.assertRaisesRegex(ValueError, "missing GublanStudioSetup.exe"):
+            updater.latest_release_from_payload({"tag_name": "v2.0.0", "assets": []}, "1.0.0")
+        payload = {
+            "tag_name": "v2.0.0",
+            "assets": [{"name": "GublanStudioSetup.exe", "browser_download_url": "http://example.com/setup.exe"}],
+        }
+        with self.assertRaisesRegex(ValueError, "github.com over HTTPS"):
+            updater.latest_release_from_payload(payload, "1.0.0")
 
 
 class ExportPlanTests(unittest.TestCase):
