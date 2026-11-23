@@ -194,15 +194,18 @@ from gublancore import run_standalone
 
 SOURCE = {source!r}
 TITLE = {title!r}
+STYLE = {style!r}
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.argv[0])))
 
 if __name__ == "__main__":
-    sys.exit(run_standalone(SOURCE, BASE_DIR, title=TITLE, console={console!r}))
+    sys.exit(run_standalone(SOURCE, BASE_DIR, title=TITLE, console={console!r}, style=STYLE))
 '''
 
 
-def program_text(source, title, console):
-    return PROGRAM_TEMPLATE.format(source=source, title=title, console=bool(console))
+def program_text(source, title, console, style=None):
+    """the python file pyinstaller builds. style is the studio's game window and popup look."""
+    return PROGRAM_TEMPLATE.format(source=source, title=title, console=bool(console),
+                                   style=dict(style) if isinstance(style, dict) and style else None)
 
 
 def core_folder():
@@ -268,7 +271,7 @@ def safe_name(text):
 
 
 def build(source, output, python, base_dir, expand_includes, progress=None, include_folder=True,
-          onefile=True, console=None, icon_path=None, title=None):
+          onefile=True, console=None, icon_path=None, title=None, style=None):
     """build the program. raises ExportError with a lowercase message when something is wrong."""
     report = progress or (lambda _status: None)
     report("checking the script and its media...")
@@ -291,7 +294,7 @@ def build(source, output, python, base_dir, expand_includes, progress=None, incl
     with tempfile.TemporaryDirectory(prefix="gublan-export-") as build_dir:
         script_path = os.path.join(build_dir, "gublan_program.py")
         with open(script_path, "w", encoding="utf-8") as handle:
-            handle.write(program_text(plan.source, (title or name).lower(), console))
+            handle.write(program_text(plan.source, (title or name).lower(), console, style))
         command, staged = pyinstaller_command(python, name, script_path, build_dir, plan, console, onefile,
                                               icon_path)
         media = f"{len(plan.assets)} media {'file' if len(plan.assets) == 1 else 'files'}"

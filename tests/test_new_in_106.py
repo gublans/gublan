@@ -27,9 +27,9 @@ from studio import collab, config, guard, textfiles, theme, updater, version  # 
 
 
 class VersionTests(unittest.TestCase):
-    def test_version_is_106(self):
-        self.assertEqual(version.VERSION, "1.0.6")
-        self.assertEqual(gublanmcp._version(), "1.0.6")
+    def test_version_is_at_least_106(self):
+        self.assertGreaterEqual(tuple(int(part) for part in version.VERSION.split(".")), (1, 0, 6))
+        self.assertEqual(gublanmcp._version(), version.VERSION)
 
     def test_new_settings_have_defaults(self):
         for key in ("reload_changed_files", "live_share_files"):

@@ -45,3 +45,45 @@ def translate(source, name="program"):
     except Exception as err:  # the playground should report anything, never hang
         return json.dumps({"ok": False, "error": f"{type(err).__name__}: {err}"})
     return json.dumps({"ok": True, "code": result.text, "notes": list(result.notes), "todos": result.todos})
+
+
+PROJECT = "/gublan/project"
+
+
+def _split_usage(text):
+    """'abs(x) the distance of x from zero' -> ('abs(x)', 'the distance of x from zero')."""
+    usage, _, summary = str(text).partition(") ")
+    if not summary:
+        return str(text), ""
+    return usage + ")", summary
+
+
+def reference():
+    """every command, function and colour name, as json, for the playground's reference panel and suggestions."""
+    commands = [{"name": name, "category": spec[0], "usage": spec[1], "summary": spec[3], "example": spec[4]}
+                for name, spec in sorted(gublancore.COMMAND_SPECS.items())]
+    functions = []
+    for name, text in sorted(gublancore.EXPRESSION_FUNCTIONS.items()):
+        usage, summary = _split_usage(text)
+        functions.append({"name": name, "usage": usage, "summary": summary})
+    colors = {name: list(value[:3]) for name, value in sorted(gublancore.COLORS.items())}
+    words = {"openers": sorted(gublancore.BLOCK_OPENERS), "middles": sorted(gublancore.BLOCK_MIDDLES),
+             "keywords": sorted(getattr(gublancore, "EXPRESSION_KEYWORDS", ()))}
+    return json.dumps({"commands": commands, "functions": functions, "colors": colors, "words": words})
+
+
+def set_files(files_json, folder=PROJECT):
+    """write the playground's other project files where include can find them. files_json is {name: text}."""
+    import os
+    files = json.loads(files_json)
+    os.makedirs(folder, exist_ok=True)
+    for old in os.listdir(folder):
+        if old.endswith(".gubl") and old not in files:
+            os.remove(os.path.join(folder, old))
+    for name, text in files.items():
+        name = os.path.basename(str(name))
+        if not name.endswith(".gubl") or name.startswith("."):
+            continue
+        with open(os.path.join(folder, name), "w", encoding="utf-8") as handle:
+            handle.write(str(text))
+    return len(files)

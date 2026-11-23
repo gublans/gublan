@@ -8,6 +8,7 @@ the page itself lives in web/. this copies it together with the real gublan file
 the javascript translator, the javascript runtime, the modules and the examples), so the website always
 runs the same language as the studio. nothing in this folder is used by the windows app or the installer.
 """
+import ast
 import json
 import os
 import re
@@ -47,6 +48,58 @@ def _uses_3d(path):
         return any(re.match(r"\s*mode\s+3d\b", line) for line in handle)
 
 
+def _constants(relative):
+    """the top-level names of a python file whose values can be read without running it."""
+    with open(os.path.join(ROOT, relative), "r", encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    found = {}
+
+    def value(node):
+        if isinstance(node, ast.Name) and node.id in found:
+            return found[node.id]
+        if isinstance(node, ast.Dict):
+            return {value(k): value(v) for k, v in zip(node.keys, node.values)}
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return [value(item) for item in node.elts]
+        return ast.literal_eval(node)
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                found[node.targets[0].id] = value(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                continue
+        elif isinstance(node, ast.FunctionDef) and node.name == "accent_choices":
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Return):
+                    found["ACCENTS"] = value(inner.value)
+    return found
+
+
+def _looks():
+    """gublan studio's themes, accent colours and game window presets, so the playground can offer the same ones."""
+    try:
+        theme = _constants("studio/theme.py")
+        moss_colors = {name.lower(): theme[name] for name in theme["COLOR_NAMES"]}
+        themes = {}
+        for name, info in theme["BUILTIN_THEMES"].items():
+            themes[name] = {"about": info.get("about", ""), "dark": bool(info.get("dark", True)),
+                            "colors": dict(moss_colors, **info.get("colors", {})),
+                            "syntax": dict(theme["SYNTAX"], **info.get("syntax", {}))}
+        accents = [{"name": name, "color": color} for name, color in theme.get("ACCENTS", [])]
+    except (OSError, KeyError, TypeError, ValueError, SyntaxError):
+        themes, accents = {}, []
+    try:
+        core = _constants("gublancore.py")
+        dialogs = _constants("studio/dialogs.py")
+        game = {"defaults": core["GAME_STYLE"], "positions": core["DIALOG_POSITIONS"],
+                "animations": core["DIALOG_ANIMATIONS"], "looks": dialogs["POPUP_LOOKS"],
+                "sizes": dialogs["WINDOW_SIZES"], "demo": dialogs["STYLE_DEMO"]}
+    except (OSError, KeyError, TypeError, ValueError, SyntaxError):
+        game = {}
+    return themes, accents, game
+
+
 def build(out):
     out = os.path.abspath(out)
     if os.path.isdir(out):
@@ -76,10 +129,14 @@ def build(out):
     with open(os.path.join(ROOT, "studio", "version.py"), "r", encoding="utf-8") as handle:
         version = re.search(r'VERSION\s*=\s*"([^"]+)"', handle.read()).group(1)
 
+    themes, accents, game = _looks()
     manifest = {
         "version": version,
         "python": PYTHON_FILES + ["runtimes/gublan_runtime.js"] + ["modules/" + name for name in modules],
         "examples": examples,
+        "themes": themes,
+        "accents": accents,
+        "game": game,
     }
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8", newline="\n") as handle:
         json.dump(manifest, handle, indent=2)

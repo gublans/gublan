@@ -436,6 +436,163 @@
     average: (items) => G.sum(items) / items.length,
   });
 
+  // ----- added in 1.0.7: more math, lists and maps, text, colours and timers --------------------------------------
+  const EASINGS = ["linear", "in", "out", "inout", "smooth", "bounce", "elastic", "back"];
+  G.ease = (t, kind = "inout") => {
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    kind = str(kind).trim().toLowerCase();
+    if (kind === "linear") return t;
+    if (kind === "in") return t * t;
+    if (kind === "out") return 1 - (1 - t) * (1 - t);
+    if (kind === "inout") return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    if (kind === "smooth") return t * t * (3 - 2 * t);
+    if (kind === "bounce") {
+      const n = 7.5625, d = 2.75;
+      if (t < 1 / d) return n * t * t;
+      if (t < 2 / d) { t -= 1.5 / d; return n * t * t + 0.75; }
+      if (t < 2.5 / d) { t -= 2.25 / d; return n * t * t + 0.9375; }
+      t -= 2.625 / d; return n * t * t + 0.984375;
+    }
+    if (kind === "elastic") return t === 0 || t === 1 ? t : 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * ((2 * Math.PI) / 3)) + 1;
+    if (kind === "back") { const c = 1.70158; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; }
+    return fail(`'${kind}' is not an easing. try: ${EASINGS.join(", ")}`);
+  };
+  const listOf = (v) => (typeof v === "string" ? Array.from(v) : v);
+  function colorChannels(value) {
+    if (Array.isArray(value) && (value.length === 3 || value.length === 4)) return value.slice(0, 3).map((c) => G.clamp(Math.trunc(c), 0, 255));
+    const text = str(value).toLowerCase();
+    if (COLORS[text]) return COLORS[text].slice();
+    if (/^#[0-9a-f]{6}$/.test(text)) return [1, 3, 5].map((i) => parseInt(text.slice(i, i + 2), 16));
+    if (/^#[0-9a-f]{3}$/.test(text)) return [1, 2, 3].map((i) => parseInt(text[i] + text[i], 16));
+    return fail(`'${str(value)}' is not a colour. use a name like red, #ff8800 or [255, 136, 0]`);
+  }
+  const timers = new Map();
+  Object.assign(G, {
+    hypot: (x, y) => Math.hypot(x, y),
+    fract: (x) => x - Math.floor(x),
+    smoothstep: (low, high, x) => {
+      if (high === low) return x < low ? 0 : 1;
+      const t = G.clamp((x - low) / (high - low), 0, 1);
+      return t * t * (3 - 2 * t);
+    },
+    snap: (x, step) => (step === 0 ? x : Math.floor(x / step + 0.5) * step),
+    between: (x, low, high) => low <= x && x <= high,
+    gcd: (a, b) => { a = Math.abs(Math.trunc(a)); b = Math.abs(Math.trunc(b)); while (b) [a, b] = [b, a % b]; return a; },
+    median: (items) => {
+      if (!items.length) fail("median() of an empty list has no middle");
+      const sorted = items.slice().sort((a, b) => a - b), middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+    },
+    product: (items) => items.reduce((a, b) => a * b, 1),
+    first: (items) => (listOf(items).length ? listOf(items)[0] : null),
+    last: (items) => { const list = listOf(items); return list.length ? list[list.length - 1] : null; },
+    take: (items, n) => items.slice(0, Math.max(0, Math.trunc(n))),
+    drop: (items, n) => items.slice(Math.max(0, Math.trunc(n))),
+    chunk: (items, size) => {
+      size = Math.trunc(size);
+      if (size < 1) fail("chunk() needs a size of 1 or more");
+      const list = listOf(items), out = [];
+      for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+      return out;
+    },
+    enumerate: (items) => listOf(items).map((v, i) => [i, v]),
+    minby: (items, f) => {
+      const list = listOf(items);
+      if (!list.length) return null;
+      let best = list[0], key = f(best);
+      for (const v of list.slice(1)) { const k = f(v); if (k < key) { best = v; key = k; } }
+      return best;
+    },
+    maxby: (items, f) => {
+      const list = listOf(items);
+      if (!list.length) return null;
+      let best = list[0], key = f(best);
+      for (const v of list.slice(1)) { const k = f(v); if (k > key) { best = v; key = k; } }
+      return best;
+    },
+    groupby: (items, f) => {
+      const groups = {};
+      for (const v of listOf(items)) { const k = str(f(v)); (groups[k] = groups[k] || []).push(v); }
+      return groups;
+    },
+    without: (items, value) => listOf(items).filter((v) => !eq(v, value)),
+    fill: (value, count) => Array.from({ length: Math.max(0, Math.trunc(count)) },
+      () => (Array.isArray(value) ? value.slice() : isMap(value) ? Object.assign({}, value) : value)),
+    merge: (a, b) => Object.assign({}, a, b),
+    get: (container, key, fallback = null) => {
+      if (isMap(container)) return str(key) in container ? container[str(key)] : fallback;
+      if (typeof key !== "number" || !Number.isInteger(key)) return fallback;
+      const index = key < 0 ? container.length + key : key;
+      return index >= 0 && index < container.length ? container[index] : fallback;
+    },
+    entries: (map) => Object.entries(map),
+    frompairs: (pairs) => {
+      const made = {};
+      for (const pair of pairs) {
+        if (!Array.isArray(pair) || pair.length !== 2) fail("frompairs() needs a list of [name, value] pairs");
+        made[str(pair[0])] = pair[1];
+      }
+      return made;
+    },
+    commas: (x) => {
+      const text = str(x), sign = text.startsWith("-") ? "-" : "";
+      const [digits, rest] = text.replace(/^-/, "").split(".");
+      if (!/^\d+$/.test(digits)) return text;
+      return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (rest !== undefined ? "." + rest : "");
+    },
+    ordinal: (n) => {
+      n = Math.trunc(n);
+      const lastTwo = Math.abs(n) % 100, last = Math.abs(n) % 10;
+      return `${n}${lastTwo >= 11 && lastTwo <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[last] || "th"}`;
+    },
+    plural: (count, word, many) => `${str(count)} ${count === 1 ? str(word) : many === undefined ? str(word) + "s" : str(many)}`,
+    wraptext: (text, width) => {
+      width = Math.trunc(width);
+      if (width < 1) fail("wraptext() needs a width of 1 or more");
+      const lines = [];
+      for (const paragraph of str(text).split("\n")) {
+        let line = "";
+        for (let word of paragraph.split(/\s+/).filter(Boolean)) {
+          while (word.length > width) {
+            if (line) { lines.push(line); line = ""; }
+            lines.push(word.slice(0, width));
+            word = word.slice(width);
+          }
+          if (!word) continue;
+          if (!line) line = word;
+          else if (line.length + 1 + word.length <= width) line += " " + word;
+          else { lines.push(line); line = word; }
+        }
+        lines.push(line);
+      }
+      return lines;
+    },
+    mixcolor: (a, b, t) => {
+      const one = colorChannels(a), two = colorChannels(b);
+      t = G.clamp(t, 0, 1);
+      return one.map((c, i) => Math.floor(c + (two[i] - c) * t + 0.5));
+    },
+    randomcolor: () => G.hsv(Math.random() * 360, 0.65, 0.95),
+    cooldown: (name, seconds) => {
+      const key = "cooldown:" + str(name), now = G.time(), last = timers.get(key);
+      if (last === undefined || now - last >= seconds) { timers.set(key, now); return true; }
+      return false;
+    },
+    pulse: (name, seconds) => {
+      const key = "pulse:" + str(name), now = G.time(), last = timers.get(key);
+      if (last === undefined) { timers.set(key, now); return false; }
+      if (now - last >= seconds) { timers.set(key, now); return true; }
+      return false;
+    },
+    after: (name, seconds) => {
+      const key = "after:" + str(name), now = G.time();
+      if (!timers.has(key)) { timers.set(key, now); return seconds <= 0; }
+      return now - timers.get(key) >= seconds;
+    },
+    scrollx: () => scrollX,
+    scrolly: () => scrollY,
+  });
+
   // ----- saving -------------------------------------------------------------------------------------------------
   let saveName = "program";
   // the same json shapes gublan itself saves, so saves and json text work in both
@@ -562,8 +719,11 @@
   G.textsize = (value) => { textSize = Math.trunc(value); };
   G.clear = () => {};
 
+  const STYLE_KEYS = ["layer", "alpha", "fixed"];
   function add(name, type, parts) {
+    const old = objects.get(str(name));
     const obj = Object.assign({ type, color }, parts);
+    if (old) for (const key of STYLE_KEYS) if (key in old && !(key in obj)) obj[key] = old[key];
     objects.set(str(name), obj);
     return obj;
   }
@@ -571,6 +731,101 @@
   G.circle = (name, x, y, r) => add(name, "circle", { x, y, r });
   G.line = (name, x, y, x2, y2, width = 1) => add(name, "line", { x, y, x2, y2, width: Math.max(1, width) });
   G.text = (name, x, y, text) => add(name, "text", { x, y, text: str(text), size: textSize });
+  G.ellipse = (name, x, y, w, h) => add(name, "ellipse", { x, y, w, h });
+  G.polygon = (name, points) => {
+    if (points.length % 2) fail("polygon points come in pairs: x y x y x y");
+    if (points.length < 6) fail("a polygon needs at least three points");
+    const xs = points.filter((_, i) => i % 2 === 0), ys = points.filter((_, i) => i % 2 === 1);
+    const left = Math.min(...xs), top = Math.min(...ys);
+    const w = Math.max(1, Math.max(...xs) - left), h = Math.max(1, Math.max(...ys) - top);
+    add(name, "polygon", { x: left, y: top, w, h, pw: w, ph: h, points: xs.map((x, i) => [x - left, ys[i] - top]) });
+  };
+
+  // ----- the view, effects and tweens ------------------------------------------------------------------------------
+  let scrollX = 0, scrollY = 0, shake = null, shakeX = 0, shakeY = 0, effectsTime = performance.now();
+  let particles = [];
+  let tweens = [];
+  G.scroll = (x, y) => { scrollX = x; scrollY = y; };
+  G.shake = (strength, seconds = 0.3) => {
+    if (strength < 0 || seconds < 0) fail("shake strength and time can't be negative");
+    shake = strength > 0 && seconds > 0 ? [strength, seconds, seconds] : null;
+    if (!shake) shakeX = shakeY = 0;
+  };
+  G.particles = (x, y, count = 20, speed = 160) => {
+    count = Math.trunc(count);
+    if (count < 0 || count > 500) fail("particles can make from 0 to 500 at a time");
+    const shade = rgb(color);
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2, velocity = speed * (0.25 + Math.random() * 0.75);
+      const life = 0.45 + Math.random() * 0.55;
+      particles.push([x, y, Math.cos(angle) * velocity, Math.sin(angle) * velocity, life, life, shade, 3 + Math.random() * 3]);
+    }
+    if (particles.length > 2000) particles.splice(0, particles.length - 2000);
+  };
+  const TWEEN_FIELDS = { x: "x", y: "y", z: "z", w: "w", width: "w", h: "h", height: "h", r: "r", radius: "r", angle: "angle",
+    rotation: "angle", opacity: "alpha", alpha: "alpha", size: "size" };
+  function tweenStart(obj, key) {
+    if (key === "alpha") return obj.alpha === undefined ? 1 : obj.alpha;
+    if ((key === "w" || key === "h") && obj[key] === undefined && obj.picture) {
+      return key === "w" ? obj.picture.naturalWidth : obj.picture.naturalHeight;
+    }
+    return obj[key] === undefined ? 0 : obj[key];
+  }
+  function applyTween(obj, key, value) {
+    if ((key === "x" || key === "y") && obj.type === "line") obj[key + "2"] += value - obj[key];
+    if (key === "alpha") value = G.clamp(value, 0, 1);
+    else if (["w", "h", "r", "size"].includes(key)) value = Math.max(0, value);
+    obj[key] = value;
+  }
+  G.tween = (name, field, value, seconds, easing = "inout") => {
+    const obj = object(name), key = TWEEN_FIELDS[str(field).toLowerCase()];
+    const pictured = obj.type === "image" || obj.type === "sprite";
+    if (!key || !(key in obj || key === "alpha" || (pictured && ["w", "h", "angle"].includes(key)))) {
+      fail(`tween can change x, y, w, h, r, angle or opacity of a ${obj.type}, not '${str(field)}'`);
+    }
+    if (seconds < 0) fail("tween time can't be negative");
+    easing = str(easing).toLowerCase();
+    if (!EASINGS.includes(easing)) fail(`'${easing}' is not an easing. try: ${EASINGS.join(", ")}`);
+    tweens = tweens.filter((t) => !(t[0] === obj && t[1] === key));
+    if (seconds === 0) applyTween(obj, key, value);
+    else tweens.push([obj, key, tweenStart(obj, key), value, seconds, 0, easing]);
+  };
+  G.opacity = (name, value) => {
+    value = G.clamp(value, 0, 1);
+    if (name === "all") objects.forEach((o) => { o.alpha = value; });
+    else object(name).alpha = value;
+  };
+  G.layer = (name, value) => { object(name).layer = value; };
+  G.fixed = (name) => { object(name).fixed = true; };
+  function tickEffects() {
+    const now = performance.now(), step = Math.min(0.1, Math.max(0, (now - effectsTime) / 1000));
+    effectsTime = now;
+    if (tweens.length) {
+      for (const tween of tweens.slice()) {
+        const [obj, key, start, target, duration, elapsed, easing] = tween;
+        tween[5] = elapsed + step;
+        const progress = duration > 0 ? Math.min(1, tween[5] / duration) : 1;
+        applyTween(obj, key, start + (target - start) * G.ease(progress, easing));
+        if (progress >= 1) tweens.splice(tweens.indexOf(tween), 1);
+      }
+    }
+    if (particles.length) {
+      particles = particles.filter((p) => {
+        p[4] -= step;
+        if (p[4] <= 0) return false;
+        p[0] += p[2] * step; p[1] += p[3] * step; p[3] += 240 * step;
+        return true;
+      });
+    }
+    if (shake) {
+      shake[1] -= step;
+      if (shake[1] <= 0) { shake = null; shakeX = shakeY = 0; }
+      else {
+        const strength = (shake[0] * shake[1]) / shake[2];
+        shakeX = (Math.random() * 2 - 1) * strength; shakeY = (Math.random() * 2 - 1) * strength;
+      }
+    }
+  }
   function picture(path) {
     if (!images[path] && inBrowser) {
       images[path] = new Image();
@@ -697,6 +952,7 @@
   };
 
   function draw() {
+    tickEffects();
     if (!ctx) return;
     ctx.fillStyle = rgb(background);
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -708,20 +964,74 @@
       ctx.font = font(20);
       ctx.fillText(uiButton, 32, 30);
     }
-    for (const [name, obj] of objects) {
+    const items = [...objects];
+    if (items.some(([, o]) => o.layer)) items.sort((a, b) => (a[1].layer || 0) - (b[1].layer || 0));
+    for (const [name, obj] of items) {
       if (obj.hidden) continue;
+      const alpha = obj.alpha === undefined ? 1 : obj.alpha;
+      if (alpha <= 0) continue;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      if (!UI_KINDS.has(obj.type) && !obj.fixed) ctx.translate(shakeX - scrollX, shakeY - scrollY);
+      drawObject(name, obj);
+      ctx.restore();
+    }
+    if (particles.length) {
+      ctx.save();
+      ctx.translate(shakeX - scrollX, shakeY - scrollY);
+      for (const [x, y, , , life, total, shade, size] of particles) {
+        const fade = G.clamp(life / total, 0, 1), side = Math.max(1, size * (0.4 + 0.6 * fade));
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = shade;
+        ctx.fillRect(x - side / 2, y - side / 2, side, side);
+      }
+      ctx.restore();
+    }
+    if (showFps) drawFps();
+  }
+  let showFps = false;
+  const frameTimes = [];
+  function drawFps() {
+    const now = performance.now();
+    frameTimes.push(now);
+    while (frameTimes.length && now - frameTimes[0] > 1000) frameTimes.shift();
+    const label = "fps " + frameTimes.length;
+    ctx.save();
+    ctx.font = font(18);
+    ctx.textBaseline = "top";
+    const width = ctx.measureText(label).width + 10;
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(canvas.width - width - 6, 6, width, 20);
+    ctx.fillStyle = G.style.accent;
+    ctx.fillText(label, canvas.width - width - 1, 9);
+    ctx.restore();
+  }
+  const UI_KINDS = new Set(["button", "textbox", "slider", "checkbox"]);
+  function drawObject(name, obj) {
+    {
       const shade = rgb(obj.color);
       ctx.fillStyle = shade;
       ctx.strokeStyle = shade;
       if (obj.type === "box") ctx.fillRect(obj.x, obj.y, obj.w, obj.h);
       else if (obj.type === "circle") { ctx.beginPath(); ctx.arc(obj.x, obj.y, Math.abs(obj.r), 0, Math.PI * 2); ctx.fill(); }
+      else if (obj.type === "ellipse") {
+        ctx.beginPath();
+        ctx.ellipse(obj.x + obj.w / 2, obj.y + obj.h / 2, Math.abs(obj.w / 2), Math.abs(obj.h / 2), 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (obj.type === "polygon") {
+        const sx = obj.pw ? obj.w / obj.pw : 1, sy = obj.ph ? obj.h / obj.ph : 1;
+        ctx.beginPath();
+        obj.points.forEach(([px, py], i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, obj.x + px * sx, obj.y + py * sy));
+        ctx.closePath();
+        ctx.fill();
+      }
       else if (obj.type === "line") {
         ctx.lineWidth = obj.width;
         ctx.beginPath(); ctx.moveTo(obj.x, obj.y); ctx.lineTo(obj.x2, obj.y2); ctx.stroke();
       } else if (obj.type === "text") { ctx.font = font(obj.size); ctx.fillText(obj.text, obj.x, obj.y); }
       else if (obj.type === "image" || obj.type === "sprite") {
         const p = obj.picture;
-        if (!p || !p.complete || !p.naturalWidth) continue;
+        if (!p || !p.complete || !p.naturalWidth) return;
         const w = obj.w === undefined ? p.naturalWidth : obj.w, h = obj.h === undefined ? p.naturalHeight : obj.h;
         ctx.save();
         ctx.translate(obj.x + w / 2, obj.y + h / 2);
@@ -782,6 +1092,7 @@
       if (left > 1) await sleep(left / 1000);
     } else {
       await sleep(Math.max(0, lastFrame + target - performance.now()) / 1000);
+      tickEffects();
     }
     const current = performance.now();
     G.dt = Math.min(0.25, (current - lastFrame) / 1000);
@@ -871,11 +1182,116 @@
   }
 
   // ----- questions and messages ------------------------------------------------------------------------------------------
+  // the look of popups and questions. a page can set globalThis.GUBLAN_STYLE before this file runs to change it.
+  // it takes this file's own names (dialog, text, accent...) or gublan studio's game style names (width,
+  // background, dialog_background, dialog_animation...), so the studio's tools > game window and popups
+  // settings carry over to web exports.
+  G.style = Object.assign({
+    dialog: "#141414", text: "#e6e6e6", accent: "#94b66c", border: "#2c2c2c", shade: 0.55,
+    font: "Segoe UI, Arial, sans-serif", size: 18, animate: true, animation: "pop", position: "center",
+    boxWidth: 520, borderWidth: 1, hints: false, hint: "#9a9a9a", field: "rgba(0,0,0,.25)", sound: false,
+  }, root.GUBLAN_STYLE || {});
+  (function gameStyle(given) {
+    if (!given) return;
+    const style = G.style, has = (key) => Object.prototype.hasOwnProperty.call(given, key);
+    const names = { dialog_background: "dialog", dialog_text: "text", dialog_accent: "accent", dialog_border: "border",
+      dialog_hint: "hint", dialog_field: "field", dialog_position: "position", dialog_width: "boxWidth",
+      dialog_border_width: "borderWidth", dialog_hints: "hints", dialog_sound: "sound" };
+    for (const [key, name] of Object.entries(names)) if (has(key)) style[name] = given[key];
+    if (has("dialog_shade")) style.shade = G.clamp(Number(given.dialog_shade) / 100, 0, 1);
+    if (has("dialog_text_size")) style.size = Math.max(10, Math.round(Number(given.dialog_text_size) * 0.72));
+    if (has("dialog_animation")) {
+      style.animation = str(given.dialog_animation);
+      style.animate = style.animation !== "none";
+    }
+    if (has("width") && has("height")) {
+      G.screen_width = Math.trunc(G.clamp(Number(given.width), 120, 4096));
+      G.screen_height = Math.trunc(G.clamp(Number(given.height), 90, 4096));
+    }
+    if (has("background")) background = given.background;
+    if (has("color")) color = given.color;
+    if (has("fps")) fps = Math.max(1, Number(given.fps) || 60);
+    if (has("title") && given.title) title = str(given.title);
+    if (has("show_fps")) showFps = Boolean(given.show_fps);
+  })(root.GUBLAN_STYLE);
+  function dialogBlip() {
+    const Context = inBrowser && (window.AudioContext || window.webkitAudioContext);
+    if (!Context) return;
+    try {
+      if (!audioContext) audioContext = new Context();
+      const start = audioContext.currentTime, gain = audioContext.createGain(), tone = audioContext.createOscillator();
+      tone.type = "sine";
+      tone.frequency.value = 880;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.06 * soundVolume, start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+      tone.connect(gain).connect(audioContext.destination);
+      tone.start(start);
+      tone.stop(start + 0.18);
+    } catch (_) { /* no sound is fine */ }
+  }
+  function pageDialog(message, asking) {
+    return new Promise((done) => {
+      const style = G.style, motion = style.animate ? ".18s" : "0s";
+      const place = { top: "flex-start", bottom: "flex-end" }[style.position] || "center";
+      const shade = document.createElement("div");
+      shade.style.cssText = `position:fixed;inset:0;display:flex;align-items:${place};justify-content:center;z-index:2147483000;` +
+        `padding:24px 0;box-sizing:border-box;background:rgba(0,0,0,${style.shade});opacity:0;transition:opacity ${motion} ease-out`;
+      const start = { pop: "scale(.86)", slide: `translateY(${style.position === "top" ? -28 : 28}px)`, fade: "none" }[style.animation]
+        || "translateY(10px) scale(.98)";
+      const panel = document.createElement("div");
+      const edge = Math.max(0, Number(style.borderWidth) || 0);
+      panel.style.cssText = `background:${style.dialog};color:${style.text};border:${edge}px solid ${style.border};` +
+        `border-top:${Math.max(edge, 2)}px solid ${style.accent};font:${style.size}px ${style.font};padding:18px 20px;min-width:260px;` +
+        `max-width:min(${Math.trunc(style.boxWidth) || 520}px,86vw);box-shadow:0 18px 40px rgba(0,0,0,.45);transform:${start};` +
+        `transition:transform ${motion} cubic-bezier(.2,.9,.3,1.25)`;
+      const words = document.createElement("div");
+      words.textContent = message;
+      words.style.cssText = "white-space:pre-wrap;line-height:1.4;margin-bottom:14px";
+      panel.appendChild(words);
+      let field = null;
+      if (asking) {
+        field = document.createElement("input");
+        field.style.cssText = `width:100%;box-sizing:border-box;background:${style.field};color:${style.text};` +
+          `border:1px solid ${style.border};border-bottom:2px solid ${style.accent};padding:8px 10px;outline:none;` +
+          `font:inherit;margin-bottom:14px`;
+        panel.appendChild(field);
+      }
+      const ok = document.createElement("button");
+      ok.textContent = asking ? "ok" : "continue";
+      ok.style.cssText = `background:${style.accent};color:#0c0c0c;border:0;padding:7px 16px;font:inherit;cursor:pointer`;
+      panel.appendChild(ok);
+      if (style.hints) {
+        const hint = document.createElement("div");
+        hint.textContent = asking ? "enter to accept" : "enter or space to continue";
+        hint.style.cssText = `margin-top:10px;font-size:.75em;color:${style.hint}`;
+        panel.appendChild(hint);
+      }
+      shade.appendChild(panel);
+      document.body.appendChild(shade);
+      if (style.sound) dialogBlip();
+      requestAnimationFrame(() => { shade.style.opacity = "1"; panel.style.transform = "none"; });
+      held.clear();
+      const finish = () => {
+        const answer = field ? field.value : "";
+        shade.style.opacity = "0";
+        setTimeout(() => shade.remove(), style.animate ? 160 : 0);
+        if (canvas) canvas.focus();
+        done(answer);
+      };
+      ok.addEventListener("click", finish);
+      shade.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key === "Enter" || (!asking && (event.key === " " || event.key === "Escape"))) { event.preventDefault(); finish(); }
+      });
+      (field || ok).focus();
+    });
+  }
   G.ask = async function (question) {
     let answer;
     if (inBrowser) {
       await new Promise((done) => requestAnimationFrame(done));
-      answer = window.prompt(str(question)) || "";
+      answer = document.body ? await pageDialog(str(question), true) : window.prompt(str(question)) || "";
     } else {
       const readline = require("readline");
       const reader = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -888,7 +1304,8 @@
   G.popup = async function (text) {
     if (inBrowser) {
       await new Promise((done) => requestAnimationFrame(done));
-      window.alert(str(text));
+      if (document.body) await pageDialog(str(text), false);
+      else window.alert(str(text));
     } else {
       console.log(str(text));
     }
@@ -916,6 +1333,40 @@
   G.stopmusic = () => { if (song) song.pause(); song = null; };
   G.stopsounds = () => { playing.forEach((a) => a.pause()); playing.clear(); };
   G.volume = (value) => { soundVolume = G.clamp(value, 0, 1); if (song) song.volume = soundVolume; };
+  const WAVES = ["square", "sine", "triangle", "saw", "noise"];
+  let audioContext = null;
+  G.beep = (frequency, seconds = 0.15, wave = "square") => {
+    wave = str(wave).toLowerCase();
+    if (!(frequency >= 20 && frequency <= 20000)) fail("beep frequency must be from 20 to 20000 (440 is the a above middle c)");
+    if (!(seconds > 0 && seconds <= 5)) fail("a beep can last from just above 0 up to 5 seconds");
+    if (!WAVES.includes(wave)) fail(`'${wave}' is not a wave. try: ${WAVES.join(", ")}`);
+    if (!inBrowser) return;
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) return;
+    if (!audioContext) audioContext = new Context();
+    const start = audioContext.currentTime, loud = 0.22 * soundVolume;
+    const gain = audioContext.createGain();
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(loud, start + 0.003);
+    gain.gain.setValueAtTime(loud, Math.max(start + 0.003, start + seconds - 0.02));
+    gain.gain.linearRampToValueAtTime(0, start + seconds);
+    gain.connect(audioContext.destination);
+    let source;
+    if (wave === "noise") {
+      const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * seconds)), audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      source = audioContext.createBufferSource();
+      source.buffer = buffer;
+    } else {
+      source = audioContext.createOscillator();
+      source.type = wave === "saw" ? "sawtooth" : wave;
+      source.frequency.value = frequency;
+    }
+    source.connect(gain);
+    source.start(start);
+    source.stop(start + seconds + 0.01);
+  };
 
   // ----- starting -----------------------------------------------------------------------------------------------------------
   // node game.js --test (or game.html#test): run every test block instead of the program

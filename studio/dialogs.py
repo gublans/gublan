@@ -8,9 +8,10 @@ import tkinter as tk
 import zlib
 from tkinter import filedialog, ttk
 
-from gublancore import COMMAND_SPECS
+from gublancore import COMMAND_SPECS, DIALOG_ANIMATIONS, GAME_STYLE, color_value, game_style
 
-from . import config, exporter, guard, theme
+from . import config, exporter, guard, sounds, theme
+from .caret import CARET_BLINKS, CARET_STYLES, TYPING_EFFECTS
 from .editor import line_tokens
 from .templates import TEMPLATES
 from .theme import (
@@ -56,7 +57,10 @@ class Dialog(tk.Toplevel):
         x = max(0, min(x, self.winfo_screenwidth() - width - 10))
         y = max(0, min(y, self.winfo_screenheight() - height - 60))
         self.geometry(f"{width}x{height}+{x}+{y}")
-        theme.fade_in(self, 150)
+        if theme.MOTION:
+            theme.slide_in(self, x, y, width, height, dy=px(10), duration=180)
+        else:
+            theme.fade_in(self, 150)
         self.deiconify()
         square_window(self, caption=PANEL)
         self.lift()
@@ -196,8 +200,10 @@ class SettingsDialog(Dialog):
                           ("line_numbers", "line numbers"),
                           ("highlight_line", "highlight the line with the cursor"),
                           ("wrap", "wrap long lines"),
-                          ("block_cursor", "block cursor")):
+                          ("rainbow_brackets", "colour brackets by how deep they are"),
+                          ("smooth_scroll", "smooth scrolling")):
             self._toggle(page, key, text)
+        self._editor_look(page)
 
         self._heading(page, "running")
         for key, text in (("check_before_run", "check for problems before running"),
@@ -209,6 +215,7 @@ class SettingsDialog(Dialog):
             self._toggle(page, key, text)
 
         self._look_section(page)
+        self._sounds_section(page)
         self._plugins_section(page)
         self._discord_section(page)
 
@@ -236,8 +243,53 @@ class SettingsDialog(Dialog):
 
     def _set(self, key, value):
         self.settings[key] = value
+        sounds.configure(self.settings)
         self.on_apply(self.settings)
         self._show_discord()
+
+    def _choices(self, parent, key, text, options, default, convert=str, per_row=6, about=None):
+        """a labelled row (or rows) of square choices for one setting."""
+        variable = tk.StringVar(value=str(self.settings.get(key, default)))
+        self.vars[key] = variable
+        about_label = None
+
+        def chosen(value):
+            self._set(key, convert(value))
+            if about_label is not None:
+                about_label.configure(text=about.get(value, ""))
+
+        for start in range(0, max(1, len(options)), per_row):
+            row = tk.Frame(parent, bg=PANEL)
+            row.pack(fill="x", pady=px(2))
+            tk.Label(row, text=text if start == 0 else "", bg=PANEL, fg=TEXT, font=ui_font(10), width=14,
+                     anchor="w").pack(side="left")
+            Segmented(row, [(str(value), shown) for value, shown in options[start:start + per_row]], variable,
+                      command=chosen, bg=PANEL, size=9).pack(side="left", padx=px(4))
+        if about:
+            about_label = tk.Label(parent, text=about.get(variable.get(), ""), bg=PANEL, fg=DIM, font=ui_font(9),
+                                   anchor="w", justify="left", wraplength=px(520))
+            about_label.pack(fill="x", pady=(0, px(4)))
+        return variable
+
+    def _editor_look(self, page):
+        fonts = [("", "default")] + [(shown, shown) for shown, _family in theme.editor_fonts(self)][:9]
+        self._choices(page, "editor_font", "code font", fonts, "", per_row=4)
+        self._choices(page, "line_spacing", "line spacing", [(0, "tight"), (1, "normal"), (3, "roomy"),
+                                                             (5, "airy")], 1, convert=int)
+        self._heading(page, "cursor and typing")
+        self._toggle(page, "smooth_caret", "a smooth cursor that glides from place to place")
+        self._choices(page, "caret_style", "cursor shape", [(name, name) for name in CARET_STYLES], "line")
+        self._choices(page, "caret_blink", "blinking", [(name, {"solid": "don't blink"}.get(name, name))
+                                                       for name in CARET_BLINKS], "fade")
+        self._choices(page, "caret_motion", "movement", [("smooth", "glide"), ("instant", "jump")], "smooth")
+        self._choices(page, "caret_width", "thickness", [(1, "thin"), (2, "normal"), (3, "thick"), (4, "chunky")],
+                      2, convert=int)
+        self._choices(page, "typing_effect", "new letters", [(name, {"fade": "fade in"}.get(name, name))
+                                                            for name in TYPING_EFFECTS], "fade",
+                      about={"fade": "letters you type fade in from the background.",
+                             "ink": "letters start bright and settle into their colour, like wet ink.",
+                             "glow": "a soft light grows behind each letter and fades away.",
+                             "off": "letters just appear."})
 
     # ----- look --------------------------------------------------------------------------------------------
     def _look_section(self, page):
@@ -265,9 +317,66 @@ class SettingsDialog(Dialog):
         self.themes_button = BracketButton(row, "open the themes folder", command=self._themes_folder, size=9,
                                            bg=PANEL)
         self.themes_button.pack(side="left")
+        self._needs_restart = False
         self._show_theme()
+        self._accent_row(page)
+        self._choices(page, "animation_speed", "animation speed", [("slow", "slow"), ("normal", "normal"),
+                                                                   ("fast", "fast")], "normal")
+        self._first_scale = int(self.settings.get("ui_scale", 100))
+        self._choices(page, "ui_scale", "interface size", [(90, "90%"), (100, "100%"), (110, "110%"),
+                                                           (125, "125%"), (150, "150%")], 100,
+                      convert=self._choose_scale)
         self._toggle(page, "animations", "animate buttons, menus, windows and messages")
 
+    def _choose_scale(self, value):
+        value = int(value)
+        self._needs_restart = value != self._first_scale
+        self.after_idle(self._show_theme)
+        return value
+
+    def _accent_row(self, page):
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=(px(6), px(2)))
+        tk.Label(row, text="accent colour", bg=PANEL, fg=TEXT, font=ui_font(10), width=14, anchor="w").pack(
+            side="left")
+        self.accent_cells = {}
+        holder = tk.Frame(row, bg=PANEL)
+        holder.pack(side="left", padx=px(4))
+        for name, color in theme.accent_choices():
+            cell = tk.Canvas(holder, width=px(24), height=px(24), bg=PANEL, highlightthickness=0, cursor="hand2")
+            cell.pack(side="left", padx=(0, px(4)))
+            cell.bind("<Button-1>", lambda _e, c=color: self._choose_accent(c))
+            theme.Tooltip(cell, name if color else "the theme's own colour")
+            self.accent_cells[color] = cell
+        BracketButton(holder, "other...", command=self._custom_accent, size=9, bg=PANEL).pack(side="left",
+                                                                                            padx=(px(4), 0))
+        self._paint_accents()
+
+    def _paint_accents(self):
+        current = str(self.settings.get("accent_color") or "").lower()
+        base = theme.theme_spec(self.settings.get("theme", theme.DEFAULT_THEME)) or {}
+        own = (base.get("colors") or {}).get("accent") or theme.MOSS
+        size = px(24)
+        for color, cell in self.accent_cells.items():
+            cell.delete("all")
+            fill = color or own
+            chosen = color.lower() == current or (not color and not current)
+            cell.create_rectangle(px(3), px(3), size - px(3), size - px(3), fill=fill, outline="")
+            if not color:
+                cell.create_line(px(3), size - px(3), size - px(3), px(3), fill=PANEL, width=px(2))
+            if chosen:
+                cell.create_rectangle(1, 1, size - 1, size - 1, outline=TEXT, width=px(2))
+
+    def _choose_accent(self, color):
+        self._set("accent_color", color)
+        self._paint_accents()
+
+    def _custom_accent(self):
+        from tkinter import colorchooser
+        current = self.settings.get("accent_color") or theme.MOSS
+        chosen = colorchooser.askcolor(color=current, title="pick an accent colour", parent=self)
+        if chosen and chosen[1]:
+            self._choose_accent(chosen[1].lower())
     def _choose_theme(self, name):
         self._set("theme", name)
         self._show_theme()
@@ -277,8 +386,14 @@ class SettingsDialog(Dialog):
         spec = theme.theme_spec(name) or {}
         about = spec.get("about") or ("your own theme" if name not in theme.BUILTIN_THEMES else "")
         changed = name != getattr(self, "_first_theme", name)
-        self.theme_about.configure(text=about + ("  a few shades only change after a restart." if changed else ""))
-        if changed and self.app is not None:
+        scaled = getattr(self, "_needs_restart", False)
+        note = "  a few shades only change after a restart." if changed else ""
+        if scaled:
+            note += "  the new interface size shows after a restart."
+        self.theme_about.configure(text=about + note)
+        if hasattr(self, "accent_cells"):
+            self._paint_accents()
+        if (changed or scaled) and self.app is not None:
             self.restart_button.pack(side="left", padx=(0, px(8)), before=self.themes_button)
         else:
             self.restart_button.pack_forget()
@@ -291,6 +406,22 @@ class SettingsDialog(Dialog):
     def _themes_folder(self):
         if self.app is not None:
             self.app.open_themes_folder()
+
+    # ----- sounds ------------------------------------------------------------------------------------------
+    def _sounds_section(self, page):
+        self._heading(page, "sounds")
+        self._toggle(page, "sounds", "play soft sounds when things open, run, finish or go wrong")
+        self._choices(page, "sound_pack", "sound set", [(name, name) for name in sounds.PACKS], "soft",
+                      about=sounds.ABOUT)
+        self._choices(page, "sound_volume", "volume", [(15, "whisper"), (30, "quiet"), (45, "normal"),
+                                                       (65, "loud"), (85, "louder")], 45, convert=int)
+        self._toggle(page, "typing_sounds", "a tiny tick for each letter you type")
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=(px(4), px(2)))
+        tk.Label(row, text="listen", bg=PANEL, fg=TEXT, font=ui_font(10), width=14, anchor="w").pack(side="left")
+        for event in ("open", "run", "done", "save", "error", "notify"):
+            BracketButton(row, event, command=lambda e=event: sounds.play(e, force=True), size=9,
+                          bg=PANEL).pack(side="left", padx=(px(4), 0))
 
     # ----- plugins -----------------------------------------------------------------------------------------
     def _plugins_section(self, page):
@@ -454,6 +585,406 @@ class SettingsDialog(Dialog):
 
 
 # ----- converter ------------------------------------------------------------------------------------------
+# ----- game window and popups ---------------------------------------------------------------------------
+POPUP_LOOKS = {
+    "moss": {},
+    "paper": {"dialog_background": "#f4f1e8", "dialog_text": "#2a2a2a", "dialog_hint": "#7a7468",
+              "dialog_accent": "#5b7a3a", "dialog_border": "#2a2a2a", "dialog_field": "#ffffff",
+              "dialog_border_width": 2, "dialog_shade": 40},
+    "night": {"dialog_background": "#141a2a", "dialog_text": "#dfe6ff", "dialog_hint": "#7f8bb0",
+              "dialog_accent": "#7aa2ff", "dialog_border": "#7aa2ff", "dialog_field": "#0b0f1a",
+              "dialog_border_width": 2, "dialog_shade": 80},
+    "arcade": {"dialog_background": "#1a1060", "dialog_text": "#ffe14d", "dialog_hint": "#b9a8ff",
+               "dialog_accent": "#ff5fa2", "dialog_border": "#ffe14d", "dialog_field": "#0d0838",
+               "dialog_border_width": 4, "dialog_shade": 60},
+    "glass": {"dialog_background": "#2a3138", "dialog_text": "#ffffff", "dialog_hint": "#b8c4cc",
+              "dialog_accent": "#9fd3ff", "dialog_border": "#5c6a75", "dialog_field": "#1b2026",
+              "dialog_border_width": 1, "dialog_shade": 40},
+}
+WINDOW_SIZES = ((540, 420), (640, 480), (800, 600), (960, 540), (1280, 720))
+STYLE_DEMO = """mode 2d
+text hello 20 20 this is your game window
+box player 40 80 70 70
+circle ball 260 140 30
+popup this is how popups look. press a key or click to go on
+input name and this is how questions look. what is your name?
+popup nice to meet you, {name}!
+kill
+"""
+
+
+def hex_color(value):
+    """#rrggbb for a gublan colour (a name, #rgb or #rrggbb)."""
+    try:
+        red, green, blue = color_value(value)[:3]
+        return f"#{int(red):02x}{int(green):02x}{int(blue):02x}"
+    except (ValueError, TypeError, KeyError):
+        return "#000000"
+
+
+class GameStyleDialog(Dialog):
+    """tools > game window and popups: how game windows start and how popups and questions look, sound and
+    move. the preview follows every change; programs can still set their own window, background and fps."""
+
+    COLORS = (("dialog_background", "box"), ("dialog_text", "text"), ("dialog_border", "border"),
+              ("dialog_accent", "cursor"), ("dialog_field", "answer field"), ("dialog_hint", "hints"))
+
+    def __init__(self, master, settings, on_apply, app=None):
+        super().__init__(master, "game window and popups", resizable=True)
+        self.settings = settings
+        self.on_apply = on_apply
+        self.app = app
+        stored = settings.get("game_style")
+        self.style = game_style(stored if isinstance(stored, dict) else {})
+        self.vars = {}
+        self.swatches = {}
+        self.intro = 1.0
+        self._intro_stop = None
+        self._store_job = None
+        self._size_lock = False
+
+        columns = tk.Frame(self.body, bg=PANEL)
+        columns.pack(fill="both", expand=True)
+        right = tk.Frame(columns, bg=PANEL)
+        right.pack(side="right", fill="y", padx=(px(18), 0))
+        scroll = ScrollFrame(columns, bg=PANEL)
+        scroll.pack(side="left", fill="both", expand=True)
+        page = scroll.inner
+
+        tk.Label(right, text="preview", bg=PANEL, fg=MOSS_LIGHT, font=ui_font(11, "bold"), anchor="w").pack(
+            fill="x", pady=(0, px(6)))
+        self.preview_size = (px(360), px(290))
+        self.preview = tk.Canvas(right, width=self.preview_size[0], height=self.preview_size[1], bg=EDITOR_BG,
+                                 highlightthickness=1, highlightbackground=BORDER, cursor="hand2")
+        self.preview.pack()
+        self.preview.bind("<Button-1>", lambda _e: self.replay())
+        tk.Label(right, text="click the preview to watch the popup open again", bg=PANEL, fg=DIM,
+                 font=ui_font(9), anchor="w").pack(fill="x", pady=(px(4), px(8)))
+        BracketButton(right, "try it in a game window", command=self.try_it, icon_name="play", size=9,
+                      bg=PANEL).pack(anchor="w")
+        tk.Label(right, text="programs you run and games you export use this look. a program's own\n"
+                             "window, background and fps lines still win.", bg=PANEL, fg=DIM,
+                 font=ui_font(8), anchor="w", justify="left").pack(fill="x", pady=(px(10), 0))
+
+        self._heading(page, "game window")
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text="size", bg=PANEL, fg=TEXT, font=ui_font(10), width=12, anchor="w").pack(side="left")
+        self.width_var = tk.StringVar(value=str(self.style["width"]))
+        self.height_var = tk.StringVar(value=str(self.style["height"]))
+        flat_entry(row, self.width_var, width=6, mono=True).pack(side="left", padx=(px(4), 0))
+        tk.Label(row, text="by", bg=PANEL, fg=DIM, font=ui_font(10)).pack(side="left", padx=px(6))
+        flat_entry(row, self.height_var, width=6, mono=True).pack(side="left")
+        for variable in (self.width_var, self.height_var):
+            variable.trace_add("write", lambda *_: self._size_typed())
+        self.size_choice = tk.StringVar(value=self._size_key())
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text="", bg=PANEL, width=12).pack(side="left")
+        Segmented(row, [(f"{w}x{h}", f"{w} x {h}") for w, h in WINDOW_SIZES], self.size_choice,
+                  command=self._size_chosen, bg=PANEL, size=8).pack(side="left", padx=px(4))
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text="title", bg=PANEL, fg=TEXT, font=ui_font(10), width=12, anchor="w").pack(side="left")
+        self.title_var = tk.StringVar(value=self.style["title"])
+        flat_entry(row, self.title_var, width=28).pack(side="left", padx=(px(4), 0))
+        self.title_var.trace_add("write", lambda *_: self._set("title", self.title_var.get()[:120], later=True))
+        tk.Label(page, text="leave the title empty to use the program's name.", bg=PANEL, fg=DIM, font=ui_font(9),
+                 anchor="w").pack(fill="x")
+        grid = tk.Frame(page, bg=PANEL)
+        grid.pack(fill="x", pady=(px(6), px(2)))
+        self._swatch(grid, "background", "background").grid(row=0, column=0, sticky="w", pady=px(3))
+        self._swatch(grid, "color", "drawing colour").grid(row=0, column=1, sticky="w", padx=(px(24), 0),
+                                                            pady=px(3))
+        self._choices(page, "fps", "fps", [(30, "30"), (60, "60"), (90, "90"), (120, "120"),
+                                                        (144, "144")], int)
+        self._toggle(page, "show_fps", "show a small fps counter in the corner")
+
+        self._heading(page, "popups and questions")
+        self.look = tk.StringVar(value=self._look_name())
+        row = tk.Frame(page, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text="looks", bg=PANEL, fg=TEXT, font=ui_font(10), width=12, anchor="w").pack(side="left")
+        Segmented(row, [(name, name) for name in list(POPUP_LOOKS) + ["studio"]], self.look,
+                  command=self._choose_look, bg=PANEL, size=9).pack(side="left", padx=px(4))
+        grid = tk.Frame(page, bg=PANEL)
+        grid.pack(fill="x", pady=(px(6), px(2)))
+        for index, (key, text) in enumerate(self.COLORS):
+            self._swatch(grid, key, text).grid(row=index // 2, column=index % 2, sticky="w",
+                                               padx=(0 if index % 2 == 0 else px(24), 0), pady=px(3))
+        self._choices(page, "dialog_animation", "opening", [(name, name) for name in DIALOG_ANIMATIONS], str)
+        self._choices(page, "dialog_position", "position", [("top", "top"), ("center", "middle"),
+                                                            ("bottom", "bottom")], str)
+        self._choices(page, "dialog_width", "box width", [(360, "narrow"), (450, "normal"), (560, "wide"),
+                                                          (680, "wider")], int)
+        self._choices(page, "dialog_text_size", "text size", [(18, "18"), (22, "22"), (26, "26"), (30, "30"),
+                                                              (36, "36")], int)
+        self._choices(page, "dialog_border_width", "border", [(0, "none"), (1, "thin"), (2, "normal"),
+                                                              (4, "thick")], int)
+        self._choices(page, "dialog_shade", "dim the game", [(0, "no"), (40, "a little"), (75, "normal"),
+                                                             (92, "a lot")], int)
+        self._toggle(page, "dialog_hints", "show the key hints under the message")
+        self._toggle(page, "dialog_sound", "play a soft sound when a popup opens")
+        scroll.bind_tree(page)
+
+        self.add_button("done", self.cancel, kind="accent")
+        self.add_button("back to the default look", self.reset, kind="ghost", side="left")
+        self.draw_preview()
+        self.after(250, self.replay)
+
+    # ----- rows ----------------------------------------------------------------------------------------
+    @staticmethod
+    def _heading(parent, text):
+        tk.Label(parent, text=text, bg=PANEL, fg=MOSS_LIGHT, font=ui_font(11, "bold"), anchor="w").pack(
+            fill="x", pady=(px(12), px(6)))
+
+    def _choices(self, parent, key, text, options, convert):
+        row = tk.Frame(parent, bg=PANEL)
+        row.pack(fill="x", pady=px(2))
+        tk.Label(row, text=text, bg=PANEL, fg=TEXT, font=ui_font(10), width=12, anchor="w").pack(side="left")
+        variable = tk.StringVar(value=str(self.style[key]))
+        self.vars[key] = variable
+        Segmented(row, [(str(value), shown) for value, shown in options], variable,
+                  command=lambda value: self._set(key, convert(value)), bg=PANEL, size=9).pack(side="left",
+                                                                                              padx=px(4))
+
+    def _toggle(self, parent, key, text):
+        variable = tk.BooleanVar(value=bool(self.style[key]))
+        self.vars[key] = variable
+        Toggle(parent, text, variable, command=lambda: self._set(key, bool(variable.get())), bg=PANEL).pack(
+            anchor="w", pady=px(3))
+
+    def _swatch(self, parent, key, text):
+        cell = tk.Frame(parent, bg=PANEL, cursor="hand2")
+        box = tk.Canvas(cell, width=px(20), height=px(20), bg=PANEL, highlightthickness=0, cursor="hand2")
+        box.pack(side="left")
+        name = tk.Label(cell, text=text, bg=PANEL, fg=TEXT, font=ui_font(10), cursor="hand2")
+        name.pack(side="left", padx=(px(8), 0))
+        shown = tk.Label(cell, text="", bg=PANEL, fg=DIM, font=mono_font(9), cursor="hand2")
+        shown.pack(side="left", padx=(px(6), 0))
+        for widget in (cell, box, name, shown):
+            widget.bind("<Button-1>", lambda _e, k=key: self.pick_color(k))
+        self.swatches[key] = (box, shown)
+        self._paint_swatch(key)
+        return cell
+
+    def _paint_swatch(self, key):
+        box, shown = self.swatches[key]
+        size = px(20)
+        box.delete("all")
+        box.create_rectangle(1, 1, size - 1, size - 1, fill=hex_color(self.style[key]), outline=BORDER)
+        shown.configure(text=hex_color(self.style[key]))
+
+    # ----- changes -------------------------------------------------------------------------------------
+    def _set(self, key, value, later=False):
+        self.style[key] = value
+        if key.startswith("dialog_") and key in POPUP_LOOKS["paper"]:
+            self.look.set(self._look_name())
+        if key == "dialog_animation":
+            self.replay()
+        else:
+            self.draw_preview()
+        if self._store_job:
+            self.after_cancel(self._store_job)
+        self._store_job = self.after(400 if later else 0, self._store)
+
+    def _store(self):
+        self._store_job = None
+        self.settings["game_style"] = {key: value for key, value in self.style.items()
+                                       if value != GAME_STYLE[key]}
+        self.on_apply(self.settings)
+
+    def pick_color(self, key):
+        from tkinter import colorchooser
+        chosen = colorchooser.askcolor(color=hex_color(self.style[key]), title="pick a colour", parent=self)
+        if chosen and chosen[1]:
+            self._set(key, chosen[1].lower())
+            self._paint_swatch(key)
+
+    def _size_key(self):
+        return f"{self.style['width']}x{self.style['height']}"
+
+    def _size_chosen(self, value):
+        width, height = (int(part) for part in value.split("x"))
+        self._size_lock = True
+        self.width_var.set(str(width))
+        self.height_var.set(str(height))
+        self._size_lock = False
+        self.style["width"], self.style["height"] = width, height
+        self._set("width", width)
+
+    def _size_typed(self):
+        if self._size_lock:
+            return
+        try:
+            width = max(120, min(4096, int(self.width_var.get())))
+            height = max(90, min(4096, int(self.height_var.get())))
+        except ValueError:
+            return
+        self.style["width"], self.style["height"] = width, height
+        self.size_choice.set(self._size_key())
+        self._set("height", height, later=True)
+
+    def _look_name(self):
+        for name, look in POPUP_LOOKS.items():
+            wanted = dict((key, GAME_STYLE[key]) for key in POPUP_LOOKS["paper"])
+            wanted.update(look)
+            if all(self.style[key] == value for key, value in wanted.items()):
+                return name
+        return ""
+
+    def _studio_look(self):
+        return {"dialog_background": theme.PANEL, "dialog_text": theme.TEXT, "dialog_hint": theme.MUTED,
+                "dialog_accent": theme.MOSS_LIGHT, "dialog_border": theme.MOSS, "dialog_field": theme.EDITOR_BG,
+                "dialog_border_width": 1, "dialog_shade": 60}
+
+    def _choose_look(self, name):
+        look = dict((key, GAME_STYLE[key]) for key in POPUP_LOOKS["paper"])
+        look.update(self._studio_look() if name == "studio" else POPUP_LOOKS.get(name, {}))
+        self.style.update(look)
+        for key, value in look.items():
+            if key in self.swatches:
+                self._paint_swatch(key)
+            elif key in self.vars:
+                self.vars[key].set(str(value))
+        self.look.set(name)
+        self._set("dialog_background", self.style["dialog_background"])
+        self.look.set(name)
+        self.replay()
+
+    def reset(self):
+        self.style = game_style({})
+        for key, variable in self.vars.items():
+            variable.set(self.style[key] if isinstance(variable, tk.BooleanVar) else str(self.style[key]))
+        for key in self.swatches:
+            self._paint_swatch(key)
+        self._size_lock = True
+        self.width_var.set(str(self.style["width"]))
+        self.height_var.set(str(self.style["height"]))
+        self.title_var.set("")
+        self._size_lock = False
+        self.size_choice.set(self._size_key())
+        self.look.set(self._look_name())
+        self._set("width", self.style["width"])
+        self.replay()
+
+    def try_it(self):
+        if self.app is not None:
+            self.app.try_game_style(dict(self.style))
+
+    # ----- preview -------------------------------------------------------------------------------------
+    def replay(self):
+        if self._intro_stop:
+            self._intro_stop()
+
+        def step(progress):
+            self.intro = progress
+            self.draw_preview()
+
+        if self.style["dialog_animation"] == "none":
+            step(1.0)
+            return
+        self.intro = 0.0
+        self._intro_stop = theme.animate(self.preview, 320, step, ease=lambda t: t)
+
+    def draw_preview(self):
+        """a small copy of the game window with a question box on it, drawn the way gublancore draws it."""
+        try:
+            canvas = self.preview
+            canvas.delete("all")
+        except tk.TclError:
+            return
+        style = self.style
+        area_width, area_height = self.preview_size
+        bar = px(18)
+        width, height = style["width"], style["height"]
+        scale = min((area_width - px(24)) / width, (area_height - px(24) - bar) / height)
+        shown_width, shown_height = int(width * scale), int(height * scale)
+        left = (area_width - shown_width) // 2
+        top = (area_height - shown_height - bar) // 2 + bar
+        progress = self.intro
+        shade = style["dialog_shade"] / 100 * min(1.0, progress * 1.4)
+
+        def dim(color):
+            return theme.mix(hex_color(color), "#000000", shade)
+
+        canvas.create_rectangle(left, top - bar, left + shown_width, top, fill=PANEL_ALT, outline=BORDER)
+        title = style["title"] or "my game"
+        canvas.create_text(left + px(8), top - bar // 2, text=title, anchor="w", fill=MUTED, font=ui_font(8))
+        canvas.create_text(left + shown_width - px(8), top - bar // 2, text="x", anchor="e", fill=MUTED,
+                           font=ui_font(8))
+        canvas.create_rectangle(left, top, left + shown_width, top + shown_height, fill=dim(style["background"]),
+                                outline=BORDER)
+        ink = dim(style["color"])
+        canvas.create_rectangle(left + 40 * scale, top + 80 * scale, left + 110 * scale, top + 150 * scale,
+                                fill=ink, outline="")
+        canvas.create_oval(left + 230 * scale, top + 110 * scale, left + 290 * scale, top + 170 * scale,
+                           fill=ink, outline="")
+        canvas.create_text(left + 20 * scale, top + 20 * scale, text="score 120", anchor="nw", fill=ink,
+                           font=(theme.UI_FAMILY, -max(6, int(20 * scale))))
+        if style["show_fps"]:
+            canvas.create_text(left + shown_width - px(6), top + px(5), text="fps 60", anchor="ne",
+                               fill=dim(style["dialog_accent"]), font=(theme.UI_FAMILY, -max(6, int(16 * scale))))
+
+        size = max(6, int(style["dialog_text_size"] * scale))
+        font = (theme.UI_FAMILY, -size, "bold")
+        hint_font = (theme.UI_FAMILY, -max(5, int((style["dialog_text_size"] - 4) * scale)))
+        line = size * 1.25
+        box_width = min(style["dialog_width"], width - 20) * scale
+        box_height = (25 * scale + line + line + 24 * scale +
+                      ((line * 0.85 + 20 * scale) if style["dialog_hints"] else 10 * scale))
+        box_left = left + (shown_width - box_width) / 2
+        place = style["dialog_position"]
+        if place == "top":
+            box_top = top + 20 * scale
+        elif place == "bottom":
+            box_top = top + shown_height - box_height - 20 * scale
+        else:
+            box_top = top + (shown_height - box_height) / 2
+        animation = style["dialog_animation"]
+        eased = 1 - (1 - progress) ** 3
+        fade = 1.0
+        grow = 1.0
+        if progress < 1.0 and animation != "none":
+            if animation == "pop":
+                grow = 0.86 + 0.14 * (1 + 2.70158 * (progress - 1) ** 3 + 1.70158 * (progress - 1) ** 2)
+                fade = min(1.0, progress * 1.6)
+            elif animation == "slide":
+                box_top += (40 if place != "top" else -40) * scale * (1 - eased)
+                fade = eased
+            else:
+                fade = eased
+        backdrop = dim(style["background"])
+
+        def blend(color):
+            return theme.mix(backdrop, hex_color(color), fade)
+
+        center_x, center_y = box_left + box_width / 2, box_top + box_height / 2
+        x0, y0 = center_x - box_width * grow / 2, center_y - box_height * grow / 2
+        x1, y1 = center_x + box_width * grow / 2, center_y + box_height * grow / 2
+        border = style["dialog_border_width"]
+        canvas.create_rectangle(x0, y0, x1, y1, fill=blend(style["dialog_background"]),
+                                outline=blend(style["dialog_border"]) if border else "",
+                                width=max(1, round(border * scale)) if border else 0)
+        if grow < 0.97 and animation == "pop":
+            return
+        y = y0 + 22 * scale * grow
+        canvas.create_text(x0 + 20 * scale, y, text="what is your name?", anchor="nw",
+                           fill=blend(style["dialog_text"]), font=font)
+        y += line + 10 * scale
+        field_bottom = y + line + 12 * scale
+        canvas.create_rectangle(x0 + 20 * scale, y, x1 - 20 * scale, field_bottom,
+                                fill=blend(style["dialog_field"]), outline="")
+        typed = canvas.create_text(x0 + 28 * scale, y + 6 * scale, text="gublan fan", anchor="nw",
+                                   fill=blend(style["dialog_text"]), font=font)
+        right_edge = canvas.bbox(typed)[2] if canvas.bbox(typed) else x0
+        canvas.create_line(right_edge + 2, y + 4 * scale, right_edge + 2, field_bottom - 5 * scale,
+                           fill=blend(style["dialog_accent"]), width=max(1, round(2 * scale)))
+        if style["dialog_hints"]:
+            canvas.create_text(x0 + 20 * scale, field_bottom + 12 * scale, text="enter to accept  |  esc to cancel",
+                               anchor="nw", fill=blend(style["dialog_hint"]), font=hint_font)
+
+
 def highlight_into(widget, source):
     widget.configure(state="normal")
     widget.delete("1.0", "end")
@@ -711,7 +1242,8 @@ class TranslateDialog(Dialog):
         language = self.language.get()
         self.settings["translate_language"] = language
         try:
-            self.result = gublantranslate.translate(self.source_code, language, name=self.program,
+            style = (self.settings or {}).get("game_style") if language == "javascript" else None
+            self.result = gublantranslate.translate(self.source_code, language, name=self.program, style=style,
                                                     base_dir=self.base_dir)
         except gublantranslate.TranslateError as err:
             self.result = None

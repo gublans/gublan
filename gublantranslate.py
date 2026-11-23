@@ -21,8 +21,8 @@ import re
 import sys
 
 from gublancore import (
-    BLOCK_MIDDLES, BLOCK_OPENERS, EXPRESSION_FUNCTIONS, GublanRuntime, QuotedText, analyze_source,
-    parse_expression, parse_line, split_command,
+    BLOCK_MIDDLES, BLOCK_OPENERS, EXPRESSION_FUNCTIONS, ContinuedLine, GublanRuntime, QuotedText, analyze_source,
+    function_parameters, parse_expression, parse_line, split_command,
 )
 from gublancore import (  # the same rules the runtime uses, so a translated program reads its lines the same way
     _BRACE_RE, _FOR_IN_RE, _FOR_RANGE_RE, _NUMBER_RE, _SET_RE, _condition_is_simple, _normalize_condition,
@@ -51,7 +51,7 @@ ALIASES = {"py": "python", "js": "javascript", "web": "javascript", "html": "jav
 THREE_D = {"cube", "sphere", "camera"}
 # commands that open a window
 WINDOW_COMMANDS = {"mode", "window", "box", "circle", "line", "text", "image", "sprite", "button", "ui", "textbox",
-                   "slider", "checkbox", "background", "frame"}
+                   "slider", "checkbox", "background", "frame", "ellipse", "polygon", "particles"}
 # commands that store into a variable: command -> positions in the line that are variable names
 STORES = {
     "add": (1,), "sub": (1,), "mul": (1,), "div": (1,), "calc": (1,), "random": (1,), "time": (1,),
@@ -62,16 +62,19 @@ STORES = {
 LOOPS = {"loop", "forever", "while", "until", "for"}
 # builtins whose answer is always true or false (no truthiness wrapper needed in javascript and lua)
 BOOLEAN_FUNCTIONS = {"contains", "keydown", "keypressed", "mousedown", "mousepressed", "touching", "exists",
-                     "chance", "startswith", "endswith", "isnumber", "overlap", "saved", "any", "every"}
+                     "chance", "startswith", "endswith", "isnumber", "overlap", "saved", "any", "every",
+                     "between", "cooldown", "pulse", "after"}
 TEXT_FUNCTIONS = {"str", "string", "upper", "lower", "trim", "join", "replace", "pad", "decimals", "capitalize",
-                  "char", "tojson", "date", "clock", "type"}
+                  "char", "tojson", "date", "clock", "type", "commas", "ordinal", "plural"}
 NUMBER_FUNCTIONS = {"abs", "min", "max", "round", "floor", "ceil", "sqrt", "sin", "cos", "tan", "atan2", "rad",
                     "deg", "clamp", "lerp", "sign", "dist", "len", "num", "number", "int", "random", "mousex",
                     "mousey", "time", "mag", "pow", "asin", "acos", "atan", "sum", "indexof", "count", "average",
                     "wrap", "remap", "approach", "angleto", "now", "code", "textwidth", "log", "exp", "noise",
-                    "randint"}
+                    "randint", "hypot", "fract", "smoothstep", "snap", "ease", "gcd", "median", "product",
+                    "scrollx", "scrolly"}
 LIST_FUNCTIONS = {"range", "sort", "reverse", "keys", "values", "split", "shuffle", "unique", "map", "filter", "sortby",
-                  "zip", "flat", "lines", "words"}
+                  "zip", "flat", "lines", "words", "chunk", "enumerate", "without", "fill", "entries", "wraptext",
+                  "mixcolor", "randomcolor"}
 # commands that have to wait for the screen in javascript (so they are awaited, and so is anything calling them)
 JS_WAITS = {"frame", "wait", "input", "popup", "animate", "get"}
 
@@ -111,8 +114,11 @@ def runtime_source(language):
         return handle.read()
 
 
-def translate(source, language, name="program", base_dir=None, check=True):
-    """turn gublan source into another language. raises TranslateError when the program has errors."""
+def translate(source, language, name="program", base_dir=None, check=True, style=None):
+    """turn gublan source into another language. raises TranslateError when the program has errors.
+
+    style is gublan studio's game window and popup look (see gublancore.GAME_STYLE). the javascript web page
+    carries it to gublan_runtime.js."""
     language = language_of(language)
     if check:
         errors = [item for item in analyze_source(source) if item.get("severity", "error") == "error"]
@@ -129,7 +135,7 @@ def translate(source, language, name="program", base_dir=None, check=True):
     main_text = writer.program()
     files = {writer.main_file: main_text, LANGUAGES[language]["runtime"]: runtime_source(language)}
     if language == "javascript":
-        files["index.html"] = _web_page(name, writer.main_file)
+        files["index.html"] = _web_page(name, writer.main_file, style)
     if language == "lua":
         files["conf.lua"] = _LOVE_CONF.replace("{title}", name.replace('"', "").replace("\\", "")).replace(
             "{console}", "false" if writer.uses_window else "true")
@@ -155,8 +161,12 @@ def _safe_name(name):
     return "program_" + cleaned if cleaned[0].isdigit() else cleaned
 
 
-def _web_page(name, script):
+def _web_page(name, script, style=None):
     title = re.sub(r"[<>&\"]", "", str(name))
+    look = ""
+    if isinstance(style, dict) and style:
+        data = json.dumps(style, sort_keys=True).replace("<", "\\u003c")
+        look = f"<script>globalThis.GUBLAN_STYLE = {data};</script>\n"
     return f"""<!doctype html>
 <html>
 <head>
@@ -172,7 +182,7 @@ def _web_page(name, script):
 </head>
 <body>
 <div id="gublan-stage"><pre id="gublan-log"></pre></div>
-<script src="gublan_runtime.js"></script>
+{look}<script src="gublan_runtime.js"></script>
 <script src="{script}"></script>
 </body>
 </html>
@@ -223,6 +233,8 @@ def _build(entries):
     root, stack, body = [], [], None
     body = root
     for raw, file, number in entries:
+        if isinstance(raw, ContinuedLine):
+            continue
         stripped = raw.strip()
         if not stripped:
             if body and body[-1] is not _BLANK:
@@ -277,6 +289,10 @@ def _stored_names(line):
         match = _SET_RE.match(line.rest)
         if match:
             names.append(match.group(1))
+    elif cmd == "local":
+        name = _local_name(line)
+        if name:
+            names.append(name)
     elif cmd == "for":
         match = _FOR_RANGE_RE.match(line.rest) or _FOR_IN_RE.match(line.rest)
         if match:
@@ -286,6 +302,23 @@ def _stored_names(line):
     elif cmd in STORES:
         names.extend(str(parts[index]) for index in STORES[cmd] if index < len(parts))
     return [name for name in names if re.fullmatch(r"[A-Za-z_]\w*", name)]
+
+
+def _local_name(line):
+    match = _SET_RE.match(line.rest)
+    name = match.group(1) if match else line.rest.strip()
+    return name if re.fullmatch(r"[A-Za-z_]\w*", name) else None
+
+
+def _local_names(nodes, params=()):
+    """the names a function makes with local (its own variables in the new language)."""
+    names = []
+    for line in _walk(nodes):
+        if line.cmd == "local":
+            name = _local_name(line)
+            if name and name not in names and name not in params:
+                names.append(name)
+    return names
 
 
 def _has_continue(nodes, word="continue"):
@@ -355,13 +388,16 @@ class _Writer:
         self.uses_ui_button = False
         self.uses_window = False
         self.function_bodies = {}
+        self.function_defaults = {}   # name -> {parameter: default source}
         self._scan()
 
     # ----- looking at the program first --------------------------------------------------------------
     def _scan(self):
         for node in self.tree:
             if isinstance(node, _Block) and node.line.cmd == "function" and len(node.line.parts) > 1:
-                self.functions[str(node.line.parts[1])] = [str(part) for part in node.line.parts[2:]]
+                names, defaults = function_parameters(node.line.parts)
+                self.functions[str(node.line.parts[1])] = names
+                self.function_defaults[str(node.line.parts[1])] = defaults
                 self.function_bodies[str(node.line.parts[1])] = node.body
         for line in _walk(self.tree):
             for stored in _stored_names(line):
@@ -486,6 +522,10 @@ class _Writer:
         for index, token in enumerate(tokens):
             if index:
                 pieces.append(" ")
+            # a word that only names a function is just a word here, like on the desktop
+            if not isinstance(token, QuotedText) and str(token) in self.functions and not self.is_variable(str(token)):
+                pieces.append(str(token))
+                continue
             node = self.val(token)
             if isinstance(node, ast.Constant):
                 value = node.value
@@ -681,6 +721,19 @@ class _Writer:
 
     c_const = c_set
 
+    def c_local(self, line):
+        match = _SET_RE.match(line.rest)
+        if match:
+            target, raw = match.groups()
+            value = self.eval_value(raw, split_command(raw))
+        else:
+            target, value = line.rest.strip(), ast.Constant(None)
+        self.store(ast.Name(target), value)
+
+    def default_value(self, raw):
+        """the tree for a parameter's default (written like the right side of set)."""
+        return self.eval_value(raw, split_command(raw))
+
     def c_calc(self, line):
         self.store(self.target(str(line.parts[1])), self.expression(line.rest.split(None, 1)[1]))
 
@@ -840,6 +893,44 @@ class _Writer:
 
     def c_circle(self, line):
         self.shape(line, "circle", 3)
+
+    def c_ellipse(self, line):
+        self.shape(line, "ellipse", 4)
+
+    def c_polygon(self, line):
+        self.call("polygon", self.object_name(line.parts[1]), ast.List(elts=[self.val(t) for t in line.parts[2:]]))
+
+    def c_particles(self, line):
+        self.call("particles", *[self.val(token) for token in line.parts[1:5]])
+
+    def c_scroll(self, line):
+        self.call("scroll", self.val(line.parts[1]), self.val(line.parts[2]))
+
+    def c_shake(self, line):
+        self.call("shake", *[self.val(token) for token in line.parts[1:3]])
+
+    def c_tween(self, line):
+        parts = line.parts
+        args = [self.object_name(parts[1]), ast.Constant(str(parts[2]).lower()), self.val(parts[3]), self.val(parts[4])]
+        if len(parts) > 5:
+            args.append(ast.Constant(str(parts[5]).lower()))
+        self.call("tween", *args)
+
+    def c_opacity(self, line):
+        self.call("opacity", self.object_name(line.parts[1]), self.val(line.parts[2]))
+
+    def c_layer(self, line):
+        self.call("layer", self.object_name(line.parts[1]), self.val(line.parts[2]))
+
+    def c_fixed(self, line):
+        self.call("fixed", self.object_name(line.parts[1]))
+
+    def c_beep(self, line):
+        parts = line.parts
+        args = [self.val(token) for token in parts[1:3]]
+        if len(parts) > 3:
+            args.append(ast.Constant(str(parts[3]).lower()))
+        self.call("beep", *args)
 
     def c_line(self, line):
         self.shape(line, "line", 5)
@@ -1374,11 +1465,28 @@ class _Python(_Writer):
     def function(self, node):
         name = str(node.line.parts[1])
         params = self.functions.get(name, [])
+        defaults = self.function_defaults.get(name, {})
+        own = _local_names(node.body, params)
         self.blank()
-        self.open(f"def {self.ident(name)}({', '.join(self.ident(p) for p in params)})")
-        self.globals_line(node.body, params)
-        self.scopes.append(set(params))
+        self.scopes.append(set(params) | set(own))
         try:
+            signature, late = [], []
+            for param in params:
+                if param not in defaults:
+                    signature.append(self.ident(param))
+                    continue
+                value = self.default_value(defaults[param])
+                if isinstance(value, ast.Constant):
+                    signature.append(f"{self.ident(param)}={self.expr(value)}")
+                else:
+                    signature.append(f"{self.ident(param)}=None")
+                    late.append((param, value))
+            self.open(f"def {self.ident(name)}({', '.join(signature)})")
+            self.globals_line(node.body, list(params) + own)
+            for param, value in late:
+                self.open(f"if {self.ident(param)} is None")
+                self.emit(f"{self.ident(param)} = {self.expr(value)}")
+                self.close()
             self.body(node.body)
         finally:
             self.scopes.pop()
@@ -1878,11 +1986,17 @@ class _JavaScript(_Writer):
     def function(self, node):
         name = str(node.line.parts[1])
         params = self.functions.get(name, [])
+        defaults = self.function_defaults.get(name, {})
+        own = _local_names(node.body, params)
         self.blank()
         prefix = "async " if name in self.waiting else ""
-        self.open(f"{prefix}function {self.ident(name)}({', '.join(self.ident(p) for p in params)})")
-        self.scopes.append(set(params))
+        self.scopes.append(set(params) | set(own))
         try:
+            signature = [self.ident(p) + (f" = {self.expr(self.default_value(defaults[p]))}" if p in defaults else "")
+                         for p in params]
+            self.open(f"{prefix}function {self.ident(name)}({', '.join(signature)})")
+            if own:
+                self.emit(f"let {', '.join(self.ident(n) for n in own)};")
             self.body(node.body)
         finally:
             self.scopes.pop()
@@ -2358,9 +2472,17 @@ class _Lua(_Writer):
     def function(self, node):
         name = str(node.line.parts[1])
         params = self.functions.get(name, [])
+        defaults = self.function_defaults.get(name, {})
+        own = _local_names(node.body, params)
         self.blank()
         self.open(f"function {self.ident(name)}({', '.join(self.ident(p) for p in params)})")
-        self.scopes.append(set(params))
+        self.scopes.append(set(params) | set(own))
+        if own:
+            self.emit(f"local {', '.join(self.ident(n) for n in own)}")
+        for param in params:
+            if param in defaults:
+                self.emit(f"if {self.ident(param)} == nil then {self.ident(param)} = "
+                          f"{self.expr(self.default_value(defaults[param]))} end")
         self.context.append(["function"])
         try:
             self.body(node.body)

@@ -44,7 +44,7 @@ def _version():
         from studio.version import VERSION
         return VERSION
     except Exception:  # noqa: BLE001 - the server works without the studio package
-        return "1.0.6"
+        return "1.0.7"
 
 
 class ToolError(Exception):

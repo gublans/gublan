@@ -8,6 +8,7 @@ three rules hold everywhere in the studio:
 
 import ctypes
 import json
+import math
 import os
 import re
 import sys
@@ -153,7 +154,90 @@ BUILTIN_THEMES = {
                    "comment": "#9a9a9a", "brace": "#a0e0e0", "function": "#e0ffc0", "keyword": "#f0f0a0",
                    "color": "#c8e890", "operator": "#d0d0d0"},
     },
+    "fern": {
+        "about": "brighter spring greens on a green-black.", "dark": True,
+        "colors": {"bg": "#121612", "panel": "#182018", "panel_alt": "#212b21", "editor_bg": "#141a14",
+                   "text": "#e6efe3", "muted": "#a8b8a3", "dim": "#6c7d68", "moss": "#5f9a48",
+                   "moss_light": "#9edb7c", "moss_dark": "#2f4f24", "number": "#dcc27a", "error": "#e46c6c",
+                   "active_line": "#1a2419", "error_line": "#332222", "debug_line": "#20321d", "border": "#283426",
+                   "hover": "#1d261c", "select": "#2d4a24", "select_text": "#f0faea", "field_bg": "#1b221a",
+                   "code_bg": "#1d251c", "inactive_select": "#233522", "match": "#36582a", "thumb": "#2f3a2d",
+                   "thumb_hover": "#465744", "button_hover": "#263124", "accent_text": "#0b1408"},
+        "syntax": {"command": "#9edb7c", "flow": "#c4ec9a", "string": "#b0d8a0", "number": "#dcc27a",
+                   "comment": "#6c7d68", "brace": "#98c8a8", "function": "#d4f0bc", "keyword": "#cfd89a",
+                   "color": "#b0d88a", "operator": "#a0ad9b"},
+    },
+    "dusk": {
+        "about": "violet evening light.", "dark": True,
+        "colors": {"bg": "#15131a", "panel": "#1c1924", "panel_alt": "#26222f", "editor_bg": "#17151d",
+                   "text": "#e8e4ef", "muted": "#aaa3b8", "dim": "#6f6880", "moss": "#7a5fa8",
+                   "moss_light": "#b49ae6", "moss_dark": "#3e3157", "number": "#e6c27a", "error": "#e87070",
+                   "active_line": "#1f1b28", "error_line": "#352229", "debug_line": "#262036", "border": "#2d2838",
+                   "hover": "#221e2b", "select": "#3a2f52", "select_text": "#f3effa", "field_bg": "#1f1c27",
+                   "code_bg": "#211d29", "inactive_select": "#2a2338", "match": "#47386a", "thumb": "#353042",
+                   "thumb_hover": "#4c4560", "button_hover": "#2c2738", "accent_text": "#120d1a"},
+        "syntax": {"command": "#b49ae6", "flow": "#d0b8f5", "string": "#a8d0b8", "number": "#e6c27a",
+                   "comment": "#6f6880", "brace": "#b8a8d8", "function": "#dccff5", "keyword": "#e0b0d0",
+                   "color": "#c0a8e8", "operator": "#a59fb3"},
+    },
+    "glacier": {
+        "about": "cold teal and ice.", "dark": True,
+        "colors": {"bg": "#101518", "panel": "#161c20", "panel_alt": "#1f272c", "editor_bg": "#12181b",
+                   "text": "#e2ecef", "muted": "#9fb2b8", "dim": "#64777d", "moss": "#3f8a99",
+                   "moss_light": "#7fd0dc", "moss_dark": "#234a52", "number": "#e3c77e", "error": "#e57373",
+                   "active_line": "#172126", "error_line": "#33232a", "debug_line": "#1a2c30", "border": "#263137",
+                   "hover": "#1b2429", "select": "#24464f", "select_text": "#ecf8fa", "field_bg": "#192125",
+                   "code_bg": "#1b2328", "inactive_select": "#1f343a", "match": "#2b5a64", "thumb": "#2e3a40",
+                   "thumb_hover": "#455860", "button_hover": "#233036", "accent_text": "#071215"},
+        "syntax": {"command": "#7fd0dc", "flow": "#a8e4ec", "string": "#a8d8b0", "number": "#e3c77e",
+                   "comment": "#64777d", "brace": "#98c8d8", "function": "#c8eef4", "keyword": "#b8c8f0",
+                   "color": "#90d0d8", "operator": "#98aab0"},
+    },
+    "rosewood": {
+        "about": "deep red wood and soft pink.", "dark": True,
+        "colors": {"bg": "#171213", "panel": "#1f1819", "panel_alt": "#2a2022", "editor_bg": "#191314",
+                   "text": "#efe4e5", "muted": "#b8a3a6", "dim": "#7d6669", "moss": "#a8505f",
+                   "moss_light": "#ec95a3", "moss_dark": "#5a2a33", "number": "#e8c47a", "error": "#ff7a7a",
+                   "active_line": "#241a1c", "error_line": "#3a2020", "debug_line": "#2c2224", "border": "#33282a",
+                   "hover": "#261d1f", "select": "#4d2a31", "select_text": "#fbf0f1", "field_bg": "#221a1c",
+                   "code_bg": "#241c1e", "inactive_select": "#36242a", "match": "#5e313b", "thumb": "#3a2e30",
+                   "thumb_hover": "#554446", "button_hover": "#31262a", "accent_text": "#1a0a0d"},
+        "syntax": {"command": "#ec95a3", "flow": "#f5b8c2", "string": "#c8c08a", "number": "#e8c47a",
+                   "comment": "#7d6669", "brace": "#d8a8b0", "function": "#f8d0d6", "keyword": "#e8b8a0",
+                   "color": "#e0a0b0", "operator": "#b0a0a2"},
+    },
+    "terminal": {
+        "about": "green glow on black, like an old screen.", "dark": True,
+        "colors": {"bg": "#050805", "panel": "#0a0f0a", "panel_alt": "#111a11", "editor_bg": "#060a06",
+                   "text": "#b8f5b0", "muted": "#7cc074", "dim": "#4a7a44", "moss": "#2f8f2a",
+                   "moss_light": "#5cff5c", "moss_dark": "#164a14", "number": "#e8e85c", "error": "#ff5c5c",
+                   "active_line": "#0c160c", "error_line": "#2a0e0e", "debug_line": "#10240f", "border": "#1c331a",
+                   "hover": "#0f1a0f", "select": "#1c4a1a", "select_text": "#e0ffe0", "field_bg": "#0a120a",
+                   "code_bg": "#0c140c", "inactive_select": "#133313", "match": "#236b20", "thumb": "#1c331a",
+                   "thumb_hover": "#2e5a2a", "button_hover": "#142614", "accent_text": "#021002"},
+        "syntax": {"command": "#5cff5c", "flow": "#a0ffa0", "string": "#c8f070", "number": "#e8e85c",
+                   "comment": "#4a7a44", "brace": "#80e0c0", "function": "#c0ffc0", "keyword": "#9af0d0",
+                   "color": "#90f090", "operator": "#7cc074"},
+    },
+    "latte": {
+        "about": "a warm light theme: cream and coffee.", "dark": False,
+        "colors": {"bg": "#f4efe8", "panel": "#ebe4da", "panel_alt": "#e0d7ca", "editor_bg": "#faf7f2",
+                   "text": "#2b2520", "muted": "#65594e", "dim": "#958879", "moss": "#8a5a34",
+                   "moss_light": "#6e4220", "moss_dark": "#e0ccb4", "number": "#8a6200", "error": "#b8382e",
+                   "active_line": "#f2ebe0", "error_line": "#f5dcd8", "debug_line": "#ebe0cc", "border": "#d4c9ba",
+                   "hover": "#e4dccf", "select": "#e6d2b8", "select_text": "#1e1812", "field_bg": "#f7f3ed",
+                   "code_bg": "#efe8de", "inactive_select": "#ece0ce", "match": "#e8d4b4", "thumb": "#cdc1b1",
+                   "thumb_hover": "#ae9f8c", "button_hover": "#dbd1c3", "accent_text": "#ffffff"},
+        "syntax": {"command": "#6e4220", "flow": "#8a4a1a", "string": "#3f7040", "number": "#8a6200",
+                   "comment": "#958879", "brace": "#5a6a6a", "function": "#5a3418", "keyword": "#7a5a1a",
+                   "color": "#8a5a2a", "operator": "#65594e"},
+    },
 }
+
+# the "accent_color" setting: any #rrggbb here replaces the theme's own accent (and the shades made from it)
+ACCENT = ""
+# the "ui_scale" setting as a fraction: 1.25 makes every button, label and gap a quarter bigger
+UI_ZOOM = 1.0
 
 
 def themes_folder():
@@ -249,19 +333,47 @@ def apply_theme(name):
         target = COLOR_ALIASES.get(key, key.upper())
         if target in values:
             values[target] = value
-    globals().update(values)
     DARK = spec["dark"]
+    accented = _apply_accent(values)
+    globals().update(values)
     SYNTAX.clear()
     SYNTAX.update(_MOSS_SYNTAX)
     if not DARK and not spec["syntax"]:
         SYNTAX.update({key: _mix(value, "#000000", 0.45) for key, value in _MOSS_SYNTAX.items()})
     SYNTAX.update({key: value for key, value in spec["syntax"].items() if key in SYNTAX})
+    if accented:
+        SYNTAX["command"] = values["MOSS_LIGHT"]
+        SYNTAX["function"] = _mix(values["MOSS_LIGHT"], values["TEXT"], 0.45)
     CATEGORY_COLORS.clear()
     CATEGORY_COLORS.update(_MOSS_CATEGORIES if DARK else
                            {key: _mix(value, "#000000", 0.45) for key, value in _MOSS_CATEGORIES.items()})
     CATEGORY_COLORS.update({key: value for key, value in spec["categories"].items() if key in CATEGORY_COLORS})
     THEME_NAME = str(name).lower()
     return True
+
+
+def _apply_accent(values):
+    """swap the accent shades in values for ones made from ACCENT. gives back True when it did."""
+    if not _is_color(ACCENT):
+        return False
+    base = ACCENT.lower()
+    values["MOSS"] = base
+    values["MOSS_LIGHT"] = _mix(base, "#ffffff", 0.32) if DARK else _mix(base, "#000000", 0.28)
+    values["MOSS_DARK"] = _mix(base, values["BG"], 0.55)
+    values["SELECT"] = _mix(base, values["EDITOR_BG"], 0.7)
+    values["INACTIVE_SELECT"] = _mix(base, values["EDITOR_BG"], 0.82)
+    values["MATCH"] = _mix(base, values["EDITOR_BG"], 0.6)
+    values["ACTIVE_LINE"] = _mix(base, values["EDITOR_BG"], 0.93)
+    values["DEBUG_LINE"] = _mix(base, values["EDITOR_BG"], 0.84)
+    brightness = sum(int(base[i:i + 2], 16) for i in (1, 3, 5)) / 3
+    values["ACCENT_TEXT"] = "#0d0d0d" if brightness > 140 else "#ffffff"
+    return True
+
+
+def accent_choices():
+    """(name, colour) pairs offered in settings next to "theme colour"."""
+    return (("theme", ""), ("moss", "#647f4a"), ("sky", "#4a86c8"), ("violet", "#8a63c9"), ("rose", "#c45a78"),
+            ("amber", "#c98a2e"), ("teal", "#2f9a8a"), ("coral", "#d0664e"), ("slate", "#6a7a8c"))
 
 
 def write_example_theme():
@@ -279,16 +391,36 @@ def write_example_theme():
     return folder
 
 
-def _theme_from_settings():
+def _stored_settings():
     try:
         from . import config
         with open(config.settings_path(), "r", encoding="utf-8") as handle:
             stored = json.load(handle)
-        return str(stored.get("theme") or DEFAULT_THEME) if isinstance(stored, dict) else DEFAULT_THEME
+        return stored if isinstance(stored, dict) else {}
     except (OSError, ValueError, ImportError):
-        return DEFAULT_THEME
+        return {}
 
 
+def _theme_from_settings():
+    return str(_stored_settings().get("theme") or DEFAULT_THEME)
+
+
+def _startup_look():
+    """the settings that must be known before the first widget is made."""
+    global ACCENT, UI_ZOOM, SPEED
+    stored = _stored_settings()
+    accent = stored.get("accent_color")
+    ACCENT = accent if _is_color(accent) else ""
+    try:
+        UI_ZOOM = max(0.8, min(1.6, int(stored.get("ui_scale", 100)) / 100.0))
+    except (TypeError, ValueError):
+        UI_ZOOM = 1.0
+    SPEED = SPEEDS.get(str(stored.get("animation_speed", "normal")), 1.0)
+
+
+SPEEDS = {"slow": 1.7, "normal": 1.0, "fast": 0.55}
+SPEED = 1.0  # the "animation_speed" setting: every animation's time is multiplied by this
+_startup_look()
 if not apply_theme(_theme_from_settings()):
     apply_theme(DEFAULT_THEME)
 
@@ -299,6 +431,23 @@ MOTION = True  # the "animations" setting; when it is off every animation jumps 
 
 def ease_out(progress):
     return 1 - (1 - progress) ** 3
+
+
+def ease_in_out(progress):
+    if progress < 0.5:
+        return 4 * progress ** 3
+    return 1 - (-2 * progress + 2) ** 3 / 2
+
+
+def ease_back(progress):
+    """overshoots a little, then settles: good for things that pop in."""
+    c = 1.70158
+    return 1 + (c + 1) * (progress - 1) ** 3 + c * (progress - 1) ** 2
+
+
+def ease_spring(progress):
+    """a soft wobble that settles on 1."""
+    return 1 - math.cos(progress * math.pi * 2.5) * math.exp(-5.5 * progress)
 
 
 def animate(widget, duration, step, done=None, ease=ease_out):
@@ -314,6 +463,7 @@ def animate(widget, duration, step, done=None, ease=ease_out):
         if done:
             done()
 
+    duration = duration * SPEED
     if not MOTION or duration <= 0:
         finish()
         return lambda: None
@@ -371,6 +521,102 @@ def fade_in(window, duration=130):
     animate(window, duration, step)
 
 
+def slide_in(window, x, y, width, height, dx=0, dy=-6, duration=140):
+    """show a window by sliding it a few pixels into place while it fades in."""
+    if not MOTION:
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        return lambda: None
+    try:
+        window.attributes("-alpha", 0.0)
+    except tk.TclError:
+        pass
+    dx, dy = px(dx), px(dy)
+
+    def step(progress):
+        window.geometry(f"{width}x{height}+{round(x + dx * (1 - progress))}+{round(y + dy * (1 - progress))}")
+        try:
+            window.attributes("-alpha", progress)
+        except tk.TclError:
+            pass
+
+    step(0.0)
+    return animate(window, duration, step)
+
+
+def pulse(widget, option, low, high, period=1300, widgets=None):
+    """slowly breathe a colour option between low and high until the returned function is called."""
+    state = {"job": None, "on": True}
+    targets = widgets or [widget]
+    start = time.perf_counter()
+
+    def tick():
+        state["job"] = None
+        if not state["on"]:
+            return
+        try:
+            if not widget.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        if MOTION:
+            phase = (time.perf_counter() - start) * 1000.0 / max(200.0, period * SPEED)
+            amount = 0.5 - 0.5 * math.cos(phase * 2 * math.pi)
+        else:
+            amount = 1.0
+        color = mix(low, high, amount)
+        for target in targets:
+            try:
+                target.configure(**{option: color})
+            except tk.TclError:
+                pass
+        if MOTION:
+            state["job"] = widget.after(40, tick)
+
+    def stop():
+        state["on"] = False
+        if state["job"]:
+            try:
+                widget.after_cancel(state["job"])
+            except tk.TclError:
+                pass
+        for target in targets:
+            try:
+                target.configure(**{option: low})
+            except tk.TclError:
+                pass
+
+    tick()
+    return stop
+
+
+def flash(widgets, option, rest, bright, duration=650):
+    """light a colour option up to bright, then let it fade back to rest."""
+    def step(progress):
+        color = mix(bright, rest, progress)
+        for widget in widgets:
+            try:
+                widget.configure(**{option: color})
+            except tk.TclError:
+                pass
+
+    if not widgets:
+        return lambda: None
+    return animate(widgets[0], duration, step, ease=ease_in_out)
+
+
+def type_in(label, text, duration=260):
+    """reveal a label's text letter by letter (status messages use it)."""
+    text = str(text)
+    if not MOTION or len(text) < 2:
+        label.configure(text=text)
+        return lambda: None
+
+    def step(progress):
+        label.configure(text=text[:max(1, round(len(text) * progress))])
+
+    return animate(label, duration, step)
+
+
 def tween_colors(widgets, option, start, end, duration=220):
     """fade a colour option (like bg) on several widgets from start to end."""
     def step(progress):
@@ -403,6 +649,7 @@ class Toast:
         self.label.bind("<Button-1>", lambda _e: self.hide())
         self.offset = 0
         self.closing = False
+        _sound("error" if kind == "error" else "warning" if kind == "warning" else "notify")
         Toast.shown.append(self)
         self._place(0.0)
         self.cancel = animate(self.frame, 200, self._place)
@@ -451,6 +698,15 @@ class Toast:
             animate(self.frame, 160, step, done=gone)
         except tk.TclError:
             gone()
+
+
+def _sound(name):
+    """play one of the studio's soft sounds (studio/sounds.py), when sounds are on."""
+    try:
+        from . import sounds
+        sounds.play(name)
+    except Exception:  # noqa: BLE001 - a missing sound must never break the window
+        pass
 
 
 def toast(window, text, kind="info", seconds=3.5):
@@ -503,20 +759,48 @@ def pick_fonts(root):
 
 
 def px(value):
-    """scale a pixel size for high dpi screens."""
-    return int(round(value * _SCALE))
+    """scale a pixel size for high dpi screens (and the ui scale setting)."""
+    return int(round(value * _SCALE * UI_ZOOM))
+
+
+def _zoomed(size):
+    return max(6, int(round(size * UI_ZOOM)))
 
 
 def ui_font(size=10, weight="normal"):
-    return (UI_FAMILY, size, weight)
+    return (UI_FAMILY, _zoomed(size), weight)
 
 
 def mono_font(size=11, weight="normal"):
-    return (MONO_FAMILY, size, weight)
+    return (MONO_FAMILY, _zoomed(size), weight)
 
 
 def icon_font(size=11):
-    return (ICON_FAMILY or UI_FAMILY, size)
+    return (ICON_FAMILY or UI_FAMILY, _zoomed(size))
+
+
+# fonts the editor can use, best first. only the ones installed on this computer are offered.
+EDITOR_FONTS = ("Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", "Source Code Pro", "Consolas",
+                "Lucida Console", "Courier New", "DejaVu Sans Mono", "Menlo", "Monaco")
+
+
+def editor_fonts(root):
+    """the editor fonts installed here, as (shown name, family) pairs."""
+    try:
+        installed = {name.lower(): name for name in tkfont.families(root)}
+    except tk.TclError:
+        installed = {}
+    return [(family.lower(), installed[family.lower()]) for family in EDITOR_FONTS if family.lower() in installed]
+
+
+def editor_family(settings, root=None):
+    """the font family the code editor should use: the editor_font setting when it is installed."""
+    wanted = str(settings.get("editor_font") or "").lower()
+    if wanted and root is not None:
+        for shown, family in editor_fonts(root):
+            if shown == wanted:
+                return family
+    return MONO_FAMILY
 
 
 def icon(name, fallback=""):
@@ -913,9 +1197,10 @@ class Tooltip:
         frame.pack()
         tk.Label(frame, text=self.text, bg=PANEL_ALT, fg=TEXT, font=ui_font(9), justify="left",
                  wraplength=px(360)).pack(padx=px(8), pady=px(5))
-        self.window.geometry(f"+{x}+{y}")
-        fade_in(self.window, 110)
+        self.window.update_idletasks()
         self.window.deiconify()
+        slide_in(self.window, x, y, self.window.winfo_reqwidth(), self.window.winfo_reqheight(), dy=-3,
+                 duration=110)
 
     def hide(self, _event=None):
         self.cancel()
@@ -1005,11 +1290,12 @@ class PopupMenu:
         screen_h = self.window.winfo_screenheight()
         x = min(x, screen_w - width - 4)
         y = min(y, screen_h - height - 4)
-        self.window.geometry(f"{width}x{height}+{x}+{y}")
-        fade_in(self.window, 90)
         self.window.deiconify()
+        slide_in(self.window, x, y, width, height, dx=-6 if self.parent_menu else 0,
+                 dy=0 if self.parent_menu else -6, duration=120)
         self.window.lift()
         if self.parent_menu is None:
+            _sound("click")
             self.window.focus_force()
             self.window.bind("<FocusOut>", self._focus_out)
             self.window.bind("<Escape>", lambda _e: self.close())

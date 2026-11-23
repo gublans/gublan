@@ -67,6 +67,24 @@ DEFAULTS = {
     "mcp_app": "claude code",
     "theme": "moss",
     "animations": True,
+    "animation_speed": "normal",
+    "accent_color": "",
+    "ui_scale": 100,
+    "editor_font": "",
+    "line_spacing": 1,
+    "rainbow_brackets": True,
+    "smooth_caret": True,
+    "caret_style": "line",
+    "caret_motion": "smooth",
+    "caret_blink": "fade",
+    "caret_width": 2,
+    "typing_effect": "fade",
+    "smooth_scroll": True,
+    "sounds": True,
+    "sound_volume": 45,
+    "sound_pack": "soft",
+    "typing_sounds": False,
+    "game_style": {},
     "plugins": False,
     "disabled_plugins": [],
     "live_name": "",
@@ -125,6 +143,9 @@ def load():
                     settings[key] = value
                 elif key in DEFAULTS and isinstance(DEFAULTS[key], int) and isinstance(value, (int, float)):
                     settings[key] = int(value)
+            # 1.0.6 had a block cursor switch; 1.0.7 has caret styles
+            if stored.get("block_cursor") is True and "caret_style" not in stored:
+                settings["caret_style"] = "block"
     except (OSError, ValueError):
         pass
     return settings

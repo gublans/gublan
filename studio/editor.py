@@ -11,7 +11,8 @@ from tkinter import font as tkfont
 
 from gublancore import BLOCK_OPENERS, COLORS, COMMAND_SPECS, EXPRESSION_FUNCTIONS
 
-from . import meta
+from . import meta, sounds
+from .caret import SmoothCaret, SmoothScroll, TypingEffects
 from .theme import (
     BORDER, DEBUG_LINE, DIM, EDITOR_BG, ERROR, ERROR_LINE, MOSS, MOSS_DARK, MOSS_LIGHT, MUTED, NUMBER,
     PANEL, PANEL_ALT, SELECT, SELECT_TEXT, SYNTAX, TEXT, ACTIVE_LINE, BracketButton, flat_entry, icon,
@@ -21,6 +22,27 @@ from . import theme
 
 SYNTAX_TAGS = ("command", "flow", "string", "number", "comment", "brace", "function", "keyword", "color",
                "operator")
+BRACKET_TAGS = ("bracket0", "bracket1", "bracket2")
+_OPENING, _CLOSING = "([", ")]"
+
+
+def bracket_depths(text):
+    """(column, depth) for each ( ) [ ] outside text and comments: rainbow brackets colour them by depth."""
+    skip = set()
+    for tag, a, b in line_tokens(text):
+        if tag in ("string", "comment"):
+            skip.update(range(a, b))
+    found, depth = [], 0
+    for column, char in enumerate(text):
+        if column in skip:
+            continue
+        if char in _OPENING:
+            found.append((column, depth))
+            depth += 1
+        elif char in _CLOSING:
+            depth = max(0, depth - 1)
+            found.append((column, depth))
+    return found
 
 _ASSIGN_START = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*|\[[^\]]*\])*)\s*(\+=|-=|\*=|/=|=)(?!=)")
 _EXPR_TOKEN = re.compile(
@@ -232,6 +254,12 @@ class CodeEditor(tk.Frame):
         self._configure_tags()
         self._install_proxy()
         self._bind_keys()
+        self._typing = False
+        self._rainbow = None
+        self.caret = SmoothCaret(self)
+        self.effects = TypingEffects(self)
+        self.smooth_scroll = SmoothScroll(self)
+        self.text.bind("<<Paste>>", self._before_paste, add="+")
         self.apply_settings(settings)
         self.gutter.bind("<Button-1>", self._gutter_click)
         self.gutter.bind("<MouseWheel>", lambda e: self.text.yview_scroll(int(-e.delta / 40), "units"))
@@ -260,6 +288,8 @@ class CodeEditor(tk.Frame):
         text.tag_configure("sel", foreground="")
         for tag in ("errorline", "debugline", "found", "foundcurrent", "match"):
             text.tag_raise(tag, "currentline")
+        for tag, color in zip(BRACKET_TAGS, (SYNTAX["number"], SYNTAX["keyword"], SYNTAX["brace"])):
+            text.tag_configure(tag, foreground=color)
         text.tag_raise("sel")
 
     def _install_proxy(self):
@@ -278,15 +308,17 @@ proc {W} {{args}} {{
         }} else {{
             set b $a
         }}
+        set n 0
+        if {{$op eq "insert"}} {{ set n [string length [lindex $args 2]] }}
         set before [lindex [split [{O} index end] .] 0]
         set result [{O} {{*}}$args]
         set after [lindex [split [{O} index end] .] 0]
-        {C} $op $a $b [expr {{$after - $before}}]
+        {C} $op $a $b [expr {{$after - $before}}] $n
         return $result
     }}
     if {{$op eq "mark" && [lindex $args 1] eq "set" && [lindex $args 2] eq "insert"}} {{
         set result [{O} {{*}}$args]
-        {C} cursor 0 0 0
+        {C} cursor 0 0 0 0
         return $result
     }}
     return [{O} {{*}}$args]
@@ -305,15 +337,29 @@ proc {W} {{args}} {{
     def apply_settings(self, settings):
         self.settings = settings
         size = int(settings.get("font_size", 11))
+        family = theme.editor_family(settings, self)
         for item in (self.font, self.italic, self.bold):
-            item.configure(family=theme.MONO_FAMILY, size=size)
+            item.configure(family=family, size=size)
         tab = self.font.measure(" " * self.indent_size())
+        try:
+            extra = max(0, min(8, int(settings.get("line_spacing", 1))))
+        except (TypeError, ValueError):
+            extra = 1
         self.text.configure(tabs=(tab,), wrap="word" if settings.get("wrap") else "none",
-                            blockcursor=bool(settings.get("block_cursor")))
+                            spacing1=px(extra), spacing3=px(extra))
         if settings.get("hint_bar", True):
             self.hintbar.grid()
         else:
             self.hintbar.grid_remove()
+        self.caret.apply(settings)
+        self.effects.apply(settings)
+        self.smooth_scroll.apply(settings)
+        rainbow = bool(settings.get("rainbow_brackets", True))
+        if rainbow != self._rainbow:
+            changed = self._rainbow is not None
+            self._rainbow = rainbow
+            if changed:
+                self.highlight_all()
         self._schedule("gutter", 0, self.draw_gutter)
 
     def indent_size(self):
@@ -370,7 +416,14 @@ proc {W} {{args}} {{
         self.text.focus_set()
 
     # ----- change tracking -------------------------------------------------------------------
-    def _changed(self, op, start, end, delta):
+    def _changed(self, op, start, end, delta, count=0):
+        if op == "insert" and self._typing and not self.live_applying:
+            try:
+                length = int(count)
+            except ValueError:
+                length = 0
+            if 0 < length <= 8:
+                self.effects.typed(start, f"{start}+{length}c")
         if op == "cursor":
             self._schedule("cursor", 0, self._cursor_moved)
             if self.collab_cursor:
@@ -481,9 +534,10 @@ proc {W} {{args}} {{
             return
         text = self.text
         start, end = f"{first}.0", f"{last}.end"
-        for tag in SYNTAX_TAGS:
+        for tag in SYNTAX_TAGS + BRACKET_TAGS:
             text.tag_remove(tag, start, end)
-        ranges = {tag: [] for tag in SYNTAX_TAGS}
+        ranges = {tag: [] for tag in SYNTAX_TAGS + BRACKET_TAGS}
+        rainbow = self.settings.get("rainbow_brackets", True)
         for offset, line in enumerate(text.get(start, end).split("\n")):
             number = first + offset
             if len(line) > 3000:
@@ -492,6 +546,11 @@ proc {W} {{args}} {{
                 if b > a:
                     ranges[tag].append(f"{number}.{a}")
                     ranges[tag].append(f"{number}.{b}")
+            if rainbow and ("(" in line or "[" in line):
+                for column, depth in bracket_depths(line):
+                    tag = BRACKET_TAGS[depth % len(BRACKET_TAGS)]
+                    ranges[tag].append(f"{number}.{column}")
+                    ranges[tag].append(f"{number}.{column + 1}")
         for tag, indices in ranges.items():
             for chunk in range(0, len(indices), 2000):
                 part = indices[chunk:chunk + 2000]
@@ -522,6 +581,7 @@ proc {W} {{args}} {{
     # ----- scrolling and the gutter -------------------------------------------------------------
     def _yscroll(self, first, last):
         self.vbar.set(first, last)
+        self.caret.update(animate=False)
         self._schedule("gutter", 0, self.draw_gutter)
         if self.peers:
             self._schedule("peers", 0, self.place_peer_flags)
@@ -533,6 +593,7 @@ proc {W} {{args}} {{
 
     def _xscroll(self, first, last):
         self.hbar.set(first, last)
+        self.caret.update(animate=False)
         if float(first) <= 0.0 and float(last) >= 1.0:
             self.hbar.grid_remove()
         else:
@@ -643,6 +704,12 @@ proc {W} {{args}} {{
             self.text.tag_add("sel", f"{line}.{start}", f"{line}.end")
         self.text.see(f"{line}.0")
         self.text.focus_set()
+        self.flash_line(line)
+
+    def flash_line(self, line, kind="jump"):
+        """a soft glow over a line that fades out, so the eye finds it (jumps, errors)."""
+        color = theme.mix(theme.ERROR, theme.EDITOR_BG, 0.55) if kind == "error" else theme.MOSS_DARK
+        self.effects.flash_line(line, color=color, duration=1.1 if kind == "error" else 0.8)
 
     # ----- cursor, matching and the hint bar -------------------------------------------------------
     def _cursor_moved(self):
@@ -650,6 +717,7 @@ proc {W} {{args}} {{
         text.tag_remove("currentline", "1.0", "end")
         if self.settings.get("highlight_line", True) and not text.tag_ranges("sel"):
             text.tag_add("currentline", "insert linestart", "insert linestart+1line")
+        self.caret.update()
         self.draw_gutter()
         self._show_matches()
         self._update_hint()
@@ -992,10 +1060,38 @@ proc {W} {{args}} {{
         self.text.see("insert")
         return "break"
 
+    def _before_paste(self, _event):
+        try:
+            ranges = self.text.tag_ranges("sel")
+            start = self.text.index(ranges[0] if ranges else "insert")
+        except tk.TclError:
+            return None
+        mark = "fxpastestart"
+        self.text.mark_set(mark, start)
+        self.text.mark_gravity(mark, "left")
+
+        def glow():
+            try:
+                if self.text.compare(mark, "<", "insert"):
+                    self.effects.flash_range(mark, "insert")
+                self.text.mark_unset(mark)
+            except tk.TclError:
+                pass
+
+        self.after_idle(glow)
+        return None
+
+    def _typed_done(self):
+        self._typing = False
+
     def _on_key_press(self, event):
         char = event.char
         if not char or event.state & 0x4 or event.state & 0x20000:
             return None
+        if char.isprintable():
+            self._typing = True
+            self.after_idle(self._typed_done)
+            sounds.play("type")
         text = self.text
         if char in PAIRS and self.settings.get("auto_pair", True):
             ranges = text.tag_ranges("sel")

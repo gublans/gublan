@@ -76,6 +76,38 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 - any function can be written after a value: `name.upper()` is `upper(name)`, `items.sort()` is `sort(items)`.
 - whole numbers also have `&`, `|`, `^`, `<<`, `>>` and `~` for working with bits.
 
+## functions
+
+```gublan
+function greet name="world" times=1
+    local message = "hi " + name
+    loop times
+        print {message}
+    end
+end
+
+greet()
+greet("sam", 2)
+```
+
+parameters can have a default (`name="world"`), used when the call leaves that value out. defaults come
+after the parameters without one. `local` makes a variable that only lives inside the function, so it can't
+clash with one of the same name somewhere else.
+
+## long lines
+
+```gublan
+levels = [
+    "grass",
+    "caves",
+    "castle",
+]
+print {len(levels)} levels
+```
+
+a line that ends with an open `[`, `(` or `{` (or a comma inside one) carries on over the next lines until the
+brackets close. that makes long lists, maps and function calls easier to read.
+
 ## when things go wrong
 
 ```gublan
@@ -194,10 +226,45 @@ own error, and `assert` throws one when a condition is false.
 | `exp(x)` | e to the power of x |
 | `noise(x)` | or noise(x, y) smooth random values from 0 to 1, for hills, clouds and wobbles |
 | `randint(low, high)` | a random whole number from low to high |
+| `hypot(x, y)` | the length of the long side of a right triangle, sqrt(x*x + y*y) |
+| `fract(x)` | the part after the decimal point: fract(2.75) is 0.75 |
+| `smoothstep(low, high, x)` | 0 below low, 1 above high and a smooth curve between |
+| `snap(x, step)` | x rounded to the nearest step: snap(37, 16) is 32, handy for grids |
+| `between(x, low, high)` | true when x is from low up to high |
+| `ease(t, kind)` | bend a 0-to-1 amount into a curve. kinds: linear, in, out, inout, smooth, bounce, elastic, back |
+| `gcd(a, b)` | the biggest whole number that divides both |
+| `median(list)` | the middle value once the list is sorted |
+| `product(list)` | every number in a list multiplied together |
+| `first(list)` | the first item, or none when the list is empty |
+| `last(list)` | the last item, or none when the list is empty |
+| `take(list, n)` | the first n items |
+| `drop(list, n)` | everything after the first n items |
+| `chunk(list, size)` | the list cut into smaller lists: chunk([1, 2, 3], 2) is [[1, 2], [3]] |
+| `enumerate(list)` | each item with its position: enumerate(["a", "b"]) is [[0, "a"], [1, "b"]] |
+| `minby(list, f)` | the item that gives the smallest f: minby(enemies, e => e.x) |
+| `maxby(list, f)` | the item that gives the biggest f |
+| `groupby(list, f)` | a map that puts items together by what f gives: groupby(words, w => len(w)) |
+| `without(list, value)` | a copy of the list with that value taken out everywhere |
+| `fill(value, count)` | a list with the value repeated: fill(0, 3) is [0, 0, 0] |
+| `merge(map, other)` | a new map with the names from both (other wins when they clash) |
+| `get(map-or-list, key, default)` | a value, or the default when it isn't there |
+| `entries(map)` | the map as a list of [name, value] pairs |
+| `frompairs(list)` | a map from a list of [name, value] pairs |
+| `commas(number)` | a number with commas every three digits: commas(1234567) is 1,234,567 |
+| `ordinal(n)` | a number with st, nd, rd or th: ordinal(2) is 2nd |
+| `plural(count, word)` | the count and the word, with an s when it isn't 1: plural(3, "coin") is 3 coins |
+| `wraptext(text, width)` | a list of lines, each at most width letters long, broken between words |
+| `mixcolor(a, b, t)` | a colour part way from a to b: mixcolor("red", "blue", 0.5) |
+| `randomcolor()` | a random bright colour |
+| `cooldown("name", seconds)` | true at most once every few seconds, like a gun that needs to reload |
+| `pulse("name", seconds)` | true once every few seconds, for spawning enemies on a beat |
+| `after("name", seconds)` | false until that many seconds after the first time you ask, then true |
+| `scrollx()` | how far the view is scrolled to the right (see scroll) |
+| `scrolly()` | how far the view is scrolled down (see scroll) |
 
 ## every command
 
-`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `const` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `until` `match` `case` `try` `catch` `throw` `break` `continue` `wait` `kill` `function` `call` `return` `include` `use` `test` `assert` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `box` `circle` `line` `text` `image` `sprite` `vec2` `cube` `sphere` `spin` `camera` `vec3` `button` `ui` `textbox` `slider` `checkbox` `focus` `move` `place` `resize` `hide` `show` `animate` `touching` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `get` `save` `load` `forget` `presence`
+`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `const` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `until` `match` `case` `try` `catch` `throw` `break` `continue` `wait` `kill` `function` `call` `return` `local` `include` `use` `test` `assert` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `scroll` `shake` `box` `circle` `line` `text` `image` `sprite` `vec2` `ellipse` `polygon` `particles` `cube` `sphere` `spin` `camera` `vec3` `button` `ui` `textbox` `slider` `checkbox` `focus` `move` `place` `resize` `hide` `show` `animate` `touching` `tween` `opacity` `layer` `fixed` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `beep` `get` `save` `load` `forget` `presence`
 
 ## basics: printing, variables and maths
 
@@ -683,6 +750,25 @@ end
 print {double(21)}
 ```
 
+### `local`
+
+make a variable that only lives inside the function it is in. when the function ends, the name goes back to what it was before.
+
+```text
+local <name> [= <value>]
+```
+
+```gublan
+function total_of items
+    local total = 0
+    for item in items
+        total += item
+    end
+    return total
+end
+print {total_of([1, 2, 3])}
+```
+
 ### `include`
 
 load another gublan script into this one.
@@ -1044,6 +1130,32 @@ textsize <pixels>
 textsize 32
 ```
 
+### `scroll`
+
+look at a bigger world: everything is drawn moved so that x, y is the top-left corner of the window. ui and fixed objects stay where they are. scrollx() and scrolly() read it back.
+
+```text
+scroll <x> <y>
+```
+
+```gublan
+mode 2d
+scroll 300 0
+```
+
+### `shake`
+
+shake the screen for a moment, for hits and explosions.
+
+```text
+shake <strength> [seconds]
+```
+
+```gublan
+mode 2d
+shake 8 0.3
+```
+
 ## 2d shapes, text and pictures
 
 ### `box`
@@ -1132,6 +1244,46 @@ vec2 <name> <x> <y>
 
 ```gublan
 vec2 speed 3 0
+```
+
+### `ellipse`
+
+make an oval that fills a box.
+
+```text
+ellipse <name> <x> <y> <width> <height>
+```
+
+```gublan
+mode 2d
+ellipse egg 100 80 40 60
+```
+
+### `polygon`
+
+make a shape with straight sides from three or more points.
+
+```text
+polygon <name> <x1> <y1> <x2> <y2> <x3> <y3> [more points...]
+```
+
+```gublan
+mode 2d
+polygon roof 100 100 150 50 200 100
+```
+
+### `particles`
+
+throw out a burst of little squares in the current color. they fly apart and fade away.
+
+```text
+particles <x> <y> [count] [speed]
+```
+
+```gublan
+mode 2d
+color gold
+particles 200 150 30
 ```
 
 ## 3d
@@ -1401,6 +1553,62 @@ circle coin 50 50 8
 touching hit player coin
 ```
 
+### `tween`
+
+smoothly change x, y, w, h, r, angle or opacity while the program keeps going. easings: linear, in, out, inout, smooth, bounce, elastic, back.
+
+```text
+tween <object> <field> <value> <seconds> [easing]
+```
+
+```gublan
+mode 2d
+circle coin 200 120 10
+tween coin y 40 0.6 bounce
+```
+
+### `opacity`
+
+make an object see-through. 0 is invisible and 1 is solid.
+
+```text
+opacity <object|all> <0-to-1>
+```
+
+```gublan
+mode 2d
+box ghost 40 40 32 32
+opacity ghost 0.5
+```
+
+### `layer`
+
+choose what is drawn on top. higher layers are drawn over lower ones, and everything starts on layer 0.
+
+```text
+layer <object> <number>
+```
+
+```gublan
+mode 2d
+box player 40 40 32 32
+layer player 2
+```
+
+### `fixed`
+
+keep an object in the same place on the screen when the view scrolls, like a score.
+
+```text
+fixed <object>
+```
+
+```gublan
+mode 2d
+text hud 10 10 score 0
+fixed hud
+```
+
 ## keyboard, mouse and questions
 
 ### `key`
@@ -1552,6 +1760,18 @@ volume <0-to-1>
 
 ```gublan
 volume 0.5
+```
+
+### `beep`
+
+play a made-up tone, no sound file needed. waves: square, sine, triangle, saw and noise.
+
+```text
+beep <frequency> [seconds] [wave]
+```
+
+```gublan
+beep 440 0.2
 ```
 
 ## the web

@@ -5,6 +5,7 @@ then interprets it statement by statement, so games run at full speed while
 the studio can still pause, step and inspect every line.
 """
 
+import array
 import ast
 import colorsys
 import difflib
@@ -118,6 +119,9 @@ COMMAND_SPECS = {
              "run a function. its answer goes into result.", "call greet world"),
     "return": ("functions", "return [value]", 1, "finish a function, optionally giving back a value.",
                "return total"),
+    "local": ("functions", "local <name> [= <value>]", 2,
+              "make a variable that only lives inside the function it is in. when the function ends, the "
+              "name goes back to what it was before.", "local total = 0"),
     "include": ("functions", "include <script.gubl>", 2, "load another gublan script into this one.",
                 "include helpers.gubl"),
     "use": ("functions", "use <module>", 2,
@@ -173,6 +177,12 @@ COMMAND_SPECS = {
     "fps": ("display", "fps <frames-per-second>", 2, "set how many frames per second frame aims for.",
             "fps 60"),
     "textsize": ("display", "textsize <pixels>", 2, "set the size of text you make next.", "textsize 32"),
+    "scroll": ("display", "scroll <x> <y>", 3,
+               "look at a bigger world: everything is drawn moved so that x, y is the top-left corner of the "
+               "window. ui and fixed objects stay where they are. scrollx() and scrolly() read it back.",
+               "scroll 300 0"),
+    "shake": ("display", "shake <strength> [seconds]", 2,
+              "shake the screen for a moment, for hits and explosions.", "shake 8 0.3"),
     # 2d
     "box": ("2d", "box <name> <x> <y> <width> <height>", 6, "make a rectangle.", "box player 40 40 32 32"),
     "circle": ("2d", "circle <name> <x> <y> <radius>", 5, "make a circle.", "circle coin 200 120 10"),
@@ -184,6 +194,14 @@ COMMAND_SPECS = {
     "sprite": ("2d", "sprite <name> <path> <x> <y> <width> <height>", 7,
                "show a resized image you can move and collide.", "sprite hero assets/hero.png 40 40 48 48"),
     "vec2": ("2d", "vec2 <name> <x> <y>", 4, "make an x/y value for positions and movement.", "vec2 speed 3 0"),
+    "ellipse": ("2d", "ellipse <name> <x> <y> <width> <height>", 6, "make an oval that fills a box.",
+                "ellipse egg 100 80 40 60"),
+    "polygon": ("2d", "polygon <name> <x1> <y1> <x2> <y2> <x3> <y3> [more points...]", 8,
+                "make a shape with straight sides from three or more points.",
+                "polygon roof 100 100 150 50 200 100"),
+    "particles": ("2d", "particles <x> <y> [count] [speed]", 3,
+                  "throw out a burst of little squares in the current color. they fly apart and fade away.",
+                  "particles 200 150 30"),
     # 3d
     "cube": ("3d", "cube <name> <x> <y> <z> <size>", 6, "make a 3d cube.", "cube crate 0 0 -6 1"),
     "sphere": ("3d", "sphere <name> <x> <y> <z> <radius>", 6, "make a 3d sphere.", "sphere moon 2 0 -7 0.5"),
@@ -219,6 +237,17 @@ COMMAND_SPECS = {
                 "glide an object to a position over time.", "animate player 200 80 0.5"),
     "touching": ("objects", "touching <variable> <object-a> <object-b>", 4,
                  "set a variable to 1 when two objects overlap.", "touching hit player coin"),
+    "tween": ("objects", "tween <object> <field> <value> <seconds> [easing]", 5,
+              "smoothly change x, y, w, h, r, angle or opacity while the program keeps going. easings: linear, "
+              "in, out, inout, smooth, bounce, elastic, back.", "tween coin y 40 0.6 bounce"),
+    "opacity": ("objects", "opacity <object|all> <0-to-1>", 3,
+                "make an object see-through. 0 is invisible and 1 is solid.", "opacity ghost 0.5"),
+    "layer": ("objects", "layer <object> <number>", 3,
+              "choose what is drawn on top. higher layers are drawn over lower ones, and everything starts "
+              "on layer 0.", "layer player 2"),
+    "fixed": ("objects", "fixed <object>", 2,
+              "keep an object in the same place on the screen when the view scrolls, like a score.",
+              "fixed hud"),
     # input
     "key": ("input", "key <variable> <key-name>", 3, "set a variable to 1 while a key is held.",
             "key left left"),
@@ -238,6 +267,9 @@ COMMAND_SPECS = {
     "stopmusic": ("sound", "stopmusic", 1, "stop the music.", "stopmusic"),
     "stopsounds": ("sound", "stopsounds", 1, "stop all sound effects.", "stopsounds"),
     "volume": ("sound", "volume <0-to-1>", 2, "set the volume from 0 (silent) to 1 (full).", "volume 0.5"),
+    "beep": ("sound", "beep <frequency> [seconds] [wave]", 2,
+             "play a made-up tone, no sound file needed. waves: square, sine, triangle, saw and noise.",
+             "beep 440 0.2"),
     # web
     "get": ("web", "get <https-url> <variable>", 3, "read text from a public https website.",
             "get https://example.com page"),
@@ -410,7 +442,87 @@ EXPRESSION_FUNCTIONS = {
     "exp": "exp(x) e to the power of x",
     "noise": "noise(x) or noise(x, y) smooth random values from 0 to 1, for hills, clouds and wobbles",
     "randint": "randint(low, high) a random whole number from low to high",
+    # added in 1.0.7: more math
+    "hypot": "hypot(x, y) the length of the long side of a right triangle, sqrt(x*x + y*y)",
+    "fract": "fract(x) the part after the decimal point: fract(2.75) is 0.75",
+    "smoothstep": "smoothstep(low, high, x) 0 below low, 1 above high and a smooth curve between",
+    "snap": "snap(x, step) x rounded to the nearest step: snap(37, 16) is 32, handy for grids",
+    "between": "between(x, low, high) true when x is from low up to high",
+    "ease": "ease(t, kind) bend a 0-to-1 amount into a curve. kinds: linear, in, out, inout, smooth, bounce, "
+            "elastic, back",
+    "gcd": "gcd(a, b) the biggest whole number that divides both",
+    "median": "median(list) the middle value once the list is sorted",
+    "product": "product(list) every number in a list multiplied together",
+    # lists and maps
+    "first": "first(list) the first item, or none when the list is empty",
+    "last": "last(list) the last item, or none when the list is empty",
+    "take": "take(list, n) the first n items",
+    "drop": "drop(list, n) everything after the first n items",
+    "chunk": "chunk(list, size) the list cut into smaller lists: chunk([1, 2, 3], 2) is [[1, 2], [3]]",
+    "enumerate": "enumerate(list) each item with its position: enumerate([\"a\", \"b\"]) is [[0, \"a\"], [1, \"b\"]]",
+    "minby": "minby(list, f) the item that gives the smallest f: minby(enemies, e => e.x)",
+    "maxby": "maxby(list, f) the item that gives the biggest f",
+    "groupby": "groupby(list, f) a map that puts items together by what f gives: groupby(words, w => len(w))",
+    "without": "without(list, value) a copy of the list with that value taken out everywhere",
+    "fill": "fill(value, count) a list with the value repeated: fill(0, 3) is [0, 0, 0]",
+    "merge": "merge(map, other) a new map with the names from both (other wins when they clash)",
+    "get": "get(map-or-list, key, default) a value, or the default when it isn't there",
+    "entries": "entries(map) the map as a list of [name, value] pairs",
+    "frompairs": "frompairs(list) a map from a list of [name, value] pairs",
+    # text
+    "commas": "commas(number) a number with commas every three digits: commas(1234567) is 1,234,567",
+    "ordinal": "ordinal(n) a number with st, nd, rd or th: ordinal(2) is 2nd",
+    "plural": "plural(count, word) the count and the word, with an s when it isn't 1: plural(3, \"coin\") is 3 coins",
+    "wraptext": "wraptext(text, width) a list of lines, each at most width letters long, broken between words",
+    # colors
+    "mixcolor": "mixcolor(a, b, t) a colour part way from a to b: mixcolor(\"red\", \"blue\", 0.5)",
+    "randomcolor": "randomcolor() a random bright colour",
+    # timers for games
+    "cooldown": "cooldown(\"name\", seconds) true at most once every few seconds, like a gun that needs to reload",
+    "pulse": "pulse(\"name\", seconds) true once every few seconds, for spawning enemies on a beat",
+    "after": "after(\"name\", seconds) false until that many seconds after the first time you ask, then true",
+    # the view
+    "scrollx": "scrollx() how far the view is scrolled to the right (see scroll)",
+    "scrolly": "scrolly() how far the view is scrolled down (see scroll)",
 }
+
+EASINGS = ("linear", "in", "out", "inout", "smooth", "bounce", "elastic", "back")
+
+
+def ease_value(t, kind="inout"):
+    """bend a 0-to-1 progress into an easing curve (the same numbers in every gublan runtime)."""
+    t = 0.0 if t < 0 else 1.0 if t > 1 else float(t)
+    kind = str(kind).strip().lower()
+    if kind == "linear":
+        return t
+    if kind == "in":
+        return t * t
+    if kind == "out":
+        return 1 - (1 - t) * (1 - t)
+    if kind == "inout":
+        return 2 * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 2 / 2
+    if kind == "smooth":
+        return t * t * (3 - 2 * t)
+    if kind == "bounce":
+        n, d = 7.5625, 2.75
+        if t < 1 / d:
+            return n * t * t
+        if t < 2 / d:
+            t -= 1.5 / d
+            return n * t * t + 0.75
+        if t < 2.5 / d:
+            t -= 2.25 / d
+            return n * t * t + 0.9375
+        t -= 2.625 / d
+        return n * t * t + 0.984375
+    if kind == "elastic":
+        if t in (0.0, 1.0):
+            return t
+        return 2 ** (-10 * t) * math.sin((t * 10 - 0.75) * (2 * math.pi / 3)) + 1
+    if kind == "back":
+        c1 = 1.70158
+        return 1 + (c1 + 1) * (t - 1) ** 3 + c1 * (t - 1) ** 2
+    raise ValueError(f"'{kind}' is not an easing. try: {', '.join(EASINGS)}")
 
 PRESENCE_PARTS = ("details", "state", "image", "smallimage", "button", "party", "timer", "countdown", "app",
                   "clear")
@@ -587,6 +699,119 @@ class ParsedLine:
         self.error = error
 
 
+class ContinuedLine(str):
+    """what is left of a line that was joined onto the line above it (a list or call spread over lines)."""
+
+
+def _bracket_change(text):
+    """how many brackets a line leaves open (opened minus closed), not counting ones inside quotes."""
+    depth = 0
+    quote = None
+    previous = " "
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                previous = " "
+                continue
+            if char == quote:
+                quote = None
+        elif char == '"' or (char == "'" and not previous.isalnum()):
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        previous = char
+        index += 1
+    return depth
+
+
+def join_continued_lines(lines):
+    """let a list, map or call carry on over several lines.
+
+    a line that ends with an open bracket or a comma inside brackets is joined with the lines below it until
+    the brackets close. the joined lines become empty ContinuedLine markers, so line numbers stay the same.
+    if the brackets never close, nothing is joined (and the normal error shows up on the first line).
+    """
+    lines = list(lines)
+    index = 0
+    while index < len(lines):
+        text = lines[index].rstrip()
+        stripped = text.strip()
+        if stripped and not stripped.startswith("//") and stripped[-1] in "([{,":
+            depth = _bracket_change(stripped)
+            if depth > 0:
+                pieces = [text]
+                end = index + 1
+                while end < len(lines) and depth > 0:
+                    piece = lines[end].strip()
+                    if piece and not piece.startswith("//"):
+                        pieces.append(piece)
+                        depth += _bracket_change(piece)
+                    end += 1
+                if depth == 0:
+                    lines[index] = " ".join(pieces)
+                    for later in range(index + 1, end):
+                        lines[later] = ContinuedLine("")
+                    index = end
+                    continue
+        index += 1
+    return lines
+
+
+def split_parameters(text):
+    """split the parameters of a function line, keeping defaults whole:
+    'a b="hi there" c=[1, 2]' -> ['a', 'b="hi there"', 'c=[1, 2]']"""
+    tokens, current, depth, quote = [], [], 0, None
+    for char in str(text):
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "\"'":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char.isspace() and depth <= 0:
+            if current:
+                tokens.append("".join(current))
+                current = []
+            continue
+        current.append(char)
+    if current:
+        tokens.append("".join(current))
+    merged = []
+    for token in tokens:
+        if merged and (token.startswith("=") or merged[-1].endswith("=")):
+            merged[-1] += token
+        else:
+            merged.append(token)
+    return merged
+
+
+def parameter_parts(token):
+    """'name="world"' -> ('name', '"world"'); 'name' -> ('name', None)"""
+    name, separator, default = str(token).partition("=")
+    return name.strip(), (default.strip() if separator else None)
+
+
+def function_parameters(parts):
+    """the names and defaults of a parsed function line: (['a', 'b'], {'b': '2'})"""
+    names, defaults = [], {}
+    for token in parts[2:]:
+        name, default = parameter_parts(token)
+        names.append(name)
+        if default is not None:
+            defaults[name] = default
+    return names, defaults
+
+
 def parse_line(raw):
     """turn one source line into a ParsedLine, or None for blank lines and comments."""
     text = raw.strip()
@@ -596,6 +821,8 @@ def parse_line(raw):
     if not parts:
         return None
     first = parts[0]
+    if first == "function" and len(parts) > 2 and "=" in text and parts[1] not in _ASSIGNMENT_TOKENS:
+        parts = parts[:2] + split_parameters(text.split(None, 2)[2])
     if first == "elif" or (first == "else" and len(parts) > 1 and parts[1] == "if"):
         skip = 1 if first == "elif" else 2
         rest = text.split(None, skip)[skip] if len(parts) > skip else ""
@@ -846,6 +1073,100 @@ def is_color(name):
     )
 
 
+# ----- the look of game windows and popups ---------------------------------------------------------------
+# gublan studio's tools menu edits these (tools > game window and popups). a program's own window,
+# background and fps lines still win. GUBLAN_STYLE (json in the environment) sets them for the command line.
+GAME_STYLE = {
+    "width": 540,
+    "height": 420,
+    "title": "",
+    "background": "#141414",
+    "color": "white",
+    "fps": 60,
+    "show_fps": False,
+    "dialog_background": "#262626",
+    "dialog_text": "#e5e5e5",
+    "dialog_hint": "#aaaaaa",
+    "dialog_accent": "#94b66c",
+    "dialog_border": "#94b66c",
+    "dialog_field": "#171717",
+    "dialog_border_width": 2,
+    "dialog_shade": 75,
+    "dialog_text_size": 26,
+    "dialog_width": 450,
+    "dialog_position": "center",
+    "dialog_animation": "pop",
+    "dialog_hints": True,
+    "dialog_sound": True,
+}
+DIALOG_POSITIONS = ("center", "top", "bottom")
+DIALOG_ANIMATIONS = ("pop", "fade", "slide", "none")
+_STYLE_RANGES = {"width": (120, 4096), "height": (90, 4096), "fps": (1, 240), "dialog_border_width": (0, 12),
+                 "dialog_shade": (0, 100), "dialog_text_size": (10, 64), "dialog_width": (160, 1600)}
+
+
+def wrap_words(text, font, width):
+    """split text into lines that fit width pixels in font (long words are cut)."""
+    lines = []
+    for paragraph in str(text).split("\n"):
+        line = ""
+        for word in paragraph.split(" "):
+            attempt = f"{line} {word}" if line else word
+            if font.size(attempt)[0] <= width:
+                line = attempt
+                continue
+            if line:
+                lines.append(line)
+            while word and font.size(word)[0] > width:
+                cut = len(word)
+                while cut > 1 and font.size(word[:cut])[0] > width:
+                    cut -= 1
+                lines.append(word[:cut])
+                word = word[cut:]
+            line = word
+        lines.append(line)
+    return lines
+
+
+def game_style(overrides=None):
+    """GAME_STYLE with the environment's GUBLAN_STYLE and then overrides on top. bad values are skipped."""
+    style = dict(GAME_STYLE)
+    layers = []
+    raw = os.environ.get("GUBLAN_STYLE")
+    if raw:
+        try:
+            layers.append(json.loads(raw))
+        except ValueError:
+            pass
+    if overrides:
+        layers.append(overrides)
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        for key, value in layer.items():
+            if key not in GAME_STYLE:
+                continue
+            default = GAME_STYLE[key]
+            if isinstance(default, bool):
+                if isinstance(value, bool):
+                    style[key] = value
+            elif isinstance(default, int):
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    low, high = _STYLE_RANGES.get(key, (-10 ** 9, 10 ** 9))
+                    style[key] = int(max(low, min(high, value)))
+            elif key == "dialog_position":
+                if value in DIALOG_POSITIONS:
+                    style[key] = value
+            elif key == "dialog_animation":
+                if value in DIALOG_ANIMATIONS:
+                    style[key] = value
+            elif key == "title":
+                style[key] = str(value)[:120]
+            elif is_color(value):
+                style[key] = value
+    return style
+
+
 # --------------------------------------------------------------------------
 # static analysis
 # --------------------------------------------------------------------------
@@ -892,7 +1213,7 @@ def analyze_source(source, warnings=False):
     """check a script without running it. returns a list of {line, severity, message}."""
     diagnostics = []
     blocks = []
-    lines = source.splitlines()
+    lines = join_continued_lines(source.splitlines())
     parsed_lines = []
     function_names = set()
     has_include = False
@@ -1058,11 +1379,27 @@ def analyze_source(source, warnings=False):
                 if parts[1] in defined_functions:
                     report(lineno, f"function '{parts[1]}' is already defined")
                 defined_functions.add(parts[1])
-            if len(parts[2:]) != len(set(parts[2:])):
+            names = [parameter_parts(token)[0] for token in parts[2:]]
+            if len(names) != len(set(names)):
                 report(lineno, "function parameters must have unique names")
-            for parameter in parts[2:]:
+            seen_default = False
+            for token in parts[2:]:
+                parameter, default = parameter_parts(token)
                 if not parameter.isidentifier():
                     report(lineno, "function parameters must be valid names")
+                elif default is not None:
+                    seen_default = True
+                    if not default:
+                        report(lineno, f"give '{parameter}' a value after =, like: {parameter}=1")
+                elif seen_default:
+                    report(lineno, "parameters with a default (like name=1) must come after the ones without")
+        if command == "local" and len(parts) >= 2:
+            match = _SET_RE.match(parsed.rest)
+            target = match.group(1) if match else parsed.rest.strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", target):
+                report(lineno, "write it as: local name = value")
+            elif not any(block["type"] in CALLABLE_BLOCKS for block in blocks):
+                report(lineno, "local only matters inside a function. out here it works just like set", "warning")
         if command == "return" and not any(block["type"] == "function" for block in blocks):
             report(lineno, "'return' must be inside a function")
         if command in ("break", "continue"):
@@ -1204,13 +1541,29 @@ class Statement:
         self.cache = None
 
 
-class FunctionInfo:
-    __slots__ = ("start", "end", "params")
+class _Scene(dict):
+    """the objects on screen. making an object again with the same name keeps its layer, opacity and
+    fixed setting, so a score text remade every frame stays on top."""
 
-    def __init__(self, start, end, params):
+    STYLE = ("layer", "alpha", "fixed")
+
+    def __setitem__(self, key, value):
+        old = self.get(key)
+        if isinstance(old, dict) and isinstance(value, dict):
+            for style in self.STYLE:
+                if style in old and style not in value:
+                    value[style] = old[style]
+        super().__setitem__(key, value)
+
+
+class FunctionInfo:
+    __slots__ = ("start", "end", "params", "defaults")
+
+    def __init__(self, start, end, params, defaults=None):
         self.start = start
         self.end = end
         self.params = params
+        self.defaults = defaults or {}
 
 
 _NUMBER_RE = re.compile(r"^-?(?:\d+\.?\d*|\.\d+)$")
@@ -1291,7 +1644,7 @@ MAX_SAVED_NAMES = 1000
 class GublanRuntime:
     def __init__(self, onlog=None, ondebug=None, shouldstop=None, waitstep=None, base_dir=None,
                  onerror=None, hold_window=False, oninput=None, onpopup=None, onpresence=None, save_name=None,
-                 fetchfile=None):
+                 fetchfile=None, style=None):
         self.onlog = onlog or print
         # fetchfile(relative path) -> a local path or None. gublan studio sets it for a program shared in a live
         # session, so pictures, sounds and included files come from the host's computer
@@ -1308,6 +1661,7 @@ class GublanRuntime:
         self.shouldstop = shouldstop or (lambda: False)
         self.waitstep = waitstep
         self.hold_window = hold_window
+        self.style = game_style(style)
         self.base_dir = os.path.abspath(base_dir or os.getcwd())
         self._handlers = {
             name[3:]: getattr(self, name) for name in dir(self) if name.startswith("_c_")
@@ -1319,7 +1673,7 @@ class GublanRuntime:
     # ----- state ---------------------------------------------------------
     def reset(self):
         self.vars = {}
-        self.objects = {}
+        self.objects = _Scene()
         self.functions = {}
         self.tests = []
         self.constants = set()
@@ -1327,8 +1681,9 @@ class GublanRuntime:
         self._dragging = None
         self._overlay_texture = None
         self.mode = "2d"
-        self.activecolor = "white"
-        self.background = (20, 20, 20)
+        style = getattr(self, "style", None) or game_style()
+        self.activecolor = style["color"]
+        self.background = color_value(style["background"])
         self.camera = Vector3(0, 0, 0)
         self.camera_turn = (0.0, 0.0)
         self.screen = None
@@ -1342,9 +1697,10 @@ class GublanRuntime:
         self.text_size = 24
         self.audio_initialized = False
         self.audio_channels = []
-        self.window_size = (540, 420)
-        self.window_title = None
-        self.target_fps = 60
+        self.window_size = (style["width"], style["height"])
+        self.window_title = style["title"] or None
+        self.target_fps = style["fps"]
+        self._fps_times = []
         self.current = None
         self.last_error = None
         self.finished = False
@@ -1367,6 +1723,15 @@ class GublanRuntime:
         self._saves = None
         self._saves_dirty = False
         self._saves_written = 0.0
+        self._local_frames = []
+        self._timers = {}
+        self.scroll = (0.0, 0.0)
+        self._shake = None
+        self._shake_offset = (0.0, 0.0)
+        self._particles = []
+        self._tweens = []
+        self._effects_time = time.perf_counter()
+        self._alpha_layer = None
 
     # ----- values ----------------------------------------------------------
     def val(self, token):
@@ -2389,7 +2754,243 @@ class GublanRuntime:
             if low > high:
                 low, high = high, low
             return random.randint(low, high)
+        return self._builtin_more(name, args, number, need)
+
+    def _builtin_more(self, name, args, number, need):
+        """the functions added in 1.0.7: more math, list and map helpers, text formatting, colours and timers."""
+        def between(low, high):
+            if not low <= len(args) <= high:
+                raise ValueError(f"{name}() needs {low} to {high} values, got {len(args)}")
+
+        def listed(value, label="list"):
+            if isinstance(value, str):
+                return list(value)
+            if not isinstance(value, list):
+                raise ValueError(f"{name}() needs a {label}, got '{format_value(value)}'")
+            return value
+
+        def mapping(value):
+            if not isinstance(value, dict):
+                raise ValueError(f"{name}() needs a map, got '{format_value(value)}'")
+            return value
+
+        def whole(value, label="count"):
+            value = number(value, label)
+            if value != int(value):
+                raise ValueError(f"{name}() needs a whole number for its {label}")
+            return int(value)
+
+        if name == "hypot":
+            need(2)
+            return math.hypot(number(args[0], "x"), number(args[1], "y"))
+        if name == "fract":
+            need(1)
+            value = number(args[0])
+            return value - math.floor(value)
+        if name == "smoothstep":
+            need(3)
+            low, high, value = (number(arg) for arg in args)
+            if high == low:
+                return 0.0 if value < low else 1.0
+            t = max(0.0, min(1.0, (value - low) / (high - low)))
+            return t * t * (3 - 2 * t)
+        if name == "snap":
+            need(2)
+            value, step = number(args[0]), number(args[1], "step")
+            if step == 0:
+                return value
+            snapped = math.floor(value / step + 0.5) * step
+            return int(snapped) if isinstance(value, int) and isinstance(step, int) else snapped
+        if name == "between":
+            need(3)
+            value, low, high = (number(arg) for arg in args)
+            return low <= value <= high
+        if name == "ease":
+            between(1, 2)
+            return ease_value(number(args[0], "amount"), args[1] if len(args) > 1 else "inout")
+        if name == "gcd":
+            need(2)
+            return math.gcd(whole(args[0], "first number"), whole(args[1], "second number"))
+        if name in ("median", "product"):
+            need(1)
+            items = [number(item, "items") for item in listed(args[0])]
+            if name == "product":
+                return math.prod(items)
+            if not items:
+                raise ValueError("median() of an empty list has no middle")
+            items = sorted(items)
+            middle = len(items) // 2
+            return items[middle] if len(items) % 2 else (items[middle - 1] + items[middle]) / 2
+        if name in ("first", "last"):
+            need(1)
+            items = listed(args[0])
+            return (items[0] if name == "first" else items[-1]) if items else None
+        if name in ("take", "drop"):
+            need(2)
+            items, count = args[0], max(0, whole(args[1]))
+            if not isinstance(items, (list, str)):
+                raise ValueError(f"{name}() needs a list or text, got '{format_value(items)}'")
+            return items[:count] if name == "take" else items[count:]
+        if name == "chunk":
+            need(2)
+            items, size = listed(args[0]), whole(args[1], "size")
+            if size < 1:
+                raise ValueError("chunk() needs a size of 1 or more")
+            return [items[index:index + size] for index in range(0, len(items), size)]
+        if name == "enumerate":
+            need(1)
+            return [[index, item] for index, item in enumerate(listed(args[0]))]
+        if name in ("minby", "maxby"):
+            need(2)
+            items = listed(args[0])
+            if not items:
+                return None
+            best, best_key = items[0], self._call_value(args[1], [items[0]])
+            for item in items[1:]:
+                key = self._call_value(args[1], [item])
+                try:
+                    better = key < best_key if name == "minby" else key > best_key
+                except TypeError as err:
+                    raise ValueError(f"{name}() needs the function to give values of the same kind") from err
+                if better:
+                    best, best_key = item, key
+            return best
+        if name == "groupby":
+            need(2)
+            groups = {}
+            for item in listed(args[0]):
+                groups.setdefault(format_value(self._call_value(args[1], [item])), []).append(item)
+            return groups
+        if name == "without":
+            need(2)
+            return [item for item in listed(args[0]) if not self._equal(item, args[1])]
+        if name == "fill":
+            need(2)
+            count = whole(args[1])
+            if not 0 <= count <= 1_000_000:
+                raise ValueError("fill() can make lists of up to a million items")
+            value = args[0]
+            return [list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value
+                    for _ in range(count)]
+        if name == "merge":
+            need(2)
+            merged = dict(mapping(args[0]))
+            merged.update(mapping(args[1]))
+            return merged
+        if name == "get":
+            between(2, 3)
+            container, key = args[0], args[1]
+            default = args[2] if len(args) > 2 else None
+            if isinstance(container, dict):
+                if key in container:
+                    return container[key]
+                text = format_value(key)
+                return container.get(text, default)
+            if isinstance(container, (list, str)):
+                if isinstance(key, bool) or not isinstance(key, (int, float)) or key != int(key):
+                    return default
+                index = int(key)
+                return container[index] if -len(container) <= index < len(container) else default
+            raise ValueError(f"get() needs a map or a list, got '{format_value(container)}'")
+        if name == "entries":
+            need(1)
+            return [[key, value] for key, value in mapping(args[0]).items()]
+        if name == "frompairs":
+            need(1)
+            made = {}
+            for pair in listed(args[0]):
+                if not isinstance(pair, list) or len(pair) != 2:
+                    raise ValueError("frompairs() needs a list of [name, value] pairs")
+                made[pair[0] if isinstance(pair[0], str) else format_value(pair[0])] = pair[1]
+            return made
+        if name == "commas":
+            need(1)
+            value = number(args[0])
+            text = format_value(value)
+            sign = "-" if text.startswith("-") else ""
+            digits, dot, rest = text.lstrip("-").partition(".")
+            if not digits.isdigit():
+                return text
+            grouped = f"{int(digits):,}"
+            return sign + grouped + (dot + rest if dot else "")
+        if name == "ordinal":
+            need(1)
+            value = whole(args[0], "number")
+            last_two = abs(value) % 100
+            suffix = "th" if 11 <= last_two <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(abs(value) % 10, "th")
+            return f"{value}{suffix}"
+        if name == "plural":
+            between(2, 3)
+            count = number(args[0])
+            word = format_value(args[1])
+            many = format_value(args[2]) if len(args) > 2 else word + "s"
+            return f"{format_value(count)} {word if count == 1 else many}"
+        if name == "wraptext":
+            need(2)
+            width = whole(args[1], "width")
+            if width < 1:
+                raise ValueError("wraptext() needs a width of 1 or more")
+            lines = []
+            for paragraph in format_value(args[0]).split("\n"):
+                line = ""
+                for word in paragraph.split():
+                    while len(word) > width:
+                        if line:
+                            lines.append(line)
+                            line = ""
+                        lines.append(word[:width])
+                        word = word[width:]
+                    if not word:
+                        continue
+                    if not line:
+                        line = word
+                    elif len(line) + 1 + len(word) <= width:
+                        line += " " + word
+                    else:
+                        lines.append(line)
+                        line = word
+                lines.append(line)
+            return lines
+        if name == "mixcolor":
+            need(3)
+            first = self._color_channels(args[0])
+            second = self._color_channels(args[1])
+            t = max(0.0, min(1.0, number(args[2], "amount")))
+            return [int(math.floor(a + (b - a) * t + 0.5)) for a, b in zip(first, second)]
+        if name == "randomcolor":
+            need(0)
+            return [int(round(channel * 255)) for channel in colorsys.hsv_to_rgb(random.random(), 0.65, 0.95)]
+        if name in ("cooldown", "pulse", "after"):
+            need(2)
+            key = (name, format_value(args[0]))
+            seconds = number(args[1], "seconds")
+            now = time.monotonic()
+            started = self._timers.get(key)
+            if name == "cooldown":
+                if started is None or now - started >= seconds:
+                    self._timers[key] = now
+                    return True
+                return False
+            if started is None:
+                self._timers[key] = now
+                return seconds <= 0 if name == "after" else False
+            if now - started >= seconds:
+                if name == "pulse":
+                    self._timers[key] = now
+                return True
+            return False
+        if name in ("scrollx", "scrolly"):
+            need(0)
+            value = self.scroll[0 if name == "scrollx" else 1]
+            return int(value) if value == int(value) else value
         return _MISSING
+
+    def _color_channels(self, value):
+        if isinstance(value, (list, tuple)) and len(value) in (3, 4):
+            return [max(0, min(255, int(channel))) for channel in value[:3]]
+        if isinstance(value, str) and is_color(value):
+            return list(color_value(value))
+        raise ValueError(f"'{format_value(value)}' is not a colour. use a name like red, #ff8800 or [255, 136, 0]")
 
     def _rect_of(self, value):
         if isinstance(value, str) and (value in self.objects or ("button:" + value) in self.objects):
@@ -2417,7 +3018,7 @@ class GublanRuntime:
         if depth > 16:
             raise ValueError("include nesting is limited to 16 files")
         expanded = []
-        for lineno, raw in enumerate(source.splitlines(), start=1):
+        for lineno, raw in enumerate(join_continued_lines(source.splitlines()), start=1):
             stripped = raw.strip()
             if not stripped.startswith(("include", "use")) or stripped.startswith("//"):
                 expanded.append((raw, label, lineno))
@@ -2521,7 +3122,8 @@ class GublanRuntime:
                     for branch in entry[2:]:
                         branch.end = statement.index
                 if opener.cmd == "function":
-                    functions[opener.parts[1]] = FunctionInfo(opener.index, statement.index, list(opener.parts[2:]))
+                    names, defaults = function_parameters(opener.parts)
+                    functions[opener.parts[1]] = FunctionInfo(opener.index, statement.index, names, defaults)
                 if opener.cmd == "test":
                     tests.append((" ".join(str(part) for part in opener.parts[1:]), opener.index, statement.index))
         if stack:
@@ -2874,14 +3476,24 @@ class GublanRuntime:
         if function is None:
             raise ValueError(f"there is no function named '{name}'")
         parameters = function.params
-        if len(arguments) != len(parameters):
-            raise ValueError(f"function '{name}' needs {len(parameters)} argument(s), got {len(arguments)}")
+        required = sum(1 for parameter in parameters if parameter not in function.defaults)
+        if not required <= len(arguments) <= len(parameters):
+            wanted = str(required) if required == len(parameters) else f"{required} to {len(parameters)}"
+            raise ValueError(f"function '{name}' needs {wanted} argument(s), got {len(arguments)}")
         if self._depth >= 180:
             raise ValueError("functions are calling each other too deeply (limit 180)")
         saved = {parameter: (parameter in self.vars, self.vars.get(parameter)) for parameter in parameters}
         self.vars.update(zip(parameters, arguments))
+        try:
+            for parameter in parameters[len(arguments):]:
+                raw = function.defaults[parameter]
+                self.vars[parameter] = self._eval_value(raw, split_command(raw))
+        except BaseException:
+            self._restore_names(saved)
+            raise
         self.vars["result"] = None
         self._depth += 1
+        self._local_frames.append(saved)
         value = None
         try:
             self._exec(function.start + 1, function.end)
@@ -2889,6 +3501,7 @@ class GublanRuntime:
             value = signal.value
         finally:
             self._depth -= 1
+            self._local_frames.pop()
             self._restore_names(saved)
         self.vars["result"] = value
         return value
@@ -3122,6 +3735,7 @@ class GublanRuntime:
         return code
 
     def render(self):
+        self._tick_effects()
         if not self.screen:
             return
         if self.mode == "2d":
@@ -3134,8 +3748,32 @@ class GublanRuntime:
     def _render_2d(self):
         self.screen.fill(self.background)
         self._draw_objects(self.screen)
+        if self.style.get("show_fps"):
+            self._draw_fps(self.screen)
 
-    _FLAT_KINDS = ("box", "circle", "line", "text", "image", "sprite", "button", "textbox", "slider", "checkbox")
+    def _draw_fps(self, screen):
+        now = time.perf_counter()
+        times = [stamp for stamp in self._fps_times if now - stamp < 1.0]
+        times.append(now)
+        self._fps_times = times
+        label = self._font(18).render(f"fps {len(times)}", True, color_value(self.style["dialog_accent"]))
+        backing = pygame.Surface((label.get_width() + 10, label.get_height() + 4), pygame.SRCALPHA)
+        backing.fill((0, 0, 0, 150))
+        screen.blit(backing, (screen.get_width() - backing.get_width() - 6, 6))
+        screen.blit(label, (screen.get_width() - backing.get_width() + -1, 8))
+
+    _FLAT_KINDS = ("box", "circle", "line", "text", "image", "sprite", "button", "textbox", "slider", "checkbox",
+                   "ellipse", "polygon")
+    _UI_KINDS = ("button", "textbox", "slider", "checkbox")
+
+    def _alpha_surface(self, screen):
+        size = screen.get_size()
+        layer = self._alpha_layer
+        if layer is None or layer.get_size() != size:
+            layer = self._alpha_layer = pygame.Surface(size, pygame.SRCALPHA)
+        layer.set_alpha(255)
+        layer.fill((0, 0, 0, 0))
+        return layer
 
     def _draw_objects(self, screen, overlay=False):
         """draw every 2d object onto a surface. in 3d (overlay=True) text is left to _render_3d_text."""
@@ -3144,46 +3782,83 @@ class GublanRuntime:
             pygame.draw.rect(screen, (109, 137, 79), (bx, by, bw, bh))
             label = self._font(20).render(self.button_label, True, (240, 240, 240))
             screen.blit(label, (bx + 12, by + 10))
-        for name, obj in self.objects.items():
-            if name == "uibtn" or obj.get("hidden"):
-                continue
+        items = [(name, obj) for name, obj in self.objects.items()
+                 if name != "uibtn" and isinstance(obj, dict) and not obj.get("hidden")]
+        if any(obj.get("layer") for _name, obj in items):
+            items.sort(key=lambda item: item[1].get("layer", 0))
+        world_x = world_y = 0.0
+        if not overlay:
+            world_x = self._shake_offset[0] - self.scroll[0]
+            world_y = self._shake_offset[1] - self.scroll[1]
+        for name, obj in items:
             kind = obj["type"]
             if kind not in self._FLAT_KINDS or (overlay and kind == "text"):
                 continue
-            color = color_value(obj["color"])
-            if kind in ("textbox", "slider", "checkbox"):
-                self._draw_widget(screen, name, obj, color)
-            elif kind == "box":
-                pygame.draw.rect(screen, color, (obj["x"], obj["y"], obj["w"], obj["h"]))
-            elif kind == "circle":
-                pygame.draw.circle(screen, color, (int(obj["x"]), int(obj["y"])), int(obj["r"]))
-            elif kind == "line":
-                pygame.draw.line(screen, color, (obj["x"], obj["y"]), (obj["x2"], obj["y2"]), int(obj["width"]))
-            elif kind == "text":
-                key = (obj["text"], color, obj.get("size", 24))
-                if obj.get("_label_key") != key:
-                    obj["_label"] = self._font(obj.get("size", 24)).render(obj["text"], True, color)
-                    obj["_label_key"] = key
-                screen.blit(obj["_label"], (obj["x"], obj["y"]))
-            elif kind in ("image", "sprite"):
-                surface = obj["surface"]
-                angle = obj.get("angle", 0)
-                if angle:
-                    if obj.get("_rotated_key") != (angle, id(surface)):
-                        obj["_rotated"] = pygame.transform.rotate(surface, -angle)
-                        obj["_rotated_key"] = (angle, id(surface))
-                    rotated = obj["_rotated"]
-                    width, height = surface.get_size()
-                    rect = rotated.get_rect(center=(obj["x"] + width / 2, obj["y"] + height / 2))
-                    screen.blit(rotated, rect)
-                else:
-                    screen.blit(surface, (obj["x"], obj["y"]))
-            elif kind == "button":
-                rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
-                hovered = rect.collidepoint(pygame.mouse.get_pos())
-                pygame.draw.rect(screen, (148, 182, 108) if hovered else (82, 105, 61), rect)
-                label = self._font(24).render(obj["label"], True, (240, 240, 240))
-                screen.blit(label, label.get_rect(center=rect.center))
+            alpha = obj.get("alpha", 1)
+            if alpha <= 0:
+                continue
+            offset = (0.0, 0.0) if kind in self._UI_KINDS or obj.get("fixed") else (world_x, world_y)
+            if alpha < 1:
+                layer = self._alpha_surface(screen)
+                self._draw_flat(layer, name, obj, offset)
+                layer.set_alpha(int(alpha * 255))
+                screen.blit(layer, (0, 0))
+            else:
+                self._draw_flat(screen, name, obj, offset)
+        if self._particles and not overlay:
+            layer = self._alpha_surface(screen)
+            for x, y, _vx, _vy, life, total, color, size in self._particles:
+                fade = max(0.0, min(1.0, life / total))
+                side = max(1, int(size * (0.4 + 0.6 * fade)))
+                pygame.draw.rect(layer, (*color[:3], int(255 * fade)),
+                                 (int(x + world_x - side / 2), int(y + world_y - side / 2), side, side))
+            screen.blit(layer, (0, 0))
+
+    def _draw_flat(self, screen, name, obj, offset):
+        kind = obj["type"]
+        ox, oy = offset
+        color = color_value(obj["color"])
+        if kind in ("textbox", "slider", "checkbox"):
+            self._draw_widget(screen, name, obj, color)
+        elif kind == "box":
+            pygame.draw.rect(screen, color, (obj["x"] + ox, obj["y"] + oy, obj["w"], obj["h"]))
+        elif kind == "circle":
+            pygame.draw.circle(screen, color, (int(obj["x"] + ox), int(obj["y"] + oy)), int(obj["r"]))
+        elif kind == "ellipse":
+            pygame.draw.ellipse(screen, color, (obj["x"] + ox, obj["y"] + oy, max(1, obj["w"]), max(1, obj["h"])))
+        elif kind == "polygon":
+            scale_x = obj["w"] / obj["pw"] if obj["pw"] else 1
+            scale_y = obj["h"] / obj["ph"] if obj["ph"] else 1
+            points = [(obj["x"] + ox + px * scale_x, obj["y"] + oy + py * scale_y) for px, py in obj["points"]]
+            pygame.draw.polygon(screen, color, points)
+        elif kind == "line":
+            pygame.draw.line(screen, color, (obj["x"] + ox, obj["y"] + oy), (obj["x2"] + ox, obj["y2"] + oy),
+                             int(obj["width"]))
+        elif kind == "text":
+            key = (obj["text"], color, obj.get("size", 24))
+            if obj.get("_label_key") != key:
+                obj["_label"] = self._font(obj.get("size", 24)).render(obj["text"], True, color)
+                obj["_label_key"] = key
+            screen.blit(obj["_label"], (obj["x"] + ox, obj["y"] + oy))
+        elif kind in ("image", "sprite"):
+            surface = obj["surface"]
+            angle = obj.get("angle", 0)
+            if angle:
+                if obj.get("_rotated_key") != (angle, id(surface)):
+                    obj["_rotated"] = pygame.transform.rotate(surface, -angle)
+                    obj["_rotated_key"] = (angle, id(surface))
+                rotated = obj["_rotated"]
+                width, height = surface.get_size()
+                rect = rotated.get_rect(center=(obj["x"] + ox + width / 2, obj["y"] + oy + height / 2))
+                screen.blit(rotated, rect)
+            else:
+                screen.blit(surface, (obj["x"] + ox, obj["y"] + oy))
+        elif kind == "button":
+            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+            hovered = rect.collidepoint(pygame.mouse.get_pos())
+            pygame.draw.rect(screen, (148, 182, 108) if hovered else (82, 105, 61), rect)
+            label = self._font(24).render(obj["label"], True, (240, 240, 240))
+            screen.blit(label, label.get_rect(center=rect.center))
 
     def _draw_widget(self, screen, name, obj, color):
         kind = obj["type"]
@@ -3347,7 +4022,7 @@ class GublanRuntime:
             return ("circle", float(obj["x"]), float(obj["y"]), abs(float(obj["r"])))
         if kind == "sphere":
             return ("circle", float(obj["x"]), float(obj["y"]), abs(float(obj["radius"])))
-        if kind in ("box", "button", "textbox", "slider", "checkbox"):
+        if kind in ("box", "button", "textbox", "slider", "checkbox", "ellipse", "polygon"):
             return ("rect", float(obj["x"]), float(obj["y"]), float(obj["w"]), float(obj["h"]))
         if kind == "cube":
             size = float(obj["size"])
@@ -3412,59 +4087,128 @@ class GublanRuntime:
             clock.tick(60)
 
     # ----- dialogs ---------------------------------------------------------------
-    def _draw_dialog(self, message, value="", is_input=False, cursor=None, anchor=None, caret_visible=True):
+    def _draw_dialog(self, message, value="", is_input=False, cursor=None, anchor=None, caret_visible=True,
+                     progress=1.0):
+        """draw a popup (or an ask box) over the game. progress below 1 is part of its opening animation."""
+        style = self.style
+        shade = int(255 * style["dialog_shade"] / 100 * min(1.0, progress * 1.4))
         if self.mode == "3d":
             # 3d windows can't be drawn on directly: draw the dialog on a see-through layer over the scene
             self._render_3d()
             target = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-            target.fill((0, 0, 0, 190))
+            target.fill((0, 0, 0, shade))
         else:
             self._render_2d()
             target = self.screen
             overlay = pygame.Surface(target.get_size(), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 190))
+            overlay.fill((0, 0, 0, shade))
             target.blit(overlay, (0, 0))
         width, height = target.get_size()
-        left = max(10, (width - 450) // 2)
-        top = max(10, (height - 160) // 2)
-        bounds = pygame.Rect(left, top, min(450, width - 20), 160)
-        pygame.draw.rect(target, (38, 38, 38), bounds)
-        pygame.draw.rect(target, (148, 182, 108), bounds, 2)
-        font = self._font(26)
-        prompt = font.render(message[:64], True, (229, 229, 229))
-        target.blit(prompt, (left + 20, top + 25))
+        size = style["dialog_text_size"]
+        font = self._font(size)
+        hint_font = self._font(max(12, size - 4))
+        line_height = font.get_linesize()
+        box_width = min(style["dialog_width"], width - 20)
+        lines = wrap_words(message, font, box_width - 40)[:6] or [""]
+        box_height = 25 + line_height * len(lines) + (line_height + 24 if is_input else 0) + \
+            (hint_font.get_linesize() + 20 if style["dialog_hints"] else 10)
+        box_height = min(box_height, height - 20)
+        box = pygame.Surface((box_width, box_height), pygame.SRCALPHA)
+        box.fill(color_value(style["dialog_background"]))
+        border = style["dialog_border_width"]
+        if border:
+            pygame.draw.rect(box, color_value(style["dialog_border"]), box.get_rect(), border)
+        text_color = color_value(style["dialog_text"])
+        y = 22
+        for line in lines:
+            box.blit(font.render(line, True, text_color), (20, y))
+            y += line_height
         if is_input:
-            entry_rect = pygame.Rect(left + 20, top + 75, bounds.width - 40, 38)
-            pygame.draw.rect(target, (23, 23, 23), entry_rect)
+            entry_rect = pygame.Rect(20, y + 10, box_width - 40, line_height + 12)
+            pygame.draw.rect(box, color_value(style["dialog_field"]), entry_rect)
             cursor = len(value) if cursor is None else cursor
             text_left = entry_rect.x + 8
             visible_width = entry_rect.width - 16
             prefix_width = font.size(value[:cursor])[0]
             offset = max(0, prefix_width - visible_width)
+            accent = color_value(style["dialog_accent"])
             if anchor is not None and anchor != cursor:
-                start, end = sorted((anchor, cursor))
-                selection_left = text_left + font.size(value[:start])[0] - offset
-                selection_right = text_left + font.size(value[:end])[0] - offset
+                first, last = sorted((anchor, cursor))
+                selection_left = text_left + font.size(value[:first])[0] - offset
+                selection_right = text_left + font.size(value[:last])[0] - offset
                 selection = pygame.Rect(
-                    max(text_left, selection_left), entry_rect.y + 7,
-                    max(0, min(entry_rect.right - 2, selection_right) - max(text_left, selection_left)), 24
+                    max(text_left, selection_left), entry_rect.y + 6,
+                    max(0, min(entry_rect.right - 2, selection_right) - max(text_left, selection_left)),
+                    line_height,
                 )
-                pygame.draw.rect(target, (75, 96, 57), selection)
-            target.set_clip(entry_rect)
-            entry = font.render(value, True, (229, 229, 229))
-            target.blit(entry, (text_left - offset, entry_rect.y + 7))
+                pygame.draw.rect(box, tuple(int(a * 0.5 + b * 0.5) for a, b in
+                                            zip(accent, color_value(style["dialog_field"]))), selection)
+            box.set_clip(entry_rect)
+            box.blit(font.render(value, True, text_color), (text_left - offset, entry_rect.y + 6))
             caret_x = text_left + prefix_width - offset
             if caret_visible:
-                pygame.draw.line(target, (148, 182, 108), (caret_x, entry_rect.y + 5),
-                                 (caret_x, entry_rect.y + 32), 2)
-            target.set_clip(None)
+                pygame.draw.line(box, accent, (caret_x, entry_rect.y + 4), (caret_x, entry_rect.bottom - 5), 2)
+            box.set_clip(None)
+            y = entry_rect.bottom
             hint = "enter to accept  |  esc to cancel  |  ctrl+a selects all"
         else:
             hint = "press any key or click to continue"
-        target.blit(self._font(22).render(hint, True, (170, 170, 170)), (left + 20, top + 128))
+        if style["dialog_hints"]:
+            box.blit(hint_font.render(hint, True, color_value(style["dialog_hint"])), (20, y + 12))
+        left = (width - box_width) // 2
+        place = style["dialog_position"]
+        top = 20 if place == "top" else (height - box_height - 20 if place == "bottom" else (height - box_height) // 2)
+        top = max(10, top)
+        animation = style["dialog_animation"]
+        if progress < 1.0 and animation != "none":
+            eased = 1 - (1 - progress) ** 3
+            if animation == "pop":
+                scale = 0.86 + 0.14 * (1 + 2.70158 * (progress - 1) ** 3 + 1.70158 * (progress - 1) ** 2)
+                scaled = pygame.transform.smoothscale(box, (max(1, int(box_width * scale)),
+                                                            max(1, int(box_height * scale))))
+                scaled.set_alpha(int(255 * min(1.0, progress * 1.6)))
+                target.blit(scaled, (left + (box_width - scaled.get_width()) // 2,
+                                     top + (box_height - scaled.get_height()) // 2))
+            elif animation == "slide":
+                distance = 40 if place != "top" else -40
+                box.set_alpha(int(255 * eased))
+                target.blit(box, (left, top + int(distance * (1 - eased))))
+            else:
+                box.set_alpha(int(255 * eased))
+                target.blit(box, (left, top))
+        else:
+            target.blit(box, (left, top))
+        self._dialog_rect = pygame.Rect(left, top, box_width, box_height)
         if target is not self.screen:
             self._blit_gl_surface(target)
         pygame.display.flip()
+
+    def _open_dialog(self, message, is_input=False):
+        """play the popup's opening animation and its soft sound."""
+        style = self.style
+        if style["dialog_sound"]:
+            try:
+                self._soft_tone(880, 0.09)
+            except (ValueError, pygame.error):
+                pass
+        if style["dialog_animation"] == "none":
+            return
+        started = time.monotonic()
+        while self.running and not self.shouldstop():
+            progress = min(1.0, (time.monotonic() - started) / 0.2)
+            pygame.event.pump()
+            self._draw_dialog(message, "", is_input=is_input, progress=progress)
+            if progress >= 1.0:
+                break
+            pygame.time.wait(12)
+
+    def _soft_tone(self, frequency, seconds):
+        """a quiet sine blip (popups use it)."""
+        self._ensure_audio()
+        sound = self._beep_sound(frequency, seconds, "sine")
+        channel = sound.play()
+        if channel:
+            channel.set_volume(self.audio_volume * 0.35)
 
     def _show_popup(self, message):
         if not self.screen:
@@ -3475,6 +4219,7 @@ class GublanRuntime:
                 return
             raise ValueError("add 'mode 2d' or 'mode 3d' before showing a popup")
         pygame.event.clear()
+        self._open_dialog(message)
         self._draw_dialog(message)
         while self.running and not self.shouldstop():
             event = pygame.event.wait(100)
@@ -3554,9 +4299,10 @@ class GublanRuntime:
         try:
             pygame.key.start_text_input()
             pygame.key.set_repeat(400, 35)
-            if hasattr(pygame.key, "set_text_input_rect"):
-                pygame.key.set_text_input_rect(pygame.Rect(65, 205, 410, 38))
+            self._open_dialog(message, is_input=True)
             self._draw_dialog(message, value, is_input=True, cursor=cursor)
+            if hasattr(pygame.key, "set_text_input_rect") and getattr(self, "_dialog_rect", None):
+                pygame.key.set_text_input_rect(self._dialog_rect)
             while self.running and not self.shouldstop():
                 event = pygame.event.wait(100)
                 if event.type == pygame.QUIT:
@@ -3760,7 +4506,7 @@ class GublanRuntime:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
                 raise ValueError("sizes must be numbers greater than zero")
         kind = obj["type"]
-        if kind in ("box", "button"):
+        if kind in ("box", "button", "ellipse", "polygon"):
             obj["w"], obj["h"] = width, height
         elif kind in ("textbox", "slider"):
             obj["w"] = width
@@ -3787,6 +4533,24 @@ class GublanRuntime:
             self.onlog(" ".join(format_value(value) for value in values))
             return
         self.onlog(self._text(statement.parts[1:]))
+
+    def _c_local(self, statement):
+        rest = statement.rest.strip()
+        match = _SET_RE.match(rest)
+        if match:
+            name, raw = match.groups()
+            value = self._eval_value(raw, split_command(raw))
+        else:
+            name, value = rest, None
+        if not re.fullmatch(r"[A-Za-z_]\w*", name):
+            raise ValueError("write it as: local name = value")
+        if name in self.constants:
+            raise ValueError(f"'{name}' is a constant (made with const), so it can't be changed")
+        if self._local_frames:
+            frame = self._local_frames[-1]
+            if name not in frame:
+                frame[name] = (name in self.vars, self.vars.get(name))
+        self.vars[name] = value
 
     def _c_set(self, statement):
         match = _SET_RE.match(statement.rest)
@@ -4295,6 +5059,8 @@ class GublanRuntime:
         if self.screen:
             self.pumpevents()
             self.render()
+        else:
+            self._tick_effects()
         target = 1.0 / max(1, self.target_fps)
         deadline = self._last_frame + target
         now = time.perf_counter()
@@ -4315,6 +5081,158 @@ class GublanRuntime:
         if not 6 <= value <= 300:
             raise ValueError("text size must be between 6 and 300")
         self.text_size = int(value)
+
+    def _c_scroll(self, statement):
+        self.scroll = (float(self._num(statement.parts[1], "scroll x")),
+                       float(self._num(statement.parts[2], "scroll y")))
+
+    def _c_shake(self, statement):
+        strength = self._num(statement.parts[1], "shake strength")
+        seconds = self._num(statement.parts[2], "shake time") if len(statement.parts) > 2 else 0.3
+        if strength < 0 or seconds < 0:
+            raise ValueError("shake strength and time can't be negative")
+        self._shake = [float(strength), float(seconds), float(seconds)] if strength and seconds else None
+        if not self._shake:
+            self._shake_offset = (0.0, 0.0)
+
+    def _c_ellipse(self, statement):
+        parts = statement.parts
+        self.objects[self._name(parts[1])] = {
+            "type": "ellipse",
+            "x": self._num(parts[2], "ellipse x"), "y": self._num(parts[3], "ellipse y"),
+            "w": self._num(parts[4], "ellipse width"), "h": self._num(parts[5], "ellipse height"),
+            "color": self.activecolor,
+        }
+
+    def _c_polygon(self, statement):
+        parts = statement.parts
+        values = [self._num(part, "polygon point") for part in parts[2:]]
+        if len(values) % 2:
+            raise ValueError("polygon points come in pairs: x y x y x y")
+        if len(values) < 6:
+            raise ValueError("a polygon needs at least three points")
+        if len(values) > 512:
+            raise ValueError("a polygon can have up to 256 points")
+        xs, ys = values[0::2], values[1::2]
+        left, top = min(xs), min(ys)
+        width, height = max(1.0, max(xs) - left), max(1.0, max(ys) - top)
+        self.objects[self._name(parts[1])] = {
+            "type": "polygon", "x": left, "y": top, "w": width, "h": height,
+            "points": [(x - left, y - top) for x, y in zip(xs, ys)], "pw": width, "ph": height,
+            "color": self.activecolor,
+        }
+
+    def _c_particles(self, statement):
+        parts = statement.parts
+        x, y = self._num(parts[1], "particles x"), self._num(parts[2], "particles y")
+        count = int(self._num(parts[3], "particle count")) if len(parts) > 3 else 20
+        speed = self._num(parts[4], "particle speed") if len(parts) > 4 else 160
+        if not 0 <= count <= 500:
+            raise ValueError("particles can make from 0 to 500 at a time")
+        color = color_value(self.activecolor)
+        for _ in range(count):
+            angle = random.uniform(0, math.tau)
+            velocity = speed * random.uniform(0.25, 1.0)
+            life = random.uniform(0.45, 1.0)
+            self._particles.append([float(x), float(y), math.cos(angle) * velocity, math.sin(angle) * velocity,
+                                    life, life, color, random.uniform(3, 6)])
+        if len(self._particles) > 2000:
+            del self._particles[:len(self._particles) - 2000]
+
+    _TWEEN_FIELDS = {"x": "x", "y": "y", "z": "z", "w": "w", "width": "w", "h": "h", "height": "h", "r": "r",
+                     "radius": "r", "angle": "angle", "rotation": "angle", "opacity": "alpha", "alpha": "alpha",
+                     "size": "size"}
+
+    def _c_tween(self, statement):
+        parts = statement.parts
+        obj = self._object(parts[1], action="tween")
+        field = str(parts[2]).lower()
+        key = self._TWEEN_FIELDS.get(field)
+        sized = obj["type"] in ("sprite", "image") and key in ("w", "h")
+        allowed = key is not None and (key in obj or key == "alpha" or sized
+                                       or (key == "angle" and obj["type"] in ("sprite", "image")))
+        if not allowed:
+            raise ValueError(f"tween can change x, y, w, h, r, angle or opacity of a {obj['type']}, not '{field}'")
+        target = self._num(parts[3], "tween value")
+        seconds = self._num(parts[4], "tween time")
+        if seconds < 0:
+            raise ValueError("tween time can't be negative")
+        easing = str(parts[5]).lower() if len(parts) > 5 else "inout"
+        if easing not in EASINGS:
+            raise ValueError(f"'{easing}' is not an easing. try: {', '.join(EASINGS)}")
+        if sized:
+            start = obj["surface"].get_size()[0 if key == "w" else 1]
+        else:
+            start = obj.get(key, 1.0 if key == "alpha" else 0.0)
+        self._tweens = [tween for tween in self._tweens if not (tween[0] is obj and tween[1] == key)]
+        if seconds == 0:
+            self._apply_tween(obj, key, float(target))
+        else:
+            self._tweens.append([obj, key, float(start), float(target), float(seconds), 0.0, easing])
+
+    def _apply_tween(self, obj, key, value):
+        if key in ("x", "y") and obj["type"] == "line":
+            obj[key + "2"] += value - obj[key]
+        if key in ("w", "h") and obj["type"] in ("sprite", "image"):
+            width, height = obj["surface"].get_size()
+            width, height = (value, height) if key == "w" else (width, value)
+            if width >= 1 and height >= 1:
+                self._resize(obj, width, height)
+            return
+        if key == "alpha":
+            value = max(0.0, min(1.0, value))
+        elif key in ("w", "h", "r", "size"):
+            value = max(0.0, value)
+        obj[key] = value
+
+    def _c_opacity(self, statement):
+        value = max(0.0, min(1.0, float(self._num(statement.parts[2], "opacity"))))
+        if statement.parts[1] == "all":
+            for obj in self.objects.values():
+                if isinstance(obj, dict):
+                    obj["alpha"] = value
+            return
+        self._object(statement.parts[1], action="change the opacity of")["alpha"] = value
+
+    def _c_layer(self, statement):
+        self._object(statement.parts[1], action="layer")["layer"] = self._num(statement.parts[2], "layer")
+
+    def _c_fixed(self, statement):
+        self._object(statement.parts[1], action="fix")["fixed"] = True
+
+    def _tick_effects(self):
+        """move tweens, particles and the screen shake on by the time since they last moved."""
+        now = time.perf_counter()
+        step = min(0.1, max(0.0, now - self._effects_time))
+        self._effects_time = now
+        if self._tweens:
+            for tween in list(self._tweens):
+                obj, key, start, target, duration, elapsed, easing = tween
+                elapsed += step
+                tween[5] = elapsed
+                progress = min(1.0, elapsed / duration) if duration > 0 else 1.0
+                self._apply_tween(obj, key, start + (target - start) * ease_value(progress, easing))
+                if progress >= 1:
+                    self._tweens.remove(tween)
+        if self._particles:
+            alive = []
+            for particle in self._particles:
+                particle[4] -= step
+                if particle[4] <= 0:
+                    continue
+                particle[0] += particle[2] * step
+                particle[1] += particle[3] * step
+                particle[3] += 240 * step
+                alive.append(particle)
+            self._particles = alive
+        if self._shake:
+            self._shake[1] -= step
+            if self._shake[1] <= 0:
+                self._shake = None
+                self._shake_offset = (0.0, 0.0)
+            else:
+                strength = self._shake[0] * self._shake[1] / self._shake[2]
+                self._shake_offset = (random.uniform(-strength, strength), random.uniform(-strength, strength))
 
     def _c_box(self, statement):
         parts = statement.parts
@@ -4468,7 +5386,7 @@ class GublanRuntime:
     def _c_move(self, statement):
         parts = statement.parts
         obj = self._object(parts[1], ("box", "circle", "cube", "sphere", "text", "image", "sprite", "line",
-                                      "button", "textbox", "slider", "checkbox"), "move")
+                                      "button", "textbox", "slider", "checkbox", "ellipse", "polygon"), "move")
         if len(parts) == 3:
             offset = self.val(parts[2])
             if isinstance(offset, Vector2):
@@ -4597,6 +5515,60 @@ class GublanRuntime:
         if channel:
             channel.set_volume(self.audio_volume)
             self.audio_channels.append((channel, sound))
+
+    BEEP_WAVES = ("square", "sine", "triangle", "saw", "noise")
+
+    def _c_beep(self, statement):
+        parts = statement.parts
+        frequency = self._num(parts[1], "beep frequency")
+        seconds = self._num(parts[2], "beep length") if len(parts) > 2 else 0.15
+        wave = str(parts[3]).lower() if len(parts) > 3 else "square"
+        if not 20 <= frequency <= 20000:
+            raise ValueError("beep frequency must be from 20 to 20000 (440 is the a above middle c)")
+        if not 0 < seconds <= 5:
+            raise ValueError("a beep can last from just above 0 up to 5 seconds")
+        if wave not in self.BEEP_WAVES:
+            raise ValueError(f"'{wave}' is not a wave. try: {', '.join(self.BEEP_WAVES)}")
+        self._ensure_audio()
+        sound = self._beep_sound(frequency, seconds, wave)
+        channel = sound.play()
+        self.audio_channels = [(c, a) for c, a in self.audio_channels if c.get_busy()]
+        if channel:
+            channel.set_volume(self.audio_volume)
+            self.audio_channels.append((channel, sound))
+
+    def _beep_sound(self, frequency, seconds, wave):
+        key = ("beep", round(frequency, 2), round(seconds, 3), wave)
+        sound = self._sound_cache.get(key)
+        if sound is None:
+            rate, size, channels = pygame.mixer.get_init()
+            if abs(size) != 16:
+                raise ValueError("beep needs 16-bit audio")
+            channels = max(1, channels)
+            count = max(1, int(rate * seconds))
+            fade_in, fade_out = rate * 0.003, rate * 0.02
+            samples = array.array("h")
+            amplitude = 0.22 * 32767
+            for index in range(count):
+                phase = (index * frequency / rate) % 1.0
+                if wave == "sine":
+                    value = math.sin(2 * math.pi * phase)
+                elif wave == "square":
+                    value = 1.0 if phase < 0.5 else -1.0
+                elif wave == "triangle":
+                    value = 4 * abs(phase - 0.5) - 1
+                elif wave == "saw":
+                    value = 2 * phase - 1
+                else:
+                    value = random.uniform(-1, 1)
+                envelope = min(1.0, index / fade_in, (count - index) / fade_out)
+                samples.extend([int(value * amplitude * envelope)] * channels)
+            try:
+                sound = pygame.mixer.Sound(buffer=samples.tobytes())
+            except pygame.error as err:
+                raise ValueError(f"could not make the beep: {str(err).lower()}") from err
+            self._sound_cache[key] = sound
+        return sound
 
     def _c_music(self, statement):
         relative = " ".join(statement.parts[1:])
@@ -4891,7 +5863,7 @@ def remove_plugin_function(name):
     return True
 
 
-def run_standalone(source, base_dir, title=None, console=False, save_name=None):
+def run_standalone(source, base_dir, title=None, console=False, save_name=None, style=None):
     """entry point for exported executables.
 
     window programs show errors in a message box. console programs (exported with a
@@ -4925,7 +5897,7 @@ def run_standalone(source, base_dir, title=None, console=False, save_name=None):
     runtime = GublanRuntime(
         onlog=log, onerror=error, base_dir=base_dir, hold_window=True,
         oninput=ask if console else None, onpopup=popup if console else None,
-        save_name=save_name or title or os.path.basename(os.path.abspath(base_dir)),
+        save_name=save_name or title or os.path.basename(os.path.abspath(base_dir)), style=style,
     )
     if title:
         runtime.window_title = title

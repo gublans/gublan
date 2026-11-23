@@ -137,6 +137,38 @@ expressions are used after `=`, in `if`, `while`, `return` and `for`, and inside
 - any function can be written after a value: `name.upper()` is `upper(name)`, `items.sort()` is `sort(items)`.
 - whole numbers also have `&`, `|`, `^`, `<<`, `>>` and `~` for working with bits.
 
+## functions
+
+```gublan
+function greet name="world" times=1
+    local message = "hi " + name
+    loop times
+        print {message}
+    end
+end
+
+greet()
+greet("sam", 2)
+```
+
+parameters can have a default (`name="world"`), used when the call leaves that value out. defaults come
+after the parameters without one. `local` makes a variable that only lives inside the function, so it can't
+clash with one of the same name somewhere else.
+
+## long lines
+
+```gublan
+levels = [
+    "grass",
+    "caves",
+    "castle",
+]
+print {len(levels)} levels
+```
+
+a line that ends with an open `[`, `(` or `{` (or a comma inside one) carries on over the next lines until the
+brackets close. that makes long lists, maps and function calls easier to read.
+
 ## when things go wrong
 
 ```gublan
@@ -335,6 +367,14 @@ presence timer
 presence button https://github.com/gublans/gublan get gublan""",
     "load": """load best highscore 0
 print the best score so far is {highscore}""",
+    "local": """function total_of items
+    local total = 0
+    for item in items
+        total += item
+    end
+    return total
+end
+print {total_of([1, 2, 3])}""",
 }
 
 
@@ -378,6 +418,15 @@ SETUP = {
     "sort": "list scores 30 10 20",
     "cursor": "mode 2d",
     "save": "score = 120",
+    "tween": "mode 2d\ncircle coin 200 120 10",
+    "opacity": "mode 2d\nbox ghost 40 40 32 32",
+    "layer": _PLAYER,
+    "fixed": "mode 2d\ntext hud 10 10 score 0",
+    "scroll": "mode 2d",
+    "shake": "mode 2d",
+    "ellipse": "mode 2d",
+    "polygon": "mode 2d",
+    "particles": "mode 2d\ncolor gold",
 }
 
 

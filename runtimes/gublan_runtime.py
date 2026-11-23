@@ -17,6 +17,7 @@ import time as _time
 # python's own versions of the names gublan reuses (gublan's len, str, round... are defined below)
 _len, _str, _int, _round, _range, _min, _max, _abs, _sum, _map, _filter, _any, _all, _zip, _pow, _type = (
     len, str, int, round, range, min, max, abs, sum, map, filter, any, all, zip, pow, type)
+_enumerate = enumerate
 
 pi = math.pi
 dt = 0
@@ -672,6 +673,286 @@ def average(items):
     return _sum(items) / _len(items)
 
 
+# ----- added in 1.0.7: more math, lists and maps, text, colours and timers ---------------------------------------------
+EASINGS = ("linear", "in", "out", "inout", "smooth", "bounce", "elastic", "back")
+
+
+def ease(t, kind="inout"):
+    t = 0.0 if t < 0 else 1.0 if t > 1 else float(t)
+    kind = _str(kind).strip().lower()
+    if kind == "linear":
+        return t
+    if kind == "in":
+        return t * t
+    if kind == "out":
+        return 1 - (1 - t) * (1 - t)
+    if kind == "inout":
+        return 2 * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 2 / 2
+    if kind == "smooth":
+        return t * t * (3 - 2 * t)
+    if kind == "bounce":
+        n, d = 7.5625, 2.75
+        if t < 1 / d:
+            return n * t * t
+        if t < 2 / d:
+            t -= 1.5 / d
+            return n * t * t + 0.75
+        if t < 2.5 / d:
+            t -= 2.25 / d
+            return n * t * t + 0.9375
+        t -= 2.625 / d
+        return n * t * t + 0.984375
+    if kind == "elastic":
+        return t if t in (0.0, 1.0) else 2 ** (-10 * t) * math.sin((t * 10 - 0.75) * (2 * math.pi / 3)) + 1
+    if kind == "back":
+        c1 = 1.70158
+        return 1 + (c1 + 1) * (t - 1) ** 3 + c1 * (t - 1) ** 2
+    raise GublanError(f"'{kind}' is not an easing. try: {', '.join(EASINGS)}")
+
+
+def _listed(value):
+    return list(value) if isinstance(value, _str) else value
+
+
+def hypot(x, y):
+    return math.hypot(x, y)
+
+
+def fract(x):
+    return x - math.floor(x)
+
+
+def smoothstep(low, high, x):
+    if high == low:
+        return 0.0 if x < low else 1.0
+    t = clamp((x - low) / (high - low), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def snap(x, step):
+    if step == 0:
+        return x
+    snapped = math.floor(x / step + 0.5) * step
+    return _int(snapped) if isinstance(x, _int) and isinstance(step, _int) else snapped
+
+
+def between(x, low, high):
+    return low <= x <= high
+
+
+def gcd(a, b):
+    return math.gcd(_int(a), _int(b))
+
+
+def median(items):
+    if not items:
+        raise GublanError("median() of an empty list has no middle")
+    ordered = sorted(items)
+    middle = _len(ordered) // 2
+    return ordered[middle] if _len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def product(items):
+    return math.prod(items)
+
+
+def first(items):
+    items = _listed(items)
+    return items[0] if items else None
+
+
+def last(items):
+    items = _listed(items)
+    return items[-1] if items else None
+
+
+def take(items, n):
+    return items[:_max(0, _int(n))]
+
+
+def drop(items, n):
+    return items[_max(0, _int(n)):]
+
+
+def chunk(items, size):
+    size = _int(size)
+    if size < 1:
+        raise GublanError("chunk() needs a size of 1 or more")
+    items = _listed(items)
+    return [items[index:index + size] for index in _range(0, _len(items), size)]
+
+
+def enumerate(items):
+    return [[index, item] for index, item in _enumerate(_listed(items))]
+
+
+def minby(items, function):
+    items = _listed(items)
+    if not items:
+        return None
+    best, key = items[0], function(items[0])
+    for item in items[1:]:
+        value = function(item)
+        if value < key:
+            best, key = item, value
+    return best
+
+
+def maxby(items, function):
+    items = _listed(items)
+    if not items:
+        return None
+    best, key = items[0], function(items[0])
+    for item in items[1:]:
+        value = function(item)
+        if value > key:
+            best, key = item, value
+    return best
+
+
+def groupby(items, function):
+    groups = {}
+    for item in _listed(items):
+        groups.setdefault(str(function(item)), []).append(item)
+    return groups
+
+
+def without(items, value):
+    return [item for item in _listed(items) if item != value]
+
+
+def fill(value, count):
+    return [list(value) if isinstance(value, list) else dict(value) if isinstance(value, dict) else value
+            for _ in _range(_max(0, _int(count)))]
+
+
+def merge(first_map, second_map):
+    merged = dict(first_map)
+    merged.update(second_map)
+    return merged
+
+
+def get(container, key, default=None):
+    if isinstance(container, dict):
+        if key in container:
+            return container[key]
+        return container.get(str(key), default)
+    if isinstance(key, bool) or not isinstance(key, (_int, float)) or key != _int(key):
+        return default
+    index = _int(key)
+    return container[index] if -_len(container) <= index < _len(container) else default
+
+
+def entries(values):
+    return [[key, value] for key, value in values.items()]
+
+
+def frompairs(pairs):
+    made = {}
+    for pair in pairs:
+        if not isinstance(pair, list) or _len(pair) != 2:
+            raise GublanError("frompairs() needs a list of [name, value] pairs")
+        made[pair[0] if isinstance(pair[0], _str) else str(pair[0])] = pair[1]
+    return made
+
+
+def commas(x):
+    text = str(x)
+    sign = "-" if text.startswith("-") else ""
+    digits, dot, rest = text.lstrip("-").partition(".")
+    if not digits.isdigit():
+        return text
+    return sign + f"{_int(digits):,}" + (dot + rest if dot else "")
+
+
+def ordinal(n):
+    n = _int(n)
+    last_two = _abs(n) % 100
+    suffix = "th" if 11 <= last_two <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(_abs(n) % 10, "th")
+    return f"{n}{suffix}"
+
+
+def plural(count, word, many=None):
+    return f"{str(count)} {str(word) if count == 1 else (str(word) + 's' if many is None else str(many))}"
+
+
+def wraptext(words_text, width):
+    width = _int(width)
+    if width < 1:
+        raise GublanError("wraptext() needs a width of 1 or more")
+    found = []
+    for paragraph in str(words_text).split("\n"):
+        current = ""
+        for word in paragraph.split():
+            while _len(word) > width:
+                if current:
+                    found.append(current)
+                    current = ""
+                found.append(word[:width])
+                word = word[width:]
+            if not word:
+                continue
+            if not current:
+                current = word
+            elif _len(current) + 1 + _len(word) <= width:
+                current += " " + word
+            else:
+                found.append(current)
+                current = word
+        found.append(current)
+    return found
+
+
+def mixcolor(first_color, second_color, t):
+    one, two = _rgb(first_color), _rgb(second_color)
+    t = clamp(t, 0, 1)
+    return [_int(math.floor(a + (b - a) * t + 0.5)) for a, b in _zip(one, two)]
+
+
+def randomcolor():
+    return hsv(_random.random() * 360, 0.65, 0.95)
+
+
+_timers = {}
+
+
+def cooldown(name, seconds):
+    key, now_time = ("cooldown", str(name)), _time.monotonic()
+    started = _timers.get(key)
+    if started is None or now_time - started >= seconds:
+        _timers[key] = now_time
+        return True
+    return False
+
+
+def pulse(name, seconds):
+    key, now_time = ("pulse", str(name)), _time.monotonic()
+    started = _timers.get(key)
+    if started is None:
+        _timers[key] = now_time
+        return False
+    if now_time - started >= seconds:
+        _timers[key] = now_time
+        return True
+    return False
+
+
+def after(name, seconds):
+    key, now_time = ("after", str(name)), _time.monotonic()
+    if key not in _timers:
+        _timers[key] = now_time
+        return seconds <= 0
+    return now_time - _timers[key] >= seconds
+
+
+def scrollx():
+    return _scroll[0]
+
+
+def scrolly():
+    return _scroll[1]
+
+
 # ----- saving ----------------------------------------------------------------------------------------------------------
 def _storable(value, depth=0):
     """the same json shapes gublan itself saves, so saves and json text work in both."""
@@ -894,8 +1175,161 @@ def textsize(value):
 
 def _add(name, kind, **parts):
     parts.update(type=kind, color=_color)
+    old = _objects.get(str(name))
+    if isinstance(old, dict):
+        for key in ("layer", "alpha", "fixed"):
+            if key in old and key not in parts:
+                parts[key] = old[key]
     _objects[str(name)] = parts
     return parts
+
+
+def ellipse(name, x, y, w, h):
+    _add(name, "ellipse", x=x, y=y, w=w, h=h)
+
+
+def polygon(name, points):
+    if _len(points) % 2:
+        raise GublanError("polygon points come in pairs: x y x y x y")
+    if _len(points) < 6:
+        raise GublanError("a polygon needs at least three points")
+    xs, ys = points[0::2], points[1::2]
+    left, top = _min(xs), _min(ys)
+    width, height = _max(1, _max(xs) - left), _max(1, _max(ys) - top)
+    _add(name, "polygon", x=left, y=top, w=width, h=height, pw=width, ph=height,
+         points=[(x - left, y - top) for x, y in _zip(xs, ys)])
+
+
+# ----- the view, effects and tweens ------------------------------------------------------------------------------------
+_scroll = [0, 0]
+_shake = None
+_shake_offset = (0.0, 0.0)
+_particles = []
+_tweens = []
+_effects_time = _time.perf_counter()
+_layer_surface = None
+
+
+def scroll(x, y):
+    _scroll[0], _scroll[1] = x, y
+
+
+def shake(strength, seconds=0.3):
+    global _shake, _shake_offset
+    if strength < 0 or seconds < 0:
+        raise GublanError("shake strength and time can't be negative")
+    _shake = [float(strength), float(seconds), float(seconds)] if strength and seconds else None
+    if not _shake:
+        _shake_offset = (0.0, 0.0)
+
+
+def particles(x, y, count=20, speed=160):
+    count = _int(count)
+    if not 0 <= count <= 500:
+        raise GublanError("particles can make from 0 to 500 at a time")
+    shade = _rgb(*_color) if isinstance(_color, (tuple, list)) and _len(_color) == 3 else _rgb(_color)
+    for _ in _range(count):
+        angle = _random.uniform(0, math.tau)
+        velocity = speed * _random.uniform(0.25, 1.0)
+        life = _random.uniform(0.45, 1.0)
+        _particles.append([float(x), float(y), math.cos(angle) * velocity, math.sin(angle) * velocity, life, life,
+                           shade, _random.uniform(3, 6)])
+    if _len(_particles) > 2000:
+        del _particles[:_len(_particles) - 2000]
+
+
+_TWEEN_FIELDS = {"x": "x", "y": "y", "z": "z", "w": "w", "width": "w", "h": "h", "height": "h", "r": "r",
+                 "radius": "r", "angle": "angle", "rotation": "angle", "opacity": "alpha", "alpha": "alpha",
+                 "size": "size"}
+
+
+def _apply_tween(obj, key, value):
+    if key in ("x", "y") and obj["type"] == "line":
+        obj[key + "2"] += value - obj[key]
+    if key in ("w", "h") and obj.get("surface") is not None:
+        width, height = obj["surface"].get_size()
+        width, height = (value, height) if key == "w" else (width, value)
+        if width >= 1 and height >= 1:
+            source = obj.setdefault("source", obj["surface"])
+            obj["surface"] = _pg.transform.smoothscale(source, (_int(width), _int(height)))
+        return
+    if key == "alpha":
+        value = clamp(value, 0, 1)
+    elif key in ("w", "h", "r", "size"):
+        value = _max(0, value)
+    obj[key] = value
+
+
+def tween(name, field, value, seconds, easing="inout"):
+    global _tweens
+    obj = _object(name)
+    key = _TWEEN_FIELDS.get(_str(field).lower())
+    pictured = obj.get("surface") is not None
+    if key is None or not (key in obj or key == "alpha" or (pictured and key in ("w", "h", "angle"))):
+        raise GublanError(f"tween can change x, y, w, h, r, angle or opacity of a {obj['type']}, not '{field}'")
+    if seconds < 0:
+        raise GublanError("tween time can't be negative")
+    easing = _str(easing).lower()
+    if easing not in EASINGS:
+        raise GublanError(f"'{easing}' is not an easing. try: {', '.join(EASINGS)}")
+    if pictured and key in ("w", "h"):
+        start_value = obj["surface"].get_size()[0 if key == "w" else 1]
+    else:
+        start_value = obj.get(key, 1.0 if key == "alpha" else 0.0)
+    _tweens = [item for item in _tweens if not (item[0] is obj and item[1] == key)]
+    if seconds == 0:
+        _apply_tween(obj, key, value)
+    else:
+        _tweens.append([obj, key, float(start_value), float(value), float(seconds), 0.0, easing])
+
+
+def opacity(name, value):
+    value = clamp(value, 0, 1)
+    if name == "all":
+        for obj in _objects.values():
+            obj["alpha"] = value
+        return
+    _object(name)["alpha"] = value
+
+
+def layer(name, value):
+    _object(name)["layer"] = value
+
+
+def fixed(name):
+    _object(name)["fixed"] = True
+
+
+def _tick_effects():
+    global _effects_time, _particles, _shake, _shake_offset
+    current = _time.perf_counter()
+    step = _min(0.1, _max(0.0, current - _effects_time))
+    _effects_time = current
+    for item in list(_tweens):
+        obj, key, start_value, target, duration, elapsed, easing = item
+        item[5] = elapsed + step
+        progress = _min(1.0, item[5] / duration) if duration > 0 else 1.0
+        _apply_tween(obj, key, start_value + (target - start_value) * ease(progress, easing))
+        if progress >= 1:
+            _tweens.remove(item)
+    if _particles:
+        alive = []
+        for particle in _particles:
+            particle[4] -= step
+            if particle[4] <= 0:
+                continue
+            particle[0] += particle[2] * step
+            particle[1] += particle[3] * step
+            particle[3] += 240 * step
+            alive.append(particle)
+        _particles = alive
+    if _shake:
+        _shake[1] -= step
+        if _shake[1] <= 0:
+            _shake, _shake_offset = None, (0.0, 0.0)
+        else:
+            strength = _shake[0] * _shake[1] / _shake[2]
+            _shake_offset = (_random.uniform(-strength, strength), _random.uniform(-strength, strength))
 
 
 def box(name, x, y, w, h):
@@ -1032,7 +1466,9 @@ def place(name, x, y, z=None):
 def resize(name, w, h=None):
     obj = _object(name)
     h = w if h is None else h
-    if obj["type"] == "circle":
+    if obj["type"] in ("ellipse", "polygon"):
+        obj["w"], obj["h"] = w, h
+    elif obj["type"] == "circle":
         obj["r"] = w
     elif obj["type"] == "text":
         obj["size"] = _int(w)
@@ -1118,68 +1554,116 @@ def overlap(first, second):
 
 
 # ----- drawing ---------------------------------------------------------------------------------------------------------
+def _alpha_layer(screen):
+    global _layer_surface
+    size = screen.get_size()
+    if _layer_surface is None or _layer_surface.get_size() != size:
+        _layer_surface = _pg.Surface(size, _pg.SRCALPHA)
+    _layer_surface.set_alpha(255)
+    _layer_surface.fill((0, 0, 0, 0))
+    return _layer_surface
+
+
+_UI_KINDS = ("button", "textbox", "slider", "checkbox")
+
+
 def _render():
     pygame = _pg
     screen = _screen
+    _tick_effects()
     screen.fill(_background)
     mouse = pygame.mouse.get_pos()
     if _ui_button is not None:
         pygame.draw.rect(screen, (109, 137, 79), (20, 20, 180, 38))
         screen.blit(_font(20).render(_ui_button, True, (240, 240, 240)), (32, 30))
-    for name, obj in _objects.items():
-        if obj.get("hidden"):
+    items = [(name, obj) for name, obj in _objects.items() if not obj.get("hidden")]
+    if _any(obj.get("layer") for _, obj in items):
+        items.sort(key=lambda item: item[1].get("layer", 0))
+    world = (_shake_offset[0] - _scroll[0], _shake_offset[1] - _scroll[1])
+    for name, obj in items:
+        alpha = obj.get("alpha", 1)
+        if alpha <= 0:
             continue
-        kind, shade = obj["type"], _rgb(obj["color"]) if not isinstance(obj["color"], tuple) else _rgb(*obj["color"])
-        if kind == "box":
-            pygame.draw.rect(screen, shade, (obj["x"], obj["y"], obj["w"], obj["h"]))
-        elif kind == "circle":
-            pygame.draw.circle(screen, shade, (_int(obj["x"]), _int(obj["y"])), _int(obj["r"]))
-        elif kind == "line":
-            pygame.draw.line(screen, shade, (obj["x"], obj["y"]), (obj["x2"], obj["y2"]), _int(obj["width"]))
-        elif kind == "text":
-            screen.blit(_font(obj["size"]).render(obj["text"], True, shade), (obj["x"], obj["y"]))
-        elif kind in ("image", "sprite"):
-            surface = obj["surface"]
-            if obj.get("angle"):
-                turned = pygame.transform.rotate(surface, -obj["angle"])
-                width, height = surface.get_size()
-                screen.blit(turned, turned.get_rect(center=(obj["x"] + width / 2, obj["y"] + height / 2)))
-            else:
-                screen.blit(surface, (obj["x"], obj["y"]))
-        elif kind == "button":
-            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
-            pygame.draw.rect(screen, (148, 182, 108) if rect.collidepoint(mouse) else (82, 105, 61), rect)
-            label = _font(24).render(obj["label"], True, (240, 240, 240))
-            screen.blit(label, label.get_rect(center=rect.center))
-        elif kind == "textbox":
-            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
-            pygame.draw.rect(screen, (23, 23, 23), rect)
-            pygame.draw.rect(screen, (148, 182, 108) if _focus == name else (90, 90, 90), rect, 2)
-            font = _font(24)
-            shown = obj["text"] or ("" if _focus == name else obj["hint"])
-            label = font.render(shown, True, shade if obj["text"] else (120, 120, 120))
-            screen.blit(label, (rect.x + 8, rect.y + (rect.h - label.get_height()) // 2))
-            if _focus == name and _int(_time.monotonic() * 2) % 2 == 0:
-                caret = rect.x + 8 + font.size(obj["text"][:obj["cursor"]])[0]
-                pygame.draw.line(screen, (148, 182, 108), (caret, rect.y + 7), (caret, rect.bottom - 7), 2)
-        elif kind == "slider":
-            share = 0 if obj["max"] == obj["min"] else (obj["value"] - obj["min"]) / (obj["max"] - obj["min"])
-            middle = obj["y"] + obj["h"] // 2
-            pygame.draw.rect(screen, (60, 60, 60), (obj["x"], middle - 3, obj["w"], 6))
-            pygame.draw.rect(screen, shade, (obj["x"], middle - 3, _int(obj["w"] * share), 6))
-            pygame.draw.circle(screen, shade, (_int(obj["x"] + obj["w"] * share), middle), 9)
-            label = _font(20).render(str(obj["value"]), True, (200, 200, 200))
-            screen.blit(label, (obj["x"] + obj["w"] + 12, middle - label.get_height() // 2))
-        elif kind == "checkbox":
-            rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
-            pygame.draw.rect(screen, (23, 23, 23), rect)
-            pygame.draw.rect(screen, shade if obj["checked"] else (110, 110, 110), rect, 2)
-            if obj["checked"]:
-                pygame.draw.lines(screen, shade, False, [(rect.x + 5, rect.centery), (rect.x + 10, rect.bottom - 6),
-                                                          (rect.right - 5, rect.y + 6)], 3)
-            label = _font(24).render(obj["label"], True, (229, 229, 229))
-            screen.blit(label, (rect.right + 8, rect.centery - label.get_height() // 2))
+        offset = (0, 0) if obj["type"] in _UI_KINDS or obj.get("fixed") else world
+        if alpha < 1:
+            target = _alpha_layer(screen)
+            _draw_one(target, name, obj, offset, mouse)
+            target.set_alpha(_int(alpha * 255))
+            screen.blit(target, (0, 0))
+        else:
+            _draw_one(screen, name, obj, offset, mouse)
+    if _particles:
+        target = _alpha_layer(screen)
+        for x, y, _vx, _vy, life, total, shade, size in _particles:
+            fade = clamp(life / total, 0, 1)
+            side = _max(1, _int(size * (0.4 + 0.6 * fade)))
+            pygame.draw.rect(target, (*shade[:3], _int(255 * fade)),
+                             (_int(x + world[0] - side / 2), _int(y + world[1] - side / 2), side, side))
+        screen.blit(target, (0, 0))
     pygame.display.flip()
+
+
+def _draw_one(screen, name, obj, offset, mouse):
+    pygame = _pg
+    ox, oy = offset
+    kind, shade = obj["type"], _rgb(obj["color"]) if not isinstance(obj["color"], tuple) else _rgb(*obj["color"])
+    if kind == "box":
+        pygame.draw.rect(screen, shade, (obj["x"] + ox, obj["y"] + oy, obj["w"], obj["h"]))
+    elif kind == "circle":
+        pygame.draw.circle(screen, shade, (_int(obj["x"] + ox), _int(obj["y"] + oy)), _int(obj["r"]))
+    elif kind == "ellipse":
+        pygame.draw.ellipse(screen, shade, (obj["x"] + ox, obj["y"] + oy, _max(1, obj["w"]), _max(1, obj["h"])))
+    elif kind == "polygon":
+        scale_x = obj["w"] / obj["pw"] if obj["pw"] else 1
+        scale_y = obj["h"] / obj["ph"] if obj["ph"] else 1
+        pygame.draw.polygon(screen, shade, [(obj["x"] + ox + px * scale_x, obj["y"] + oy + py * scale_y)
+                                            for px, py in obj["points"]])
+    elif kind == "line":
+        pygame.draw.line(screen, shade, (obj["x"] + ox, obj["y"] + oy), (obj["x2"] + ox, obj["y2"] + oy),
+                         _int(obj["width"]))
+    elif kind == "text":
+        screen.blit(_font(obj["size"]).render(obj["text"], True, shade), (obj["x"] + ox, obj["y"] + oy))
+    elif kind in ("image", "sprite"):
+        surface = obj["surface"]
+        if obj.get("angle"):
+            turned = pygame.transform.rotate(surface, -obj["angle"])
+            width, height = surface.get_size()
+            screen.blit(turned, turned.get_rect(center=(obj["x"] + ox + width / 2, obj["y"] + oy + height / 2)))
+        else:
+            screen.blit(surface, (obj["x"] + ox, obj["y"] + oy))
+    elif kind == "button":
+        rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+        pygame.draw.rect(screen, (148, 182, 108) if rect.collidepoint(mouse) else (82, 105, 61), rect)
+        label = _font(24).render(obj["label"], True, (240, 240, 240))
+        screen.blit(label, label.get_rect(center=rect.center))
+    elif kind == "textbox":
+        rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+        pygame.draw.rect(screen, (23, 23, 23), rect)
+        pygame.draw.rect(screen, (148, 182, 108) if _focus == name else (90, 90, 90), rect, 2)
+        font = _font(24)
+        shown = obj["text"] or ("" if _focus == name else obj["hint"])
+        label = font.render(shown, True, shade if obj["text"] else (120, 120, 120))
+        screen.blit(label, (rect.x + 8, rect.y + (rect.h - label.get_height()) // 2))
+        if _focus == name and _int(_time.monotonic() * 2) % 2 == 0:
+            caret = rect.x + 8 + font.size(obj["text"][:obj["cursor"]])[0]
+            pygame.draw.line(screen, (148, 182, 108), (caret, rect.y + 7), (caret, rect.bottom - 7), 2)
+    elif kind == "slider":
+        share = 0 if obj["max"] == obj["min"] else (obj["value"] - obj["min"]) / (obj["max"] - obj["min"])
+        middle = obj["y"] + obj["h"] // 2
+        pygame.draw.rect(screen, (60, 60, 60), (obj["x"], middle - 3, obj["w"], 6))
+        pygame.draw.rect(screen, shade, (obj["x"], middle - 3, _int(obj["w"] * share), 6))
+        pygame.draw.circle(screen, shade, (_int(obj["x"] + obj["w"] * share), middle), 9)
+        label = _font(20).render(str(obj["value"]), True, (200, 200, 200))
+        screen.blit(label, (obj["x"] + obj["w"] + 12, middle - label.get_height() // 2))
+    elif kind == "checkbox":
+        rect = pygame.Rect(obj["x"], obj["y"], obj["w"], obj["h"])
+        pygame.draw.rect(screen, (23, 23, 23), rect)
+        pygame.draw.rect(screen, shade if obj["checked"] else (110, 110, 110), rect, 2)
+        if obj["checked"]:
+            pygame.draw.lines(screen, shade, False, [(rect.x + 5, rect.centery), (rect.x + 10, rect.bottom - 6),
+                                                      (rect.right - 5, rect.y + 6)], 3)
+        label = _font(24).render(obj["label"], True, (229, 229, 229))
+        screen.blit(label, (rect.right + 8, rect.centery - label.get_height() // 2))
 
 
 def _slide(obj, mouse_x):
@@ -1266,6 +1750,8 @@ def frame():
     if _screen is not None:
         _pump()
         _render()
+    else:
+        _tick_effects()
     target = 1.0 / _max(1, _fps)
     left = _last_frame + target - _time.perf_counter()
     if left > 0:
@@ -1433,6 +1919,46 @@ def music(path):
     mixer.music.load(path)
     mixer.music.set_volume(_volume)
     mixer.music.play(-1)
+
+
+_WAVES = ("square", "sine", "triangle", "saw", "noise")
+
+
+def beep(frequency, seconds=0.15, wave="square"):
+    import array as _array
+    wave = _str(wave).lower()
+    if not 20 <= frequency <= 20000:
+        raise GublanError("beep frequency must be from 20 to 20000 (440 is the a above middle c)")
+    if not 0 < seconds <= 5:
+        raise GublanError("a beep can last from just above 0 up to 5 seconds")
+    if wave not in _WAVES:
+        raise GublanError(f"'{wave}' is not a wave. try: {', '.join(_WAVES)}")
+    if _pygame() is None:
+        return
+    mixer = _mixer()
+    key = ("beep", frequency, seconds, wave)
+    if key not in _sounds:
+        rate, _size, channels = mixer.get_init()
+        channels = _max(1, channels)
+        count = _max(1, _int(rate * seconds))
+        samples = _array.array("h")
+        for index in _range(count):
+            phase = (index * frequency / rate) % 1.0
+            if wave == "sine":
+                value = math.sin(2 * math.pi * phase)
+            elif wave == "square":
+                value = 1.0 if phase < 0.5 else -1.0
+            elif wave == "triangle":
+                value = 4 * _abs(phase - 0.5) - 1
+            elif wave == "saw":
+                value = 2 * phase - 1
+            else:
+                value = _random.uniform(-1, 1)
+            envelope = _min(1.0, index / (rate * 0.003), (count - index) / (rate * 0.02))
+            samples.extend([_int(value * 0.22 * 32767 * envelope)] * channels)
+        _sounds[key] = mixer.Sound(buffer=samples.tobytes())
+    _sounds[key].set_volume(_volume)
+    _sounds[key].play()
 
 
 def stopmusic():

@@ -324,6 +324,61 @@ editor. very big files ask first, and files saved as utf-16 (notepad's "unicode"
 open correctly and are saved as utf-8. when another program changes a file you have open, it is
 loaded again (file > reload from disk does it by hand)."""),
 
+    ("moving things smoothly", """tween changes an object bit by bit while the program keeps going. easings change how it moves:
+linear, in, out, inout, smooth, bounce, elastic and back.
+
+    mode 2d
+    circle coin 270 300 16
+    tween coin y 80 0.8 bounce
+    ellipse egg 100 80 40 60
+    polygon roof 400 200 450 150 500 200
+    layer coin 2
+    opacity roof 0.5
+    forever
+        if keypressed("space")
+            particles {coin.x} {coin.y} 20
+            shake 6 0.2
+            beep 660 0.08
+        end
+        frame
+    end
+
+scroll x y moves the view over a bigger world. fixed keeps a score or a health bar still while it
+scrolls. cooldown("shoot", 0.3) is true at most once every 0.3 seconds, pulse("spawn", 2) is true
+once every 2 seconds and after("start", 3) turns true 3 seconds after you first ask."""),
+
+    ("handy functions", """lists: take(xs, 2), drop(xs, 2), first(xs), last(xs), chunk(xs, 3), fill(0, 5), without(xs, 0),
+enumerate(xs), minby(xs, n => n.y), maxby(...) and groupby(words, w => len(w)).
+maps: entries(m), frompairs(pairs), merge(a, b) and get(m, "name", fallback).
+numbers: median, product, gcd, hypot, fract, snap(37, 16), between(x, 1, 10), smoothstep and
+ease(t, "out").
+text: commas(1234567) is 1,234,567, ordinal(2) is 2nd, plural(3, "coin") is 3 coins and
+wraptext(text, 20) splits text into lines.
+colours: mixcolor("red", "blue", 0.5) and randomcolor().
+
+local makes a variable that only lives inside its function:
+
+    function shout word
+        local loud = upper(word)
+        return loud
+    end"""),
+
+    ("game window and popups", """tools > game window and popups sets how game windows start (size, title, background, fps and an
+fps counter) and how popups and questions look: their colours, border, width, text size, how much
+they dim the game, where they sit, how they open (pop, fade, slide or none) and their soft sound.
+pick a look like paper, night, arcade or glass, or start from the studio's own theme.
+
+a program's own window, background and fps lines still win. exported programs and the web keep
+the look you chose."""),
+
+    ("cursor, typing and sounds", """tools > settings, under cursor and typing, changes the editor's text cursor: its shape (line,
+block or underline), how it blinks, whether it glides or jumps and how thick it is. new letters
+can fade in, settle like wet ink, glow or just appear.
+
+under sounds, gublan studio plays soft sounds when things open, run, finish, save or go wrong.
+pick a set (soft, glass, wood or retro), a volume, and a tiny tick while you type if you like it.
+the listen buttons play each one."""),
+
     ("keyboard shortcuts", """f5 run or continue      shift+f5 stop        f10 step         f9 breakpoint
 ctrl+s save            ctrl+o open          ctrl+n new       ctrl+w close tab
 ctrl+f find            ctrl+h replace       ctrl+g go to line

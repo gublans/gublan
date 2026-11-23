@@ -1153,6 +1153,252 @@ function G.average(items)
     return G.sum(items) / #items
 end
 
+-- ----- added in 1.0.7: more math, lists and maps, text, colours and timers -----------------------------------------------
+local EASINGS = {"linear", "in", "out", "inout", "smooth", "bounce", "elastic", "back"}
+function G.ease(t, kind)
+    t = t < 0 and 0 or (t > 1 and 1 or t)
+    kind = trim(str(kind == nil and "inout" or kind)):lower()
+    if kind == "linear" then return t end
+    if kind == "in" then return t * t end
+    if kind == "out" then return 1 - (1 - t) * (1 - t) end
+    if kind == "inout" then
+        if t < 0.5 then return 2 * t * t end
+        return 1 - (-2 * t + 2) ^ 2 / 2
+    end
+    if kind == "smooth" then return t * t * (3 - 2 * t) end
+    if kind == "bounce" then
+        local n, d = 7.5625, 2.75
+        if t < 1 / d then return n * t * t end
+        if t < 2 / d then t = t - 1.5 / d; return n * t * t + 0.75 end
+        if t < 2.5 / d then t = t - 2.25 / d; return n * t * t + 0.9375 end
+        t = t - 2.625 / d
+        return n * t * t + 0.984375
+    end
+    if kind == "elastic" then
+        if t == 0 or t == 1 then return t end
+        return 2 ^ (-10 * t) * math.sin((t * 10 - 0.75) * (2 * math.pi / 3)) + 1
+    end
+    if kind == "back" then
+        local c = 1.70158
+        return 1 + (c + 1) * (t - 1) ^ 3 + c * (t - 1) ^ 2
+    end
+    fail("'" .. kind .. "' is not an easing. try: " .. concat(EASINGS, ", "))
+end
+function G.hypot(x, y) return math.sqrt(x * x + y * y) end
+function G.fract(x) return x - floor(x) end
+function G.smoothstep(low, high, x)
+    if high == low then
+        return x < low and 0 or 1
+    end
+    local t = clamp((x - low) / (high - low), 0, 1)
+    return t * t * (3 - 2 * t)
+end
+function G.snap(x, step)
+    if step == 0 then return x end
+    return floor(x / step + 0.5) * step
+end
+function G.between(x, low, high) return low <= x and x <= high end
+function G.gcd(a, b)
+    a, b = abs(floor(a)), abs(floor(b))
+    while b ~= 0 do a, b = b, a % b end
+    return a
+end
+function G.median(items)
+    if #items == 0 then fail("median() of an empty list has no middle") end
+    local sorted = G.sort(items)
+    local middle = floor(#sorted / 2)
+    if #sorted % 2 == 1 then return sorted[middle + 1] end
+    return (sorted[middle] + sorted[middle + 1]) / 2
+end
+function G.product(items)
+    local total = 1
+    for _, value in ipairs(items) do total = total * value end
+    return total
+end
+function G.first(items)
+    items = sequence(items)
+    return items[1]
+end
+function G.last(items)
+    items = sequence(items)
+    return items[#items]
+end
+function G.take(items, n) return G.slice(items, 0, math.max(0, floor(n))) end
+function G.drop(items, n) return G.slice(items, math.max(0, floor(n))) end
+function G.chunk(items, size)
+    size = floor(size)
+    if size < 1 then fail("chunk() needs a size of 1 or more") end
+    items = sequence(items)
+    local out = {}
+    for start = 1, #items, size do
+        local piece = {}
+        for index = start, math.min(#items, start + size - 1) do piece[#piece + 1] = items[index] end
+        out[#out + 1] = piece
+    end
+    return out
+end
+function G.enumerate(items)
+    local out = {}
+    for index, value in ipairs(sequence(items)) do out[index] = {index - 1, value} end
+    return out
+end
+local function best_by(items, f, better)
+    items = sequence(items)
+    if #items == 0 then return nil end
+    local best, key = items[1], f(items[1])
+    for index = 2, #items do
+        local value = f(items[index])
+        if better(value, key) then best, key = items[index], value end
+    end
+    return best
+end
+function G.minby(items, f) return best_by(items, f, function(a, b) return a < b end) end
+function G.maxby(items, f) return best_by(items, f, function(a, b) return a > b end) end
+function G.groupby(items, f)
+    local groups = new_map()
+    for _, value in ipairs(sequence(items)) do
+        local key = str(f(value))
+        local group = rawget(groups, key)
+        if group == nil then
+            group = {}
+            groups[key] = group
+        end
+        group[#group + 1] = value
+    end
+    return groups
+end
+function G.without(items, value)
+    local out = {}
+    for _, entry in ipairs(sequence(items)) do
+        if not eq(entry, value) then out[#out + 1] = entry end
+    end
+    return out
+end
+function G.fill(value, count)
+    local out = {}
+    for index = 1, math.max(0, floor(count)) do
+        if is_list(value) then
+            out[index] = G.slice(value)
+        elseif is_map(value) then
+            out[index] = G.merge(value, new_map())
+        else
+            out[index] = value
+        end
+    end
+    return out
+end
+function G.merge(first, second)
+    local merged = new_map()
+    for _, source_map in ipairs({first, second}) do
+        for _, key in ipairs(map_keys(source_map)) do merged[key] = rawget(source_map, key) end
+    end
+    return merged
+end
+function G.get(container, key, default)
+    if is_map(container) then
+        local found = rawget(container, key)
+        if found == nil then found = rawget(container, str(key)) end
+        if found == nil then return default end
+        return found
+    end
+    if type(key) ~= "number" or key ~= floor(key) then return default end
+    local items = sequence(container)
+    local index = key < 0 and #items + key + 1 or key + 1
+    if index >= 1 and index <= #items then return items[index] end
+    return default
+end
+function G.entries(map)
+    local out = {}
+    for _, key in ipairs(map_keys(map)) do out[#out + 1] = {key, rawget(map, key)} end
+    return out
+end
+function G.frompairs(pairs_list)
+    local made = new_map()
+    for _, pair in ipairs(pairs_list) do
+        if not is_list(pair) or #pair ~= 2 then fail("frompairs() needs a list of [name, value] pairs") end
+        made[type(pair[1]) == "string" and pair[1] or str(pair[1])] = pair[2]
+    end
+    return made
+end
+function G.commas(x)
+    local text = str(x)
+    local sign, rest = text:match("^(%-?)(.*)$")
+    local digits, tail = rest:match("^(%d+)(.*)$")
+    if not digits or (tail ~= "" and tail:sub(1, 1) ~= ".") then return text end
+    local grouped = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    return sign .. grouped .. tail
+end
+function G.ordinal(n)
+    n = floor(n)
+    local last_two, last = abs(n) % 100, abs(n) % 10
+    local suffix = "th"
+    if last_two < 11 or last_two > 13 then
+        suffix = ({[1] = "st", [2] = "nd", [3] = "rd"})[last] or "th"
+    end
+    return str(n) .. suffix
+end
+function G.plural(count, word, many)
+    if count == 1 then return str(count) .. " " .. str(word) end
+    return str(count) .. " " .. (many == nil and (str(word) .. "s") or str(many))
+end
+function G.wraptext(text, width)
+    width = floor(width)
+    if width < 1 then fail("wraptext() needs a width of 1 or more") end
+    local found = {}
+    for _, paragraph in ipairs(plain_split(str(text), "\n")) do
+        local line = ""
+        for _, word in ipairs(words(paragraph)) do
+            while #chars(word) > width do
+                if line ~= "" then found[#found + 1] = line; line = "" end
+                local letters = chars(word)
+                found[#found + 1] = concat(letters, "", 1, width)
+                word = concat(letters, "", width + 1, #letters)
+            end
+            if word ~= "" then
+                if line == "" then
+                    line = word
+                elseif #chars(line) + 1 + #chars(word) <= width then
+                    line = line .. " " .. word
+                else
+                    found[#found + 1] = line
+                    line = word
+                end
+            end
+        end
+        found[#found + 1] = line
+    end
+    return found
+end
+local timers = {}
+function G.cooldown(name, seconds)
+    local key, time_now = "cooldown:" .. str(name), now()
+    if timers[key] == nil or time_now - timers[key] >= seconds then
+        timers[key] = time_now
+        return true
+    end
+    return false
+end
+function G.pulse(name, seconds)
+    local key, time_now = "pulse:" .. str(name), now()
+    if timers[key] == nil then
+        timers[key] = time_now
+        return false
+    end
+    if time_now - timers[key] >= seconds then
+        timers[key] = time_now
+        return true
+    end
+    return false
+end
+function G.after(name, seconds)
+    local key, time_now = "after:" .. str(name), now()
+    if timers[key] == nil then
+        timers[key] = time_now
+        return seconds <= 0
+    end
+    return time_now - timers[key] >= seconds
+end
+
 -- ----- json -------------------------------------------------------------------------------------------------------------------------
 local function storable(value, depth)
     depth = depth or 0
@@ -1481,6 +1727,25 @@ local function rgb(value)
     return 240 / 255, 240 / 255, 240 / 255
 end
 
+local function channels(value)
+    if is_list(value) then return {clamp(floor(value[1]), 0, 255), clamp(floor(value[2]), 0, 255), clamp(floor(value[3]), 0, 255)} end
+    local text = str(value):lower()
+    if COLORS[text] then return {COLORS[text][1], COLORS[text][2], COLORS[text][3]} end
+    local hex = text:match("^#(%x+)$")
+    if hex and #hex == 3 then hex = hex:gsub("%x", "%0%0") end
+    if hex and #hex == 6 then
+        return {tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16)}
+    end
+    fail("'" .. str(value) .. "' is not a colour. use a name like red, #ff8800 or [255, 136, 0]")
+end
+function G.mixcolor(a, b, t)
+    local one, two = channels(a), channels(b)
+    t = clamp(t, 0, 1)
+    return {floor(one[1] + (two[1] - one[1]) * t + 0.5), floor(one[2] + (two[2] - one[2]) * t + 0.5),
+        floor(one[3] + (two[3] - one[3]) * t + 0.5)}
+end
+function G.randomcolor() return G.hsv(math.random() * 360, 0.65, 0.95) end
+
 local function font(size)
     local pixels = math.max(6, floor(size * 0.72 + 0.5))
     if not fonts[pixels] then
@@ -1540,14 +1805,38 @@ function G.clear() end
 local function add(name, kind, parts)
     name = str(name)
     open_window()
-    if objects[name] == nil then
+    local old = objects[name]
+    if old == nil then
         order[#order + 1] = name
+    else
+        for _, key in ipairs({"layer", "alpha", "fixed"}) do
+            if parts[key] == nil then parts[key] = old[key] end
+        end
     end
     parts.type = kind
     parts.color = parts.color or color
     objects[name] = parts
     return parts
 end
+
+function G.ellipse(name, x, y, w, h) add(name, "ellipse", {x = x, y = y, w = w, h = h}) end
+function G.polygon(name, points)
+    if #points % 2 == 1 then fail("polygon points come in pairs: x y x y x y") end
+    if #points < 6 then fail("a polygon needs at least three points") end
+    local left, top, right, bottom = huge, huge, -huge, -huge
+    for index = 1, #points, 2 do
+        left, right = math.min(left, points[index]), math.max(right, points[index])
+        top, bottom = math.min(top, points[index + 1]), math.max(bottom, points[index + 1])
+    end
+    local w, h = math.max(1, right - left), math.max(1, bottom - top)
+    local relative = {}
+    for index = 1, #points, 2 do
+        relative[#relative + 1] = points[index] - left
+        relative[#relative + 1] = points[index + 1] - top
+    end
+    add(name, "polygon", {x = left, y = top, w = w, h = h, pw = w, ph = h, points = relative})
+end
+
 
 local function object(name)
     name = str(name)
@@ -1626,6 +1915,116 @@ function G.focus(name)
 end
 
 local FIELD_ALIASES = {width = "w", height = "h", radius = "r", rotation = "angle"}
+-- ----- the view, effects and tweens ---------------------------------------------------------------------------------------------
+local scroll_x, scroll_y, shake, shake_x, shake_y = 0, 0, nil, 0, 0
+local particles, tweens = {}, {}
+local effects_time = now()
+local draw_alpha = 1
+function G.scroll(x, y) scroll_x, scroll_y = x, y end
+function G.scrollx() return scroll_x end
+function G.scrolly() return scroll_y end
+function G.shake(strength, seconds)
+    seconds = seconds == nil and 0.3 or seconds
+    if strength < 0 or seconds < 0 then fail("shake strength and time can't be negative") end
+    if strength > 0 and seconds > 0 then
+        shake = {strength, seconds, seconds}
+    else
+        shake, shake_x, shake_y = nil, 0, 0
+    end
+end
+function G.particles(x, y, count, speed)
+    count, speed = floor(count or 20), speed or 160
+    if count < 0 or count > 500 then fail("particles can make from 0 to 500 at a time") end
+    local r, g, b = rgb(color)
+    for _ = 1, count do
+        local angle = math.random() * math.pi * 2
+        local velocity = speed * (0.25 + math.random() * 0.75)
+        local life = 0.45 + math.random() * 0.55
+        particles[#particles + 1] = {x, y, math.cos(angle) * velocity, math.sin(angle) * velocity, life, life, r, g, b,
+            3 + math.random() * 3}
+    end
+    while #particles > 2000 do table.remove(particles, 1) end
+end
+local TWEEN_FIELDS = {x = "x", y = "y", z = "z", w = "w", width = "w", h = "h", height = "h", r = "r", radius = "r",
+    angle = "angle", rotation = "angle", opacity = "alpha", alpha = "alpha", size = "size"}
+local function apply_tween(found, key, value)
+    if (key == "x" or key == "y") and found.type == "line" then
+        found[key .. "2"] = found[key .. "2"] + value - found[key]
+    end
+    if key == "alpha" then
+        value = clamp(value, 0, 1)
+    elseif key == "w" or key == "h" or key == "r" or key == "size" then
+        value = math.max(0, value)
+    end
+    found[key] = value
+end
+function G.tween(name, field, value, seconds, easing)
+    local found = object(name)
+    local key = TWEEN_FIELDS[str(field):lower()]
+    local pictured = found.picture ~= nil
+    if key == nil or not (found[key] ~= nil or key == "alpha" or (pictured and (key == "w" or key == "h" or key == "angle"))) then
+        fail("tween can change x, y, w, h, r, angle or opacity of a " .. found.type .. ", not '" .. str(field) .. "'")
+    end
+    if seconds < 0 then fail("tween time can't be negative") end
+    easing = str(easing or "inout"):lower()
+    G.ease(0, easing)
+    local start = found[key]
+    if key == "alpha" and start == nil then start = 1 end
+    if start == nil and pictured then
+        start = key == "w" and found.picture:getWidth() or (key == "h" and found.picture:getHeight() or 0)
+    end
+    for index = #tweens, 1, -1 do
+        if tweens[index][1] == found and tweens[index][2] == key then table.remove(tweens, index) end
+    end
+    if seconds == 0 then
+        apply_tween(found, key, value)
+    else
+        tweens[#tweens + 1] = {found, key, start or 0, value, seconds, 0, easing}
+    end
+end
+function G.opacity(name, value)
+    value = clamp(value, 0, 1)
+    if name == "all" then
+        for _, found in pairs(objects) do found.alpha = value end
+        return
+    end
+    object(name).alpha = value
+end
+function G.layer(name, value) object(name).layer = value end
+function G.fixed(name) object(name).fixed = true end
+local function tick_effects()
+    local time_now = now()
+    local step = math.min(0.1, math.max(0, time_now - effects_time))
+    effects_time = time_now
+    for index = #tweens, 1, -1 do
+        local tween = tweens[index]
+        tween[6] = tween[6] + step
+        local progress = tween[5] > 0 and math.min(1, tween[6] / tween[5]) or 1
+        apply_tween(tween[1], tween[2], tween[3] + (tween[4] - tween[3]) * G.ease(progress, tween[7]))
+        if progress >= 1 then table.remove(tweens, index) end
+    end
+    local alive = {}
+    for _, particle in ipairs(particles) do
+        particle[5] = particle[5] - step
+        if particle[5] > 0 then
+            particle[1] = particle[1] + particle[3] * step
+            particle[2] = particle[2] + particle[4] * step
+            particle[4] = particle[4] + 240 * step
+            alive[#alive + 1] = particle
+        end
+    end
+    particles = alive
+    if shake then
+        shake[2] = shake[2] - step
+        if shake[2] <= 0 then
+            shake, shake_x, shake_y = nil, 0, 0
+        else
+            local strength = shake[1] * shake[2] / shake[3]
+            shake_x, shake_y = (math.random() * 2 - 1) * strength, (math.random() * 2 - 1) * strength
+        end
+    end
+end
+
 local function object_field(name, key)
     local found = object(name)
     key = FIELD_ALIASES[key] or key
@@ -1709,7 +2108,9 @@ function G.place(name, x, y)
 end
 function G.resize(name, w, h)
     local found = object(name)
-    if found.type == "circle" then
+    if found.type == "ellipse" or found.type == "polygon" then
+        found.w, found.h = w, h or w
+    elseif found.type == "circle" then
         found.r = w
     elseif found.type == "text" then
         found.size = floor(w)
@@ -1797,17 +2198,35 @@ end
 
 -- ----- drawing ---------------------------------------------------------------------------------------------------------------------
 local function set(r, g, b)
-    love.graphics.setColor(r / 255, g / 255, b / 255)
+    love.graphics.setColor(r / 255, g / 255, b / 255, draw_alpha)
+end
+local function tint(r, g, b)
+    love.graphics.setColor(r, g, b, draw_alpha)
 end
 
 local function draw_object(name, found)
     local lg = love.graphics
-    lg.setColor(rgb(found.color))
+    tint(rgb(found.color))
     local kind = found.type
     if kind == "box" then
         lg.rectangle("fill", found.x, found.y, found.w, found.h)
     elseif kind == "circle" then
         lg.circle("fill", found.x, found.y, abs(found.r))
+    elseif kind == "ellipse" then
+        lg.ellipse("fill", found.x + found.w / 2, found.y + found.h / 2, abs(found.w / 2), abs(found.h / 2))
+    elseif kind == "polygon" then
+        local sx, sy = found.w / found.pw, found.h / found.ph
+        local points = {}
+        for index = 1, #found.points, 2 do
+            points[index] = found.x + found.points[index] * sx
+            points[index + 1] = found.y + found.points[index + 1] * sy
+        end
+        local ok, triangles = pcall(love.math.triangulate, points)
+        if ok then
+            for _, triangle in ipairs(triangles) do lg.polygon("fill", triangle) end
+        else
+            lg.polygon("fill", points)
+        end
     elseif kind == "line" then
         lg.setLineWidth(found.width)
         lg.line(found.x, found.y, found.x2, found.y2)
@@ -1818,7 +2237,7 @@ local function draw_object(name, found)
         local image = found.picture
         local iw, ih = image:getWidth(), image:getHeight()
         local w, h = found.w or iw, found.h or ih
-        lg.setColor(1, 1, 1)
+        lg.setColor(1, 1, 1, draw_alpha)
         lg.draw(image, found.x + w / 2, found.y + h / 2, math.rad(found.angle or 0), w / iw, h / ih, iw / 2, ih / 2)
     elseif kind == "button" then
         local over = mouse_x >= found.x and mouse_x <= found.x + found.w and mouse_y >= found.y and
@@ -1838,7 +2257,7 @@ local function draw_object(name, found)
         local f = font(24)
         lg.setFont(f)
         if found.text ~= "" then
-            lg.setColor(rgb(found.color))
+            tint(rgb(found.color))
             lg.print(found.text, found.x + 8, found.y + (found.h - f:getHeight()) / 2)
         elseif focused ~= name then
             set(120, 120, 120)
@@ -1854,7 +2273,7 @@ local function draw_object(name, found)
         local middle = found.y + found.h / 2
         set(60, 60, 60)
         lg.rectangle("fill", found.x, middle - 3, found.w, 6)
-        lg.setColor(rgb(found.color))
+        tint(rgb(found.color))
         lg.rectangle("fill", found.x, middle - 3, found.w * share, 6)
         lg.circle("fill", found.x + found.w * share, middle, 9)
         set(200, 200, 200)
@@ -1864,7 +2283,7 @@ local function draw_object(name, found)
     elseif kind == "checkbox" then
         set(23, 23, 23)
         lg.rectangle("fill", found.x, found.y, found.w, found.h)
-        if found.checked then lg.setColor(rgb(found.color)) else set(110, 110, 110) end
+        if found.checked then tint(rgb(found.color)) else set(110, 110, 110) end
         lg.setLineWidth(2)
         lg.rectangle("line", found.x, found.y, found.w, found.h)
         if found.checked then
@@ -1920,11 +2339,41 @@ local function draw()
         lg.setFont(font(20))
         lg.print(ui_label, 32, 30)
     end
-    for _, name in ipairs(order) do
+    tick_effects()
+    local shown = {}
+    for index, name in ipairs(order) do
         local found = objects[name]
-        if found and not found.hidden then
-            draw_object(name, found)
+        if found and not found.hidden and (found.alpha == nil or found.alpha > 0) then
+            shown[#shown + 1] = {name, found, index}
         end
+    end
+    table.sort(shown, function(a, b)
+        local la, lb = a[2].layer or 0, b[2].layer or 0
+        if la == lb then return a[3] < b[3] end
+        return la < lb
+    end)
+    local ui_kinds = {button = true, textbox = true, slider = true, checkbox = true}
+    for _, entry in ipairs(shown) do
+        local name, found = entry[1], entry[2]
+        draw_alpha = found.alpha or 1
+        lg.push()
+        if not ui_kinds[found.type] and not found.fixed then
+            lg.translate(shake_x - scroll_x, shake_y - scroll_y)
+        end
+        draw_object(name, found)
+        lg.pop()
+    end
+    draw_alpha = 1
+    if #particles > 0 then
+        lg.push()
+        lg.translate(shake_x - scroll_x, shake_y - scroll_y)
+        for _, p in ipairs(particles) do
+            local fade = clamp(p[5] / p[6], 0, 1)
+            local side = math.max(1, p[10] * (0.4 + 0.6 * fade))
+            lg.setColor(p[7], p[8], p[9], fade)
+            lg.rectangle("fill", p[1] - side / 2, p[2] - side / 2, side, side)
+        end
+        lg.pop()
     end
     if overlay then
         draw_overlay()
@@ -2224,6 +2673,39 @@ function G.volume(value)
     if song then
         song:setVolume(sound_volume)
     end
+end
+local WAVES = {square = true, sine = true, triangle = true, saw = true, noise = true}
+local beeps = {}
+function G.beep(frequency, seconds, wave)
+    seconds, wave = seconds or 0.15, str(wave or "square"):lower()
+    if frequency < 20 or frequency > 20000 then
+        fail("beep frequency must be from 20 to 20000 (440 is the a above middle c)")
+    end
+    if seconds <= 0 or seconds > 5 then fail("a beep can last from just above 0 up to 5 seconds") end
+    if not WAVES[wave] then fail("'" .. wave .. "' is not a wave. try: square, sine, triangle, saw, noise") end
+    if not has_love then return end
+    local key = frequency .. ":" .. seconds .. ":" .. wave
+    if not beeps[key] then
+        local rate = 44100
+        local count = math.max(1, floor(rate * seconds))
+        local data = love.sound.newSoundData(count, rate, 16, 1)
+        for index = 0, count - 1 do
+            local phase = (index * frequency / rate) % 1
+            local value
+            if wave == "sine" then value = math.sin(2 * math.pi * phase)
+            elseif wave == "square" then value = phase < 0.5 and 1 or -1
+            elseif wave == "triangle" then value = 4 * abs(phase - 0.5) - 1
+            elseif wave == "saw" then value = 2 * phase - 1
+            else value = math.random() * 2 - 1 end
+            local envelope = math.min(1, index / (rate * 0.003), (count - index) / (rate * 0.02))
+            data:setSample(index, value * 0.22 * envelope)
+        end
+        beeps[key] = love.audio.newSource(data, "static")
+    end
+    local effect = beeps[key]:clone()
+    effect:setVolume(sound_volume)
+    effect:play()
+    playing[#playing + 1] = effect
 end
 
 -- ----- starting ------------------------------------------------------------------------------------------------------------------------

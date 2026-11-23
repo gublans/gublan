@@ -18,11 +18,11 @@ from tkinter import filedialog
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
 
 from . import blocks as blocks_module
-from . import collab, config, exporter, guard, plugins, textfiles, theme, updater, version
+from . import collab, config, exporter, guard, plugins, sounds, textfiles, theme, updater, version
 from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
-from .dialogs import (CommandPalette, ConvertDialog, ExportDialog, McpDialog, SettingsDialog, SpriteEditor,
-                      TranslateDialog, WelcomePage, ask, confirm, message)
+from .dialogs import (STYLE_DEMO, CommandPalette, ConvertDialog, ExportDialog, GameStyleDialog, McpDialog,
+                      SettingsDialog, SpriteEditor, TranslateDialog, WelcomePage, ask, confirm, message)
 from .editor import CodeEditor
 from .presence import StudioPresence
 from .panels import (AssetsPanel, FilesPanel, HelpPanel, OutlinePanel, OutputPanel, ProblemsPanel,
@@ -561,6 +561,18 @@ class GublanStudio:
                 ("sprite painter...", lambda: self.sprite_editor(None), ""),
                 ("find any action...", self.command_palette, "ctrl+shift+p"),
                 "-",
+                ("game window and popups...", self.open_game_style, ""),
+                ("theme", [{"label": name, "command": lambda n=name: self.set_option("theme", n),
+                            "checked": theme.THEME_NAME == name} for name in theme.theme_names()]),
+                ("accent colour", [{"label": name, "command": lambda c=color: self.set_option("accent_color", c),
+                                    "checked": str(self.settings.get("accent_color") or "").lower() == color}
+                                   for name, color in theme.accent_choices()]),
+                ("animation speed", [{"label": name, "command": lambda n=name: self.set_option("animation_speed", n),
+                                      "checked": self.settings.get("animation_speed", "normal") == name}
+                                     for name in ("slow", "normal", "fast")]),
+                {"label": "sounds", "command": lambda: self.set_option("sounds", not self.settings.get("sounds", True)),
+                 "checked": bool(self.settings.get("sounds", True))},
+                "-",
                 ("how much help", [{"label": name, "command": lambda n=name: self.set_level(n),
                                     "checked": self.settings.get("level") == name}
                                    for name in ("beginner", "standard", "expert")]),
@@ -733,8 +745,9 @@ class GublanStudio:
             self._paint_activity(None)
             return
         if not self.side_visible():
-            self.hpanes.add(self.side, before=self.vpanes, width=px(self.settings.get("side_width", 250)),
-                            minsize=px(170), stretch="never")
+            width = px(self.settings.get("side_width", 250))
+            self.hpanes.add(self.side, before=self.vpanes, width=width, minsize=px(170), stretch="never")
+            self._slide_pane(self.hpanes, width, px(170), from_end=False)
         for panel_name, panel in self.side_panels.items():
             if panel_name == name:
                 panel.pack(fill="both", expand=True)
@@ -746,6 +759,39 @@ class GublanStudio:
         self._paint_activity(name)
         if name == "outline" and self.current:
             self.side_panels["outline"].show(self.current.editor.symbols)
+
+    def _slide_pane(self, panes, size, minsize, from_end):
+        """grow a panel that was just shown out of the edge of its paned window (the side bar from the left,
+        the bottom panel from below)."""
+        if not theme.MOTION or not self.root.winfo_viewable():
+            return
+        vertical = str(panes.cget("orient")) == "vertical"
+        self.root.update_idletasks()
+        total = panes.winfo_height() if vertical else panes.winfo_width()
+        if total < size * 2:
+            return
+        pane = self.bottom if from_end else self.side
+        panes.paneconfigure(pane, minsize=0)
+
+        def place(amount):
+            shown = max(1, int(size * amount))
+            where = total - shown if from_end else shown
+            try:
+                if vertical:
+                    panes.sash_place(0, 0, where)
+                else:
+                    panes.sash_place(0, where, 0)
+            except tk.TclError:
+                pass
+
+        def done():
+            try:
+                panes.paneconfigure(pane, minsize=minsize)
+            except tk.TclError:
+                pass
+
+        place(0.0)
+        theme.animate(panes, 190, place, done=done)
 
     def _paint_activity(self, active):
         for name, button in self.activity_buttons.items():
@@ -770,14 +816,19 @@ class GublanStudio:
             self.settings["show_bottom"] = False
             return
         if not self.bottom_visible():
-            self.vpanes.add(self.bottom, height=px(self.settings.get("bottom_height", 210)), minsize=px(90),
-                            stretch="never")
+            height = px(self.settings.get("bottom_height", 210))
+            self.vpanes.add(self.bottom, height=height, minsize=px(90), stretch="never")
+            self._slide_pane(self.vpanes, height, px(90), from_end=True)
         for panel_name, panel in self.bottom_panels.items():
             label_widget, line = self.bottom_tabs[panel_name]
             if panel_name == name:
                 panel.pack(fill="both", expand=True)
                 label_widget.configure(fg=TEXT)
-                line.configure(bg=MOSS_LIGHT)
+                if panel_name != getattr(self, "bottom_name", None) and theme.MOTION:
+                    theme.tween_colors([line], "bg", PANEL, MOSS_LIGHT, 220)
+                    theme.tween_colors([label_widget], "fg", MUTED, TEXT, 220)
+                else:
+                    line.configure(bg=MOSS_LIGHT)
             else:
                 panel.pack_forget()
                 label_widget.configure(fg=MUTED)
@@ -952,6 +1003,7 @@ class GublanStudio:
             self.stop()
         index = self.docs.index(doc)
         self.docs.remove(doc)
+        sounds.play("close")
         if self.live is not None:
             self.live.doc_closed(doc)
         doc.tab["cell"].destroy()
@@ -1215,6 +1267,7 @@ class GublanStudio:
         replace = current if current and not current.path and not current.dirty and not current.editor.get() \
             else None
         doc = self.new_tab(text, path=path)
+        sounds.play("open")
         doc.encoding = encoding
         doc.disk_stamp = disk_stamp(path)
         if replace is not None:
@@ -1305,6 +1358,15 @@ class GublanStudio:
         self._paint_tab(doc)
         self.update_title()
         self.flash(f"saved {os.path.basename(path)}")
+        sounds.play("save")
+        if theme.MOTION and doc.tab:
+            # the tab glows for a moment so you can see the save happened
+            widgets = [doc.tab[key] for key in ("cell", "row", "name")]
+            try:
+                rest = doc.tab["cell"].cget("bg")
+                theme.flash(widgets, "bg", rest, theme.mix(theme.MOSS_DARK, rest, 0.15), 650)
+            except tk.TclError:
+                pass
         return True
 
     def save_all(self):
@@ -1447,12 +1509,49 @@ class GublanStudio:
                 return
             except tk.TclError:
                 self.settings_dialog = None
+        sounds.play("open")
         dialog = SettingsDialog(self.root, self.settings, lambda settings: self.apply_settings(settings),
                                 presence=self.presence, app=self)
         self.settings_dialog = dialog
         dialog.bind("<Destroy>", lambda e: setattr(self, "settings_dialog", None) if e.widget is dialog else None,
                     add="+")
         dialog.show(width=px(600), height=px(min(760, self.root.winfo_screenheight() - 120)), modal=False)
+
+    def open_game_style(self):
+        """tools > game window and popups."""
+        existing = getattr(self, "game_style_dialog", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    return
+            except tk.TclError:
+                pass
+        sounds.play("open")
+        dialog = GameStyleDialog(self.root, self.settings, config.save, app=self)
+        self.game_style_dialog = dialog
+        dialog.show(width=px(1000), height=px(min(720, self.root.winfo_screenheight() - 120)), modal=False)
+
+    def try_game_style(self, style):
+        """open a small game that shows a popup and a question in the given look."""
+        if self.running():
+            self.flash("stop the running program first, then try the look")
+            return
+        demo = getattr(self, "style_demo", None)
+        if demo is not None and demo.is_alive():
+            self.flash("the preview game window is already open")
+            return
+        sounds.play("run")
+
+        def work():
+            runtime = GublanRuntime(onlog=lambda *_: None, onerror=lambda *_: None, style=style)
+            try:
+                runtime.run(STYLE_DEMO)
+            except Exception as err:  # noqa: BLE001 - a broken preview must not take the studio down
+                guard.log_error(f"game style preview: {type(err).__name__}: {err}")
+
+        self.style_demo = threading.Thread(target=work, daemon=True)
+        self.style_demo.start()
 
     def open_translate(self):
         doc = self.current
@@ -1536,6 +1635,7 @@ class GublanStudio:
                 where = f" (line {result['line']})" if result.get("line") else ""
                 self.output.write(f"fail  {result['name']}{where}: {lower(result['message'])}", "error")
         summary = f"{len(results) - len(failed)} passed, {len(failed)} failed"
+        sounds.play("error" if failed else "pass")
         self.output.write(summary, "error" if failed else "good")
         self.set_state(summary, ERROR if failed else MOSS_LIGHT)
         if failed and doc in self.docs and failed[0].get("line") and not failed[0].get("file"):
@@ -1592,6 +1692,7 @@ class GublanStudio:
         """build a .exe in the calling thread and report back through exportfinished on the tk thread."""
         options = dict(options or {})
         options.update(kwargs)
+        options.setdefault("style", (getattr(self, "settings", None) or {}).get("game_style") or None)
         try:
             result = exporter.build(source, output, python, base_dir or os.getcwd(), self.runtime._expand_includes,
                                     progress=progress, **options)
@@ -1610,6 +1711,7 @@ class GublanStudio:
             alive = False
         if alive:
             dialog.finished(output, error)
+        sounds.play("error" if error else "done")
         if error:
             self.output.write(f"export failed: {lower(error)}", "error")
             if not alive:
@@ -1644,6 +1746,10 @@ class GublanStudio:
         if not source.strip():
             self.flash("this program is empty. try print hello")
             return
+        demo = getattr(self, "style_demo", None)
+        if demo is not None and demo.is_alive():
+            self.flash("close the game window preview first")
+            return
         if self.settings.get("check_before_run", True):
             items = analyze_source(source, warnings=bool(self.settings.get("warnings", True)))
             doc.analysed_version = doc.editor.version
@@ -1653,6 +1759,7 @@ class GublanStudio:
             errors = [item for item in items if item.get("severity", "error") == "error"]
             if errors:
                 first = errors[0]
+                sounds.play("error")
                 self.show_bottom_panel("problems")
                 if first.get("line"):
                     doc.editor.goto_line(first["line"], select_line=False)
@@ -1680,7 +1787,7 @@ class GublanStudio:
                                 base_dir=base_dir, onerror=self._from_error, hold_window=True,
                                 oninput=self._from_input, onpopup=self._from_popup,
                                 onpresence=self._from_presence, save_name=os.path.splitext(doc.name)[0],
-                                fetchfile=fetchfile)
+                                fetchfile=fetchfile, style=self.settings.get("game_style") or None)
         self.active_runtime = runtime
         self.run_wall_started = time.time()
         self.presence.told_off = False
@@ -1690,6 +1797,7 @@ class GublanStudio:
         self.run_thread = threading.Thread(target=self._run_worker, args=(runtime, source, base_dir), daemon=True)
         self.run_active = True
         self.run_thread.start()
+        sounds.play("run")
         self.set_state("running", MOSS_LIGHT)
         self.update_run_controls()
         if self.settings.get("show_variables_on_run") and self.settings.get("show_bottom", True):
@@ -1816,7 +1924,9 @@ class GublanStudio:
                 doc.editor.set_diagnostics(doc.diagnostics)
                 if doc is self.current:
                     doc.editor.goto_line(line)
+                    doc.editor.flash_line(line, "error")
                     self._show_problems(doc)
+            sounds.play("error")
             self.show_bottom_panel("output")
             self.set_state(f"stopped: error on line {line}" if line else "stopped with an error", ERROR)
         elif kind == "input":
@@ -1869,6 +1979,7 @@ class GublanStudio:
 
     def _show_popup(self, text, holder):
         self.set_state("showing a message", NUMBER)
+        sounds.play("notify")
         message(self.root, self.run_doc.name if self.run_doc else "message", text)
         holder["event"].set()
         if self.running():
@@ -1891,9 +2002,11 @@ class GublanStudio:
         elif self.stop_event.is_set():
             self.output.write("stopped", "info")
             self.set_state("stopped", MUTED)
+            sounds.play("stop")
         else:
             self.output.write(f"finished in {seconds:.2f} s", "info")
             self.set_state("finished", MOSS_LIGHT)
+            sounds.play("done")
         self.paused = False
         self.update_run_controls()
 
@@ -2002,8 +2115,18 @@ class GublanStudio:
             before = bg
         if getattr(self, "_status_fade", None):
             self._status_fade()
-        self._status_fade = theme.tween_colors(self.status_widgets, "bg", before, bg, 260)
+        if getattr(self, "_status_pulse", None):
+            self._status_pulse()
+            self._status_pulse = None
+        if color == ERROR and not running and before == bg:
+            # an error lights the bar up red for a moment
+            self._status_fade = theme.flash(self.status_widgets, "bg", bg, theme.mix(ERROR, bg, 0.6), 900)
+        else:
+            self._status_fade = theme.tween_colors(self.status_widgets, "bg", before, bg, 260)
         self.status_state.configure(fg=TEXT if running else color)
+        if running and not self.paused:
+            # the dot and word breathe while a program runs
+            self._status_pulse = theme.pulse(self.status_state, "fg", TEXT, MOSS_LIGHT, period=1500)
         self.presence.refresh()
 
     def update_run_controls(self):
@@ -2095,8 +2218,14 @@ class GublanStudio:
     def apply_settings(self, settings, save=True):
         self.settings = settings
         theme.MOTION = bool(settings.get("animations", True))
+        theme.SPEED = theme.SPEEDS.get(str(settings.get("animation_speed", "normal")), 1.0)
+        sounds.configure(settings)
+        accent = str(settings.get("accent_color") or "").lower()
+        accent = accent if theme._is_color(accent) else ""
         wanted = str(settings.get("theme") or theme.DEFAULT_THEME).lower()
-        if hasattr(self, "tab_strip") and wanted != theme.THEME_NAME and theme.theme_spec(wanted) is not None:
+        if hasattr(self, "tab_strip") and (wanted != theme.THEME_NAME or accent != theme.ACCENT) and \
+                theme.theme_spec(wanted) is not None:
+            theme.ACCENT = accent
             self.switch_theme(wanted)
         for doc in self.docs:
             doc.editor.settings = settings
@@ -2358,7 +2487,9 @@ class GublanStudio:
         self.flash(f"text size {size}")
 
     def flash(self, text, seconds=6):
-        self.status_message.configure(text=lower(text)[:160])
+        if getattr(self, "_message_typing", None):
+            self._message_typing()
+        self._message_typing = theme.type_in(self.status_message, lower(text)[:160], duration=220)
         if self.status_message_job:
             self.root.after_cancel(self.status_message_job)
         self.status_message_job = self.root.after(int(seconds * 1000),
