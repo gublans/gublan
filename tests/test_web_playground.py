@@ -1,5 +1,6 @@
-"""tests for the online playground in web/: the site builds, lists only files that exist, and gublan's checker and
-javascript translator work without pygame or pyopengl, the way they run in the browser."""
+"""tests for gublan.xyz in web/: the site builds with its home page at the top and the playground in /playground/,
+the playground lists only files that exist, and gublan's checker and javascript translator work without pygame or
+pyopengl, the way they run in the browser."""
 import json
 import os
 import subprocess
@@ -17,15 +18,25 @@ class PlaygroundSiteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
-        cls.site, cls.manifest = build_site.build(os.path.join(cls.temp.name, "site"))
+        cls.root, cls.manifest = build_site.build(os.path.join(cls.temp.name, "site"))
+        cls.site = os.path.join(cls.root, build_site.PLAYGROUND)
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
 
     def test_page_files_are_there(self):
-        for name in ["index.html", "playground.js", "playground.css", "bridge.py", "logo.png", ".nojekyll"]:
+        for name in ["index.html", "playground.js", "playground.css", "bridge.py", "logo.png", "manifest.json"]:
             self.assertTrue(os.path.isfile(os.path.join(self.site, name)), name)
+
+    def test_home_page_is_at_the_top(self):
+        for name in ["index.html", "home.css", "home.js", "logo.png", ".nojekyll"]:
+            self.assertTrue(os.path.isfile(os.path.join(self.root, name)), name)
+        with open(os.path.join(self.root, "index.html"), encoding="utf-8") as handle:
+            page = handle.read()
+        self.assertNotIn("{{", page)
+        self.assertIn(self.manifest["version"], page)
+        self.assertIn('href="playground/"', page)
 
     def test_manifest_lists_real_files(self):
         for name in self.manifest["python"]:

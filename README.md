@@ -9,8 +9,8 @@ English-like commands, then run them in the built-in editor. Gublan Studio inclu
 2D and 3D graphics, debugging tools, live sessions for coding together, and converters to and from Python,
 JavaScript, and Lua.
 
-[Try it in your browser](https://gublans.github.io/gublan/) ·
-[Download for Windows](https://github.com/gublans/gublan/releases) ·
+[Website](https://gublan.xyz/) · [Try it in your browser](https://gublan.xyz/playground/) ·
+[Download for Windows](https://gublan.xyz/#download) ·
 [Language reference](docs/COMMANDS.md) · [Examples](examples/)
 
 ## Features
@@ -185,7 +185,7 @@ JavaScript, and Lua.
 
 ## Try it online
 
-The [Gublan playground](https://gublans.github.io/gublan/) runs Gublan in a web browser, with nothing to
+The [Gublan playground](https://gublan.xyz/playground/) runs Gublan in a web browser, with nothing to
 install. Write a program or open an example, then press **Run** (or `Ctrl+Enter`). Problems show up while you
 type. **Share** copies a link that contains your program (or your whole project), and the **JavaScript** tab
 shows what your program turns into. Press `Ctrl+Shift+P` to search every action, and `Ctrl+,` for settings.
@@ -195,15 +195,16 @@ The playground runs 2D games, text programs, keyboard and mouse input, buttons, 
 Studio.
 
 It uses the same checker and translator as Gublan Studio's JavaScript export, running in the browser through
-[Pyodide](https://pyodide.org), so it always matches the current language. The page lives in `web/`. To try it
-locally:
+[Pyodide](https://pyodide.org), so it always matches the current language. The website lives in `web/`: the home
+page in `web/home/` (published at <https://gublan.xyz/>) and the playground in `web/playground/` (published at
+<https://gublan.xyz/playground/>). To try it locally:
 
 ```powershell
 py web/build_site.py
 py -m http.server -d _site
 ```
 
-Then open <http://localhost:8000>. Every push to `main` that changes the language or the page publishes it
+Then open <http://localhost:8000> for the home page, or <http://localhost:8000/playground/>. Every push to `main` that changes the language or the page publishes it
 again through `.github/workflows/pages.yml`. To turn this on the first time, open the repository's
 **Settings > Pages** and set **Source** to **GitHub Actions**.
 
@@ -392,6 +393,6 @@ py -m unittest discover -s tests
 | `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
 | `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`), plugins (`plugins.py`), crash protection and recovery (`guard.py`), and file reading (`textfiles.py`) |
 | `gublancli.py` | Command-line interface |
-| `web/` | Online playground, published to GitHub Pages by `.github/workflows/pages.yml` |
+| `web/` | The website: home page (`web/home/`) and online playground (`web/playground/`), published to GitHub Pages by `.github/workflows/pages.yml` |
 | `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
 | `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |

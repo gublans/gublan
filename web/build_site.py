@@ -1,12 +1,16 @@
-"""build the online playground into a folder (default: _site) ready for github pages.
+"""build gublan.xyz into a folder (default: _site) ready for github pages.
 
     python web/build_site.py            # writes _site/
     python web/build_site.py out        # writes out/
     python -m http.server -d _site      # then open http://localhost:8000 to try it
 
-the page itself lives in web/. this copies it together with the real gublan files it needs (the checker,
-the javascript translator, the javascript runtime, the modules and the examples), so the website always
-runs the same language as the studio. nothing in this folder is used by the windows app or the installer.
+the site has two parts:
+    /             the home page (web/home/): intro, downloads and live github numbers
+    /playground/  the online playground (web/playground/)
+
+the playground is copied together with the real gublan files it needs (the checker, the javascript translator,
+the javascript runtime, the modules and the examples), so the website always runs the same language as the studio.
+nothing in this folder is used by the windows app or the installer.
 """
 import ast
 import json
@@ -17,7 +21,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
+PLAYGROUND = "playground"  # the playground's folder on the site: gublan.xyz/playground/
 
+HOME_FILES = ["index.html", "home.css", "home.js"]
 PAGE_FILES = ["index.html", "playground.css", "playground.js", "bridge.py"]
 PYTHON_FILES = ["gublancore.py", "gublantranslate.py", "studio/__init__.py", "studio/version.py"]
 OTHER_FILES = ["runtimes/gublan_runtime.js", "logo.png", "logo.ico"]
@@ -100,14 +106,28 @@ def _looks():
     return themes, accents, game
 
 
-def build(out):
-    out = os.path.abspath(out)
-    if os.path.isdir(out):
-        shutil.rmtree(out)
-    os.makedirs(out)
+def _version():
+    with open(os.path.join(ROOT, "studio", "version.py"), "r", encoding="utf-8") as handle:
+        return re.search(r'VERSION\s*=\s*"([^"]+)"', handle.read()).group(1)
 
+
+def _home(out, version):
+    """the home page, with the version filled in so it is right even before github's numbers load."""
+    for name in HOME_FILES:
+        with open(os.path.join(WEB, "home", name), "r", encoding="utf-8") as handle:
+            text = handle.read()
+        if name.endswith(".html"):
+            text = text.replace("{{VERSION_SLUG}}", version.replace(".", "")).replace("{{VERSION}}", version)
+        with open(os.path.join(out, name), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    _copy("logo.png", out)
+    _copy("logo.ico", out)
+
+
+def _playground(out, version):
+    out = os.path.join(out, PLAYGROUND)
     for name in PAGE_FILES:
-        _copy(os.path.join("web", name), out, name)
+        _copy(os.path.join("web", PLAYGROUND, name), out, name)
     for relative in PYTHON_FILES:
         _copy(relative, out, os.path.join("gublan", relative))
     for relative in OTHER_FILES:
@@ -126,9 +146,6 @@ def build(out):
         examples.append({"file": "examples/" + os.path.basename(path), "title": _title(path),
                          "web": not _uses_3d(path)})
 
-    with open(os.path.join(ROOT, "studio", "version.py"), "r", encoding="utf-8") as handle:
-        version = re.search(r'VERSION\s*=\s*"([^"]+)"', handle.read()).group(1)
-
     themes, accents, game = _looks()
     manifest = {
         "version": version,
@@ -140,6 +157,18 @@ def build(out):
     }
     with open(os.path.join(out, "manifest.json"), "w", encoding="utf-8", newline="\n") as handle:
         json.dump(manifest, handle, indent=2)
+    return manifest
+
+
+def build(out):
+    """build the whole site into out. gives back (out, the playground's manifest)."""
+    out = os.path.abspath(out)
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(out)
+    version = _version()
+    _home(out, version)
+    manifest = _playground(out, version)
     # github pages would otherwise run jekyll, which hides files and folders that start with an underscore
     open(os.path.join(out, ".nojekyll"), "w").close()
     return out, manifest
@@ -147,4 +176,5 @@ def build(out):
 
 if __name__ == "__main__":
     folder, info = build(sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "_site"))
-    print(f"built the gublan {info['version']} playground in {folder} ({len(info['examples'])} examples)")
+    print(f"built gublan.xyz ({info['version']}) in {folder}: the home page and /{PLAYGROUND}/ "
+          f"with {len(info['examples'])} examples")
