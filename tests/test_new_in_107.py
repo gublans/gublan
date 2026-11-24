@@ -57,9 +57,9 @@ def translated_output(source, language, command):
 
 
 class VersionTests(unittest.TestCase):
-    def test_version_is_107(self):
-        self.assertEqual(version.VERSION, "1.0.7")
-        self.assertEqual(gublanmcp._version(), "1.0.7")
+    def test_version_is_at_least_107(self):
+        self.assertGreaterEqual(tuple(int(part) for part in version.VERSION.split(".")), (1, 0, 7))
+        self.assertEqual(gublanmcp._version(), version.VERSION)
 
     def test_new_settings_have_defaults(self):
         for key in ("smooth_caret", "caret_style", "caret_motion", "caret_blink", "caret_width", "typing_effect",

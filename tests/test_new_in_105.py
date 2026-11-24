@@ -351,8 +351,12 @@ class ThemeTests(unittest.TestCase):
         self.folder = tempfile.mkdtemp(prefix="gublan_themes_")
         self.patch = patch.object(config, "settings_folder", lambda: self.folder)
         self.patch.start()
+        # the accent colour was read from this computer's real settings.json when theme was first imported
+        self.accent = patch.object(theme, "ACCENT", "")
+        self.accent.start()
 
     def tearDown(self):
+        self.accent.stop()
         self.patch.stop()
         theme.apply_theme(self.before)
         shutil.rmtree(self.folder, ignore_errors=True)
