@@ -123,6 +123,19 @@ kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid var(--border);
 .brand img { transition: transform calc(.4s * var(--speed)) var(--spring); }
 .brand:hover img { transform: rotate(-8deg) scale(1.08); }
 .brand em { font-style: normal; font-weight: 400; color: var(--muted); }
+
+/* links to the rest of gublan.xyz, next to the logo */
+.site { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.site-tabs { display: flex; gap: 2px; }
+.site-tabs a {
+  padding: 5px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px;
+  transition: background-color calc(.15s * var(--speed)), color calc(.15s * var(--speed));
+}
+.site-tabs a:hover { background: var(--hover); color: var(--text); }
+.site-tabs a[aria-current="page"] { background: var(--panel-alt); color: var(--text); }
+.site-tabs a:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
+@media (max-width: 1180px) { .site-tabs a[href^="https:"] { display: none; } }
+@media (max-width: 1040px) { .site-tabs { display: none; } }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 
 button, select, .download {

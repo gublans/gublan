@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gublan: make games in plain words</title>
+<meta name="description" content="Gublan is a small programming language and studio for beginners and games. Write English-like commands, press run, and play. Free for Windows, or try it in your browser.">
+<meta property="og:title" content="Gublan">
+<meta property="og:description" content="A small programming language and studio for beginners and games.">
+<meta property="og:image" content="logo.png">
+<link rel="icon" href="logo.png">
+<script>
+  // share links from before the playground moved (gublan.xyz/#z=...) open in the playground
+  if (/^#[ztpq]=/.test(location.hash)) location.replace("playground/" + location.hash);
+</script>
+<link rel="stylesheet" href="home.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="./" aria-label="Gublan home">
+      <img src="logo.png" alt="" width="32" height="32">
+      <span>Gublan</span>
+    </a>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#top" data-tab="top" aria-current="true">Home</a>
+      <a href="#features" data-tab="features">Features</a>
+      <a href="#download" data-tab="download">Download</a>
+      <a href="#github" data-tab="github">GitHub</a>
+      <a href="playground/" class="tab-play">Playground</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero wrap" id="top">
+    <div class="hero-text">
+      <p class="eyebrow"><span class="pill">v<span data-stat="version">{{VERSION}}</span></span> Free for Windows · Runs in your browser</p>
+      <h1>Make games in <span class="hl">plain words.</span></h1>
+      <p class="lead">Gublan is a small programming language and studio for beginners. Write short, English-like
+        commands, press run, and play what you made, in 2D or 3D, as code or as blocks.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/gublans/gublan/releases/latest/download/GublanStudioSetup.exe" data-download>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3.5-3L8 10.5 11.5 7M3 13.5h10"/></svg>
+          Download for Windows
+        </a>
+        <a class="btn" href="playground/">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8v10.4L13 8z"/></svg>
+          Try it in your browser
+        </a>
+      </div>
+      <p class="meta" id="hero-meta">Gublan Studio <span data-stat="version">{{VERSION}}</span><span data-stat="size-dot"></span> · updates itself</p>
+    </div>
+
+    <figure class="code-card" aria-label="An example Gublan program">
+      <div class="code-head">
+        <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="file">coin.gubl</span>
+        <a class="run" id="run-snippet" href="playground/">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8v10.4L13 8z"/></svg>Run it
+        </a>
+      </div>
+      <pre class="code" id="snippet">// coin catcher: catch the falling coins with the arrow keys
+window 640 480 coin catcher
+mode 2d
+background navy
+color moss
+box player 290 440 60 16
+color gold
+circle coin 320 0 10
+score = 0
+coinx = 320
+coiny = 0
+text hud 10 10 score {score}
+
+function new_coin
+    coinx = random(20, 620)
+    coiny = 0
+end
+
+forever
+    if keydown("left")
+        move player {-400 * dt} 0
+    end
+    if keydown("right")
+        move player {400 * dt} 0
+    end
+    coiny += 240 * dt
+    if touching("player", "coin")
+        score += 1
+        call new_coin
+    end
+    if coiny > 480
+        call new_coin
+    end
+    place coin {coinx} {coiny}
+    text hud 10 10 score {score}
+    frame
+end</pre>
+      <figcaption>One command per line. Blocks close with <code>end</code>. Maths goes in <code>{braces}</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section class="section wrap" id="features">
+    <div class="section-head">
+      <h2>Everything you need to make your first game</h2>
+      <p>Gublan Studio is an editor, a game window, a debugger and a set of guides in one app.</p>
+    </div>
+    <div class="features">
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+        <h3>Reads like English</h3>
+        <p>Short commands, one per line, and error messages that say what went wrong and how to fix it.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="7" y="14" width="8" height="6" rx="1.5"/><path d="M14 7h7M11 17h-8"/></svg>
+        <h3>Code or blocks</h3>
+        <p>Edit as text, as blocks, or side by side. Both views are the same program.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>
+        <h3>2D and 3D games</h3>
+        <p>Shapes, sprites, sound, tweens and particles, with keyboard, mouse, buttons, sliders and text boxes.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.5"/><path d="M11 12h10M14 7h7M14 17h7"/></svg>
+        <h3>Learn as you debug</h3>
+        <p>Breakpoints, step-through, variable watches, hints for every command and a live problem checker.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>
+        <h3>Bring your code</h3>
+        <p>Convert Python, JavaScript and Lua (even pygame, p5.js and LÖVE games) into Gublan, or export back out.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3 19c.6-3 2.6-4.5 5-4.5s4.4 1.5 5 4.5M14 18.5c.4-2 1.6-3 3-3s2.6 1 3 3"/></svg>
+        <h3>Code together</h3>
+        <p>Host a live session and edit with friends on your network. Everyone gets their own named cursor.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2"/><circle cx="12" cy="12" r="3"/></svg>
+        <h3>AI helpers</h3>
+        <p>Connect Claude, Copilot, Cursor or any MCP client to read, run, test and screenshot your project.</p>
+      </article>
+      <article class="feature">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.8 1.8-1.7 0-1.2-1-1.6-1-2.7 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.5 17 3 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/></svg>
+        <h3>Make it yours</h3>
+        <p>Themes, accent colours, cursors, typing effects, sound sets, plugins and your own modules.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section wrap" id="download">
+    <div class="section-head">
+      <h2>Download</h2>
+      <p>Gublan is free. Install the studio, use it in your browser, or run it from the source.</p>
+    </div>
+    <div class="downloads">
+      <article class="dl main">
+        <div class="dl-top">
+          <img src="logo.png" alt="" width="56" height="56">
+          <div>
+            <h3>Gublan Studio for Windows</h3>
+            <p class="dl-meta">Version <span data-stat="version">{{VERSION}}</span><span data-stat="released"></span><span data-stat="size-dot"></span></p>
+          </div>
+        </div>
+        <a class="btn primary big" href="https://github.com/gublans/gublan/releases/latest/download/GublanStudioSetup.exe" data-download>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3.5-3L8 10.5 11.5 7M3 13.5h10"/></svg>
+          Download GublanStudioSetup.exe
+        </a>
+        <ul class="checks">
+          <li>Installs for your account, with a Start menu shortcut</li>
+          <li>Checks for new versions and asks before updating</li>
+          <li>Brings back unsaved work if it ever closes unexpectedly</li>
+        </ul>
+        <p class="dl-links">
+          <a href="https://github.com/gublans/gublan/releases">All releases</a>
+          <a href="https://github.com/gublans/gublan#whats-new-in-{{VERSION_SLUG}}">What's new in {{VERSION}}</a>
+        </p>
+      </article>
+
+      <article class="dl">
+        <h3>In your browser</h3>
+        <p>Nothing to install. 2D games, text, input, buttons and saving all work in the playground, and
+          <b>Share</b> gives you a link to your program.</p>
+        <a class="btn" href="playground/">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8v10.4L13 8z"/></svg>
+          Open the playground
+        </a>
+        <p class="note">3D, files, and pictures or sounds from your computer need the studio.</p>
+      </article>
+
+      <article class="dl">
+        <h3>From source</h3>
+        <p>Run the studio with Python 3:</p>
+        <pre class="cmd">git clone https://github.com/gublans/gublan
+cd gublan
+py -m pip install pygame-ce pyopengl
+py gublanide.py</pre>
+        <a class="btn" href="https://github.com/gublans/gublan">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path class="fill" d="M8 1.3a6.7 6.7 0 0 0-2.1 13c.3.1.5-.1.5-.3v-1.2c-1.9.4-2.3-.8-2.3-.8-.3-.8-.7-1-.7-1-.6-.4 0-.4 0-.4.7 0 1 .7 1 .7.6 1 1.6.7 2 .6 0-.4.2-.7.4-.9-1.5-.2-3-.7-3-3.3 0-.7.2-1.3.7-1.8-.1-.2-.3-.9 0-1.8 0 0 .6-.2 1.8.7a6.3 6.3 0 0 1 3.4 0c1.3-.9 1.8-.7 1.8-.7.4.9.2 1.6.1 1.8.4.5.7 1.1.7 1.8 0 2.6-1.6 3.1-3.1 3.3.3.2.5.6.5 1.2v1.8c0 .2.1.4.5.3A6.7 6.7 0 0 0 8 1.3z"/></svg>
+          View the source
+        </a>
+      </article>
+    </div>
+  </section>
+
+  <section class="section wrap" id="github">
+    <div class="section-head">
+      <h2>On GitHub</h2>
+      <p id="gh-note">Live numbers from <a href="https://github.com/gublans/gublan">gublans/gublan</a>.</p>
+    </div>
+    <div class="stats" id="stats" aria-live="polite">
+      <a class="stat" href="https://github.com/gublans/gublan/stargazers"><span class="value" data-stat="stars">–</span><span class="label">Stars</span></a>
+      <a class="stat" href="https://github.com/gublans/gublan/releases"><span class="value" data-stat="downloads">–</span><span class="label">Downloads</span></a>
+      <a class="stat" href="https://github.com/gublans/gublan/releases"><span class="value" data-stat="releases">–</span><span class="label">Releases</span></a>
+      <a class="stat" href="https://github.com/gublans/gublan/commits/main"><span class="value" data-stat="commits">–</span><span class="label">Commits</span></a>
+      <a class="stat" href="https://github.com/gublans/gublan/forks"><span class="value" data-stat="forks">–</span><span class="label">Forks</span></a>
+      <a class="stat" href="https://github.com/gublans/gublan/issues"><span class="value" data-stat="issues">–</span><span class="label">Open issues</span></a>
+    </div>
+    <div class="gh-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <h3>Releases</h3>
+          <span class="muted">downloads of each installer</span>
+        </div>
+        <ol class="releases" id="releases">
+          <li class="empty">Loading releases…</li>
+        </ol>
+      </div>
+      <div class="panel repo">
+        <div class="panel-head"><h3>Repository</h3></div>
+        <dl class="facts">
+          <div><dt>Last update</dt><dd data-stat="pushed">–</dd></div>
+          <div><dt>Started</dt><dd data-stat="created">–</dd></div>
+          <div><dt>Written in</dt><dd data-stat="language">–</dd></div>
+          <div><dt>Latest release</dt><dd data-stat="latest">–</dd></div>
+        </dl>
+        <div class="repo-links">
+          <a class="btn" href="https://github.com/gublans/gublan">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg>
+            Star on GitHub
+          </a>
+          <a class="btn" href="https://github.com/gublans/gublan/issues/new">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.5M8 10.8v.2"/></svg>
+            Report a problem
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <a class="brand small" href="./"><img src="logo.png" alt="" width="24" height="24"><span>Gublan <span data-stat="version">{{VERSION}}</span></span></a>
+    <nav class="foot-links" aria-label="More">
+      <a href="playground/">Playground</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/gublans/gublan/blob/main/docs/COMMANDS.md">Language reference</a>
+      <a href="https://github.com/gublans/gublan/tree/main/examples">Examples</a>
+      <a href="https://github.com/gublans/gublan">GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="home.js"></script>
+</body>
+</html>
