@@ -91,6 +91,7 @@
   let frameFailed = false;
   let checkTimer = 0;
   let saveTimer = 0;
+  const cloud = { timer: 0, busy: false, again: false, status: "", last: 0 }; // gublan account sync (see below)
   let lastText = "";
   let charWidth = 8;
   let lineHeight = 21;
@@ -313,7 +314,10 @@
     } catch (_) { /* broken settings: use the defaults */ }
     if (!settings.game || typeof settings.game !== "object" || Array.isArray(settings.game)) settings.game = {};
   }
-  function saveSettings() { storage.set(SETTINGS_KEY, JSON.stringify(settings)); }
+  function saveSettings() {
+    storage.set(SETTINGS_KEY, JSON.stringify(settings));
+    cloudSoon();
+  }
 
   function setSetting(key, value) {
     settings[key] = value;
@@ -779,11 +783,11 @@
       if (opensBlock(text)) depth++;
       return INDENT.repeat(level) + text;
     }).join("\n");
-    if (tidy === source.value) { toast("The indentation is already tidy"); return; }
+    if (tidy === source.value) { toast("the indentation is already tidy"); return; }
     const caretLine = caretPoint(source.selectionStart).line;
     replaceRange(0, source.value.length, tidy);
     goToLine(caretLine + 1, false, true);
-    toast("Tidied up the indentation");
+    toast("tidied up the indentation");
   }
 
   function pressEnter() {
@@ -1221,7 +1225,7 @@
     }
     replaceRange(0, source.value.length, text, 0);
     updateFind();
-    toast(count === 1 ? "Replaced 1 match" : `Replaced ${count} matches`);
+    toast(count === 1 ? "replaced 1 match" : `replaced ${count} matches`);
     replaceText.focus();
   }
   findText.addEventListener("input", () => { updateFind(); goFind(0); findText.focus(); });
@@ -1268,6 +1272,7 @@
     }));
     if (now) write();
     else saveTimer = setTimeout(write, 400);
+    cloudSoon(5000);
   }
 
   function rememberView() {
@@ -1306,15 +1311,15 @@
   }
 
   function newFile() {
-    const asked = window.prompt("Name for the new file:", uniqueName("helpers"));
+    const asked = window.prompt("name for the new file:", uniqueName("helpers"));
     if (asked === null) return;
     addFile(asked, "// " + cleanName(asked).slice(0, -5) + "\n");
-    toast(`Made ${currentFile().name}. Use it from another file with: include ${currentFile().name}`);
+    toast(`made ${currentFile().name}. use it from another file with: include ${currentFile().name}`);
     play("open");
   }
 
   function renameFile(file) {
-    const asked = window.prompt("Rename this file:", file.name);
+    const asked = window.prompt("rename this file:", file.name);
     if (asked === null || cleanName(asked) === file.name) return;
     const name = uniqueName(asked, file);
     const view = views.get(file.name);
@@ -1328,7 +1333,7 @@
 
   function closeFile(file) {
     if (project.files.length < 2) return;
-    if (file.text.trim() && !file.pristine && !window.confirm(`Delete ${file.name}? Its code will be gone.`)) return;
+    if (file.text.trim() && !file.pristine && !window.confirm(`delete ${file.name}? its code will be gone.`)) return;
     const index = project.files.indexOf(file);
     const tab = fileList.querySelector(`[data-name="${CSS.escape(file.name)}"]`);
     const finish = () => {
@@ -1351,9 +1356,9 @@
     for (const file of project.files) {
       const chosen = file.name === project.current;
       const tab = h("button", { class: "file-tab", role: "tab", "aria-selected": String(chosen), "data-name": file.name,
-        title: "Double-click (or F2) to rename" + (many ? ", Delete to remove" : "") },
+        title: "double-click (or f2) to rename" + (many ? ", delete to remove" : "") },
       h("span", { class: "name", text: file.name }),
-      many ? h("span", { class: "close", role: "button", "aria-label": "Delete " + file.name, title: "Delete this file", text: "×" }) : null);
+      many ? h("span", { class: "close", role: "button", "aria-label": "delete " + file.name, title: "delete this file", text: "×" }) : null);
       tab.addEventListener("click", (event) => {
         if (event.target.classList.contains("close")) { event.stopPropagation(); closeFile(file); return; }
         if (!chosen) selectFile(file.name);
@@ -1378,7 +1383,7 @@
     }
     if (last) {
       play("open");
-      toast(list.length === 1 ? `Opened ${last.name}` : `Opened ${list.length} files`);
+      toast(list.length === 1 ? `opened ${last.name}` : `opened ${list.length} files`);
     }
   }
   $("open-file").addEventListener("change", (event) => {
@@ -1432,7 +1437,7 @@
     count.hidden = problems.length === 0;
     count.textContent = text;
     count.classList.toggle("warn", errors === 0);
-    if (!problems.length) list.append(h("li", { class: "empty", text: "No problems found." }));
+    if (!problems.length) list.append(h("li", { class: "empty", text: "no problems found." }));
     problems.forEach((problem, index) => {
       const item = h("li", { class: problem.severity || "error" },
         h("span", { class: "where", text: problem.line ? "line " + problem.line : "" }),
@@ -1443,7 +1448,7 @@
     });
     if (!document.body.classList.contains("running")) {
       if (errors) setStatus(errors === 1 ? "1 problem to fix" : `${errors} problems to fix`, "bad");
-      else setStatus("Ready", "good");
+      else setStatus("ready", "good");
     }
   }
 
@@ -1533,7 +1538,7 @@
       box.append(h("h3", { text: category }));
       for (const command of groups.get(category)) {
         const example = command.example ? h("div", { class: "example" }, h("code", { text: command.example }),
-          h("button", { text: "insert", title: "Put this example in your program", onclick: () => insertExample(command.example) })) : null;
+          h("button", { text: "insert", title: "put this example in your program", onclick: () => insertExample(command.example) })) : null;
         box.append(entry(command.name, command.usage, command.summary, example));
       }
     }
@@ -1554,7 +1559,7 @@
       box.append(row);
       found++;
     }
-    if (!found) box.append(h("p", { class: "empty", text: `Nothing matches “${query}”.` }));
+    if (!found) box.append(h("p", { class: "empty", text: `nothing matches “${query}”.` }));
     if (flashed) {
       flashed.scrollIntoView({ block: "center" });
       flashed.classList.add("flash");
@@ -1647,7 +1652,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     stageNote.hidden = false;
     stageNote.innerHTML = `<span>${text}</span>`;
   }
-  const IDLE_NOTE = "Press <kbd>Run</kbd> to start the program. Windows and games show up here.";
+  const IDLE_NOTE = "press <kbd>run</kbd> to start the program. windows and games show up here.";
 
   function stop(quiet) {
     const wasRunning = Boolean(frame);
@@ -1678,7 +1683,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     if (output.textContent) say("");
     if (!result.ok) {
       say(result.error, "error");
-      setStatus("Fix the problems first", "bad");
+      setStatus("fix the problems first", "bad");
       play("error");
       const first = problems.find((p) => p.line && (p.severity || "error") === "error");
       if (first) {
@@ -1693,7 +1698,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     frameName = name;
     frameFailed = false;
     frame = document.createElement("iframe");
-    frame.title = "Your program";
+    frame.title = "your program";
     // scripts, alerts and prompts only: no access to this page, its storage or its cookies
     frame.setAttribute("sandbox", "allow-scripts allow-modals");
     frame.srcdoc = frameDocument(result.code, gameStyle());
@@ -1702,7 +1707,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     frame.addEventListener("load", () => frame && frame.focus());
     stopButton.disabled = false;
     document.body.classList.add("running");
-    setStatus(demo === true ? "Showing the game window and popups" : "Running", "busy");
+    setStatus(demo === true ? "showing the game window and popups" : "running", "busy");
     play("run");
   }
 
@@ -1712,7 +1717,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     if (message.type === "print") say(message.text);
     else if (message.type === "error") {
       say(message.text, "error");
-      setStatus("Stopped with an error", "bad");
+      setStatus("stopped with an error", "bad");
       if (!frameFailed) play("error");
       frameFailed = true;
       statusText.classList.add("bad");
@@ -1726,26 +1731,26 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
       storage.set(SAVES_KEY, JSON.stringify(all));
     } else if (message.type === "picture") {
       if (!message.data) {
-        toast("This program has no window to take a picture of", "bad");
+        toast("this program has no window to take a picture of", "bad");
         return;
       }
       download(frameName + ".png", message.data);
       play("save");
-      toast("Saved a picture of the game");
+      toast("saved a picture of the game");
     } else if (message.type === "done") {
       document.body.classList.remove("running");
       if (!frameFailed) {
-        setStatus("Finished", "good");
+        setStatus("finished", "good");
         play("done");
       }
       stopButton.disabled = true;
-      if (!stageNote.hidden) showStageNote("This program has no window. What it printed is below.");
+      if (!stageNote.hidden) showStageNote("this program has no window. what it printed is below.");
     }
   });
 
   function screenshot() {
     if (!frame) {
-      toast("Run the program first, then take a picture", "bad");
+      toast("run the program first, then take a picture", "bad");
       return;
     }
     frame.contentWindow.postMessage({ gublanAsk: "picture" }, "*");
@@ -1753,7 +1758,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
 
   function fullscreen() {
     if (document.fullscreenElement) document.exitFullscreen();
-    else if (stage.requestFullscreen) stage.requestFullscreen().then(() => frame && frame.focus()).catch(() => toast("Full screen isn't allowed here", "bad"));
+    else if (stage.requestFullscreen) stage.requestFullscreen().then(() => frame && frame.focus()).catch(() => toast("full screen isn't allowed here", "bad"));
   }
 
   runButton.addEventListener("click", () => run());
@@ -1768,7 +1773,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     if (!bridge) return;
     const result = translate(source.value, programName());
     if (!result.ok) {
-      toast("Fix the problems first", "bad");
+      toast("fix the problems first", "bad");
       play("error");
       return;
     }
@@ -1801,7 +1806,7 @@ ${safe(result.code)}
 `;
     download(programName() + ".html", page, "text/html");
     play("save");
-    toast("Saved a web page you can open anywhere");
+    toast("saved a web page you can open anywhere");
   }
 
   // ----- sharing ---------------------------------------------------------------------------------------
@@ -1846,9 +1851,9 @@ ${safe(result.code)}
     play("notify");
     try {
       await navigator.clipboard.writeText(link);
-      toast(many ? `Link copied, with all ${project.files.length} files` : "Link copied");
+      toast(many ? `link copied, with all ${project.files.length} files` : "link copied");
     } catch (_) {
-      window.prompt("Copy this link:", link);
+      window.prompt("copy this link:", link);
     }
   }
   $("share").addEventListener("click", share);
@@ -1863,8 +1868,8 @@ ${safe(result.code)}
       return;
     }
     if (lone) project.files = [];
-    else if (shared.files.length > 1 && window.confirm(`This link has ${shared.files.length} files. ` +
-      "Replace your files with them? (Cancel puts them next to yours.)")) project.files = [];
+    else if (shared.files.length > 1 && window.confirm(`this link has ${shared.files.length} files. ` +
+      "replace your files with them? (cancel puts them next to yours.)")) project.files = [];
     let chosen = null;
     for (const file of shared.files) {
       const existing = same(file);
@@ -2048,9 +2053,9 @@ ${safe(result.code)}
   }
 
   function accentRow() {
-    const row = h("div", { class: "swatches", role: "group", "aria-label": "Accent colour" });
+    const row = h("div", { class: "swatches", role: "group", "aria-label": "accent colour" });
     const own = h("input", { type: "color", value: isHex(settings.accent) ? toHex(rgb(settings.accent)) : "#647f4a",
-      title: "Pick any colour", "aria-label": "Pick any accent colour" });
+      title: "pick any colour", "aria-label": "pick any accent colour" });
     const mark = () => {
       for (const swatch of row.querySelectorAll(".swatch")) {
         swatch.setAttribute("aria-pressed", String((swatch.dataset.color || "") === (settings.accent || "")));
@@ -2264,6 +2269,7 @@ ${safe(result.code)}
     gamePreview = null;
     const themes = Object.entries(manifest.themes || {});
     const sections = [
+      accountSection(),
       h("section", {},
         h("h3", { text: "look" }),
         selectRow("theme", "theme", [["auto", "match my system"]].concat(themes.map(([name, info]) => [name, name, info.about]))),
@@ -2275,11 +2281,11 @@ ${safe(result.code)}
         selectRow("font", "font", FONTS),
         rangeRow("text size", "fontSize", 11, 24, 1, (v) => v + "px"),
         ...choiceRow("line spacing", "spacing", [["tight", "tight"], ["normal", "normal"], ["roomy", "roomy"], ["airy", "airy"]]),
-        checkRow("suggest commands and names as I type", "suggestions"),
-        checkRow("show help for the line I'm on", "hints"),
+        checkRow("suggest commands and names as i type", "suggestions"),
+        checkRow("show help for the line i'm on", "hints"),
         checkRow("close brackets and quotes for me", "autoPairs"),
         checkRow("add end after if, loop, function…", "autoEnd"),
-        checkRow("highlight the line I'm on", "lineHighlight"),
+        checkRow("highlight the line i'm on", "lineHighlight"),
         checkRow("rainbow brackets", "rainbow")),
       h("section", {},
         h("h3", { text: "cursor and typing" }),
@@ -2313,19 +2319,21 @@ ${safe(result.code)}
           h("span", { text: what }))))),
       h("section", {},
         h("h3", { text: "your data" }),
-        h("p", { class: "about", text: "your files, settings and saved games stay in this browser. nothing is uploaded." }),
+        h("p", { class: "about", text: signedIn()
+          ? "your files and settings are kept in this browser and in your gublan account. saved games stay in this browser."
+          : "your files, settings and saved games stay in this browser. nothing is uploaded unless you sign in." }),
         h("div", { class: "row" },
           h("button", { type: "button", text: "forget saved games", onclick: () => {
-            if (!window.confirm("Forget every saved game made with save in this browser?")) return;
+            if (!window.confirm("forget every saved game made with save in this browser?")) return;
             storage.remove(SAVES_KEY);
-            toast("Saved games forgotten");
+            toast("saved games forgotten");
           } }),
           h("button", { type: "button", text: "reset settings", onclick: () => {
             settings = Object.assign({}, DEFAULTS, { game: {} });
             saveSettings();
             applySettings();
             buildSettings();
-            toast("Settings are back to how they started");
+            toast("settings are back to how they started");
           } }))),
     ];
     body.append(...sections.filter(Boolean));
@@ -2350,6 +2358,255 @@ ${safe(result.code)}
     leave(scrim, 200);
     if (!quiet) play("close");
     source.focus();
+  }
+  // ----- gublan account: settings and files follow you ------------------------------------------------------
+  // account.js signs in with discord and talks to supabase. the row's settings.playground and project belong to
+  // the playground; gublan studio keeps settings.studio in the same row and never touches the rest. like the
+  // studio (studio/account.py), a three-way merge decides: whatever changed since the last sync wins, here or there.
+  const SYNCED_KEY = KEY + "synced"; // what this browser and the cloud last agreed on: {user, settings, files}
+  const LOCAL_ONLY = new Set(["split", "splitY"]); // pane sizes belong to this screen
+  const DISCORD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18.2 18.2 0 0 0-5.6 0L8.6 3a19.5 19.5 0 0 0-4.9 1.5C.6 9.1-.3 13.6.1 18.1a19.8 19.8 0 0 0 6 3l1.3-2.1c-.7-.3-1.4-.6-2-1l.5-.4a14.1 14.1 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l1.3 2.1a19.7 19.7 0 0 0 6-3c.5-5.2-.8-9.7-3.6-13.7zM8 15.3c-1.2 0-2.2-1.1-2.2-2.4S6.8 10.5 8 10.5s2.2 1.1 2.2 2.4-1 2.4-2.2 2.4zm8 0c-1.2 0-2.2-1.1-2.2-2.4s1-2.4 2.2-2.4 2.2 1.1 2.2 2.4-1 2.4-2.2 2.4z"/></svg>';
+
+  function cloudAccount() {
+    const account = window.GublanAccount;
+    return account && account.configured ? account : null;
+  }
+  function signedIn() {
+    const account = cloudAccount();
+    return account ? account.user() : null;
+  }
+
+  // json with sorted keys, so the same data always compares equal (postgres keeps keys in its own order)
+  function stable(value) {
+    if (Array.isArray(value)) return "[" + value.map(stable).join(",") + "]";
+    if (value && typeof value === "object") {
+      return "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + stable(value[key])).join(",") + "}";
+    }
+    return JSON.stringify(value === undefined ? null : value);
+  }
+  const same = (a, b) => stable(a) === stable(b);
+
+  function mySettings() {
+    const mine = {};
+    for (const key of Object.keys(DEFAULTS)) if (!LOCAL_ONLY.has(key)) mine[key] = settings[key];
+    return JSON.parse(JSON.stringify(mine));
+  }
+  // untouched examples aren't worth keeping
+  const myFiles = () => project.files.filter((file) => !file.pristine).map(({ name, text }) => ({ name, text }));
+
+  function readSynced(user) {
+    try {
+      const synced = JSON.parse(storage.get(SYNCED_KEY) || "null");
+      return synced && synced.user === user.id ? synced : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function cloudDirty() {
+    const user = signedIn();
+    if (!user) return false;
+    const synced = readSynced(user);
+    return !synced || !same(mySettings(), synced.settings) || !same(myFiles(), synced.files);
+  }
+
+  function cloudSoon(delay = 2500) {
+    if (!signedIn()) return;
+    clearTimeout(cloud.timer);
+    cloud.timer = setTimeout(() => { if (cloudDirty()) cloudSync(); }, delay);
+  }
+
+  // the first sync takes the cloud's settings (signing in brings them with you); after that a setting changed
+  // here since the last sync keeps this browser's value and every other one takes the cloud's
+  function mergeSettings(local, remote, synced) {
+    if (!remote) return local;
+    const merged = Object.assign({}, local);
+    // only values of the right kind, so a broken row can't break the page
+    const fits = (key, value) => (key === "game"
+      ? Boolean(value) && typeof value === "object" && !Array.isArray(value)
+      : typeof value === typeof DEFAULTS[key]);
+    for (const key of Object.keys(local)) {
+      if (!(key in remote) || !fits(key, remote[key])) continue;
+      if (!synced || !(key in synced) || same(local[key], synced[key])) merged[key] = remote[key];
+    }
+    return merged;
+  }
+
+  // files changed here and there: keep all of them, renaming the cloud's copy when its name is taken
+  function bothFiles(local, remote) {
+    const out = local.slice();
+    for (const file of remote) {
+      if (out.some((f) => f.text === file.text)) continue;
+      let name = file.name;
+      for (let n = 2; out.some((f) => f.name.toLowerCase() === name.toLowerCase()); n++) name = file.name.replace(/\.gubl$/, ` ${n}.gubl`);
+      out.push({ name, text: file.text });
+    }
+    return out;
+  }
+
+  function cloudFiles(project) {
+    const files = project && Array.isArray(project.files) ? project.files : [];
+    return files.filter((f) => f && typeof f.name === "string" && typeof f.text === "string")
+      .map((f) => ({ name: cleanName(f.name), text: f.text }));
+  }
+
+  function setCloudStatus(text) {
+    cloud.status = text;
+    const line = $("account-status");
+    if (line) line.textContent = text;
+  }
+
+  async function cloudSync(manual) {
+    const account = cloudAccount();
+    const user = signedIn();
+    if (!account || !user) return;
+    if (cloud.busy) { cloud.again = true; return; }
+    cloud.busy = true;
+    setCloudStatus("syncing…");
+    try {
+      const synced = readSynced(user);
+      const localSettings = mySettings();
+      const localFiles = myFiles();
+      const row = await account.load();
+      // something changed here while we waited: start over with the new version
+      if (!same(mySettings(), localSettings) || !same(myFiles(), localFiles)) { cloud.again = true; return; }
+
+      const everything = row && row.settings && typeof row.settings === "object" && !Array.isArray(row.settings)
+        ? Object.assign({}, row.settings) : {};
+      const remoteSettings = everything.playground && typeof everything.playground === "object" ? everything.playground : null;
+      const remoteFiles = cloudFiles(row && row.project);
+      const mergedSettings = mergeSettings(localSettings, remoteSettings, synced && synced.settings);
+      // files: whichever side changed since the last sync wins; when both did, keep both sets
+      let mergedFiles = localFiles;
+      const changedHere = !synced || !same(localFiles, synced.files);
+      const changedThere = !synced || !same(remoteFiles, synced.files);
+      if (!changedHere) mergedFiles = remoteFiles;
+      else if (changedThere && remoteFiles.length) mergedFiles = localFiles.length ? bothFiles(localFiles, remoteFiles) : remoteFiles;
+
+      if (!same(mergedSettings, localSettings)) {
+        Object.assign(settings, mergedSettings);
+        storage.set(SETTINGS_KEY, JSON.stringify(settings));
+        applySettings();
+        if (!drawer.hidden) buildSettings();
+      }
+      if (!same(mergedFiles, localFiles) && mergedFiles.length) {
+        const current = project.current;
+        project.files = mergedFiles.map((f) => ({ name: f.name, text: f.text, pristine: false }));
+        selectFile(project.files.some((f) => f.name === current) ? current : project.files[0].name, true);
+        storage.set(PROJECT_KEY, JSON.stringify({ files: project.files, current: project.current }));
+        check();
+      }
+      if (!row || !same(mergedSettings, remoteSettings) || !same(mergedFiles, remoteFiles)) {
+        everything.playground = mergedSettings;
+        await account.save({ settings: everything, project: { files: mergedFiles } });
+      }
+      storage.set(SYNCED_KEY, JSON.stringify({ user: user.id, settings: mergedSettings, files: mergedFiles }));
+      cloud.last = Date.now();
+      setCloudStatus("synced just now");
+      if (manual) toast("synced");
+    } catch (error) {
+      const why = String(error && error.message || error).toLowerCase();
+      setCloudStatus("couldn't sync: " + why);
+      if (manual) toast("couldn't sync: " + why, "bad");
+    } finally {
+      cloud.busy = false;
+      if (cloud.again) { cloud.again = false; cloudSoon(1500); }
+      showAccount();
+    }
+  }
+
+  // the header button and the account part of settings
+  function showAccount() {
+    const account = cloudAccount();
+    const button = $("account");
+    if (!account || !button) return;
+    const user = account.user();
+    button.hidden = false;
+    const face = $("account-face");
+    face.textContent = "";
+    if (user && user.avatar) face.append(h("img", { src: user.avatar, alt: "", width: 20, height: 20 }));
+    else face.innerHTML = DISCORD_ICON;
+    $("account-label").textContent = user ? user.name.toLowerCase() : "sign in";
+    button.title = user ? `signed in as ${user.name.toLowerCase()}: your settings and files sync` : "sign in with discord to keep your settings and files everywhere";
+    button.classList.toggle("signed-in", Boolean(user));
+  }
+
+  function startSignIn() {
+    saveProject(true);
+    cloudAccount().signIn().catch((error) => toast("couldn't start signing in: " + String(error.message).toLowerCase(), "bad"));
+  }
+
+  function accountSection() {
+    const account = cloudAccount();
+    if (!account) return null;
+    const user = account.user();
+    if (!user) {
+      return h("section", { id: "settings-account" },
+        h("h3", { text: "account" }),
+        h("p", { class: "about", text: "sign in with discord to keep your settings and files in your gublan account. they follow you to any browser, and gublan studio keeps its settings there too." }),
+        h("div", { class: "row" }, h("button", { type: "button", class: "primary discord", onclick: startSignIn },
+          h("span", { class: "face", "aria-hidden": "true" }), "sign in with discord")));
+    }
+    const section = h("section", { id: "settings-account" },
+      h("h3", { text: "account" }),
+      h("div", { class: "who" },
+        user.avatar ? h("img", { src: user.avatar, alt: "", width: 40, height: 40 }) : null,
+        h("div", {},
+          h("b", { text: user.name.toLowerCase() }),
+          h("p", { class: "about", id: "account-status", text: cloud.status || "signed in with discord" }))),
+      h("div", { class: "row" },
+        h("button", { type: "button", text: "sync now", onclick: () => cloudSync(true) }),
+        h("button", { type: "button", text: "sign out", onclick: async () => {
+          await account.signOut();
+          setCloudStatus("");
+          toast("signed out. your files and settings stay in this browser.");
+        } }),
+        h("button", { type: "button", class: "danger", text: "delete my saved data", onclick: async () => {
+          if (!window.confirm("delete the settings and files saved in your gublan account? this browser keeps its own copy. gublan studio's synced settings go too.")) return;
+          try {
+            await account.deleteData();
+            storage.remove(SYNCED_KEY);
+            await account.signOut();
+            setCloudStatus("");
+            toast("deleted your saved data and signed you out");
+          } catch (error) {
+            toast("couldn't delete it: " + String(error.message).toLowerCase(), "bad");
+          }
+        } })));
+    const discord = section.querySelector(".discord .face");
+    if (discord) discord.innerHTML = DISCORD_ICON;
+    return section;
+  }
+
+  function startAccount() {
+    const account = cloudAccount();
+    if (!account) return;
+    $("account").addEventListener("click", () => (account.user() ? openSettings("settings-account") : startSignIn()));
+    let who = signedIn() ? signedIn().id : null;
+    account.onChange((now) => {
+      showAccount();
+      if ((now ? now.id : null) === who) return; // just a refreshed token
+      who = now ? now.id : null;
+      if (!drawer.hidden) buildSettings();
+      if (now) cloudSync();
+    });
+    account.ready.then((justSignedIn) => {
+      const user = signedIn();
+      if (justSignedIn && user) toast(`signed in as ${user.name.toLowerCase()}`);
+    }, (error) => toast("couldn't sign in: " + String(error.message).toLowerCase(), "bad")).finally(() => {
+      showAccount();
+      if (signedIn()) cloudSync();
+      if (location.hash === "#account") {
+        history.replaceState(null, "", location.pathname + location.search);
+        openSettings("settings-account");
+      }
+    });
+    // pick up changes from other computers when coming back to the tab, and send ours when leaving it
+    document.addEventListener("visibilitychange", () => {
+      if (!signedIn()) return;
+      if (document.visibilityState === "visible" ? Date.now() - cloud.last > 30000 : cloudDirty()) cloudSync();
+    });
+    showAccount();
   }
   $("open-settings").addEventListener("click", () => openSettings());
   $("close-settings").addEventListener("click", () => closeSettings());
@@ -2454,7 +2711,7 @@ ${safe(result.code)}
       row.addEventListener("mousemove", () => markPalette(index));
       paletteList.append(row);
     });
-    if (!paletteItems.length) paletteList.append(h("li", { class: "empty", text: "Nothing matches." }));
+    if (!paletteItems.length) paletteList.append(h("li", { class: "empty", text: "nothing matches." }));
   }
   function markPalette(index) {
     if (!paletteItems.length) return;
@@ -2527,7 +2784,7 @@ ${safe(result.code)}
       if (event.shiftKey) download(currentFile().name, source.value);
       else {
         saveProject(true);
-        toast("Saved in this browser");
+        toast("saved in this browser");
       }
       play("save");
       const tab = fileList.querySelector('[aria-selected="true"]');
@@ -2652,11 +2909,11 @@ ${safe(result.code)}
   async function main() {
     loadSettings();
     applySettings();
-    setStatus("Loading Gublan…", "busy");
+    setStatus("loading gublan…", "busy");
     try {
       manifest = Object.assign(manifest, await (await fetch("manifest.json")).json());
     } catch (_) {
-      setStatus("This page is missing its files. Build it with web/build_site.py.", "bad");
+      setStatus("this page is missing its files. build it with web/build_site.py.", "bad");
       bootStep("files", "failed");
       return;
     }
@@ -2664,7 +2921,7 @@ ${safe(result.code)}
     applySettings();
     $("version").textContent = manifest.version;
     for (const example of manifest.examples) {
-      examplesBox.append(h("option", { value: example.file, text: example.title + (example.web ? "" : " (3D, studio only)") }));
+      examplesBox.append(h("option", { value: example.file, text: example.title + (example.web ? "" : " (3d, studio only)") }));
     }
     const stored = await firstProject();
     project.files = [];
@@ -2685,11 +2942,12 @@ ${safe(result.code)}
     }
     saveProject(true);
     if (storage.get(PROJECT_KEY)) storage.remove(DRAFT_KEY);
+    startAccount();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); updateCaret(true); moveTabIndicator(); });
     try {
       bridge = await loadGublan();
     } catch (error) {
-      setStatus("Couldn't load Gublan. Check your connection and reload.", "bad");
+      setStatus("couldn't load gublan. check your connection and reload.", "bad");
       say("loading failed: " + error.message, "error");
       for (const step of document.querySelectorAll(".boot-steps li.active")) step.classList.replace("active", "failed");
       play("error");

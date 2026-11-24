@@ -20,6 +20,7 @@ if ROOT not in sys.path:
 WEB = os.path.join(ROOT, "web")
 if WEB not in sys.path:
     sys.path.insert(0, WEB)
+PLAYGROUND = os.path.join(WEB, "playground")  # the playground page and bridge.py (gublan.xyz/playground/)
 
 import pygame  # noqa: E402
 
@@ -375,7 +376,7 @@ class PlaygroundTests(unittest.TestCase):
     def bridge(self, code, *args):
         script = ("import sys, json; sys.path.insert(0, sys.argv[1]); sys.path.insert(0, sys.argv[2]); import bridge\n"
                   + code)
-        done = subprocess.run([sys.executable, "-I", "-c", script, ROOT, WEB, *args], capture_output=True, text=True,
+        done = subprocess.run([sys.executable, "-I", "-c", script, ROOT, PLAYGROUND, *args], capture_output=True, text=True,
                               timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr)
         return done.stdout
@@ -427,7 +428,7 @@ class PlaygroundTests(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
-        done = subprocess.run([node, "--check", os.path.join(WEB, "playground.js")], capture_output=True, text=True,
+        done = subprocess.run([node, "--check", os.path.join(PLAYGROUND, "playground.js")], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
 

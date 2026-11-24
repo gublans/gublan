@@ -38,6 +38,20 @@ class PlaygroundSiteTests(unittest.TestCase):
         self.assertIn(self.manifest["version"], page)
         self.assertIn('href="playground/"', page)
 
+    def test_account_script_is_filled_in(self):
+        # one account.js at the top, shared by both pages, pointing at the same supabase project as the studio
+        from studio import account
+        with open(os.path.join(self.root, "account.js"), encoding="utf-8") as handle:
+            script = handle.read()
+        self.assertNotIn("{{", script)
+        self.assertIn(account.SUPABASE_URL, script)
+        self.assertIn(account.SUPABASE_KEY, script)
+        self.assertNotIn("service_role", script)
+        for page in [os.path.join(self.root, "index.html"), os.path.join(self.site, "index.html")]:
+            with open(page, encoding="utf-8") as handle:
+                text = handle.read()
+            self.assertRegex(text, r'<script src="(\.\./)?account\.js"></script>', page)
+
     def test_manifest_lists_real_files(self):
         for name in self.manifest["python"]:
             self.assertTrue(os.path.isfile(os.path.join(self.site, "gublan", name)), name)

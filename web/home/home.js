@@ -1,16 +1,40 @@
 // gublan.xyz: colours the sample program, links it to the playground, keeps the tabs in step with scrolling,
-// and fills in live numbers from github. everything works (with less detail) if this script or github fails.
+// fills in live numbers from github, shows who is signed in, and hides a gublan or two.
+// everything works (with less detail) if this script, github or the account server fails.
 (function () {
   "use strict";
   const REPO = "gublans/gublan";
   const API = "https://api.github.com/repos/" + REPO;
   const INSTALLER = "GublanStudioSetup.exe";
   const CACHE_KEY = "gublan-site:github";
+  const EGG_KEY = "gublan-site:found";
   const CACHE_MINUTES = 10;
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const escape = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const escape = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const store = {
+    get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* private mode */ } },
+  };
+
+  // a message along the bottom of the page
+  let noteTimer = null;
+  function note(text, seconds = 3.5) {
+    let box = $("#note");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "note";
+      box.className = "egg-note";
+      box.setAttribute("role", "status");
+      document.body.append(box);
+    }
+    box.textContent = text;
+    requestAnimationFrame(() => box.classList.add("show"));
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => box.classList.remove("show"), seconds * 1000);
+  }
 
   // ----- the sample program ------------------------------------------------------------------------------
   // a small version of the playground's highlighter: enough for the sample, not the whole language
@@ -86,17 +110,47 @@
       let best = "top", most = 0;
       for (const [id, ratio] of seen) if (ratio > most) { most = ratio; best = id; }
       setTab(best);
-    }, { rootMargin: "-64px 0px -40% 0px", threshold: [0, .1, .25, .5, .75, 1] });
+    }, { rootMargin: "-72px 0px -40% 0px", threshold: [0, .1, .25, .5, .75, 1] });
     for (const tab of tabs) {
       const section = document.getElementById(tab.dataset.tab);
       if (section) observer.observe(section);
     }
   }
 
+  // ----- who is signed in (account.js) ---------------------------------------------------------------------
+  const account = window.GublanAccount;
+  const who = $("#who");
+  const DISCORD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18.2 18.2 0 0 0-5.6 0L8.6 3a19.5 19.5 0 0 0-4.9 1.5C.6 9.1-.3 13.6.1 18.1a19.8 19.8 0 0 0 6 3l1.3-2.1c-.7-.3-1.4-.6-2-1l.5-.4a14.1 14.1 0 0 0 12.2 0l.5.4c-.6.4-1.3.7-2 1l1.3 2.1a19.7 19.7 0 0 0 6-3c.5-5.2-.8-9.7-3.6-13.7zM8 15.3c-1.2 0-2.2-1.1-2.2-2.4S6.8 10.5 8 10.5s2.2 1.1 2.2 2.4-1 2.4-2.2 2.4zm8 0c-1.2 0-2.2-1.1-2.2-2.4s1-2.4 2.2-2.4 2.2 1.1 2.2 2.4-1 2.4-2.2 2.4z"/></svg>';
+
+  function showWho() {
+    if (!account || !account.configured) return;
+    const user = account.user();
+    who.hidden = false;
+    if (user) {
+      who.innerHTML = (user.avatar ? `<img src="${escape(user.avatar)}" alt="">` : DISCORD) + `<span>${escape(user.name.toLowerCase())}</span>`;
+      who.title = `signed in as ${user.name.toLowerCase()}. your settings and files sync in the playground and the studio.`;
+    } else {
+      who.innerHTML = DISCORD + "<span>sign in</span>";
+      who.title = "sign in with discord to keep your settings and files everywhere";
+    }
+  }
+  if (account && account.configured && who) {
+    who.addEventListener("click", () => {
+      if (account.user()) location.href = "playground/#account";
+      else account.signIn().catch((error) => note("couldn't start signing in: " + String(error.message).toLowerCase(), 6));
+    });
+    account.onChange(showWho);
+    account.ready.then((justSignedIn) => {
+      const user = account.user();
+      if (justSignedIn && user) note(`signed in as ${user.name.toLowerCase()}`);
+    }, (error) => note("couldn't sign in: " + String(error.message).toLowerCase(), 6)).finally(showWho);
+    showWho();
+  }
+
   // ----- github ----------------------------------------------------------------------------------------------
   const numberText = (n) => n >= 10000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "k" : n.toLocaleString("en");
-  const sizeText = (bytes) => (bytes / 1048576).toFixed(0) + " MB";
-  const dateText = (iso) => new Date(iso).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" });
+  const sizeText = (bytes) => (bytes / 1048576).toFixed(0) + " mb";
+  const dateText = (iso) => new Date(iso).toLocaleDateString("en", { year: "numeric", month: "short", day: "numeric" }).toLowerCase();
 
   function agoText(iso) {
     const seconds = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -118,14 +172,10 @@
 
   function readCache() {
     try {
-      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      const cached = JSON.parse(store.get(CACHE_KEY) || "null");
       if (cached && Date.now() - cached.at < CACHE_MINUTES * 60000) return cached.data;
-    } catch (_) { /* storage blocked or bad data */ }
+    } catch (_) { /* bad data */ }
     return null;
-  }
-
-  function writeCache(data) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), data })); } catch (_) { /* fine */ }
   }
 
   async function getJSON(url) {
@@ -176,7 +226,7 @@
     setStat("releases", numberText(data.releases.length));
     setStat("downloads", numberText(downloads));
     setStat("commits", data.commits == null ? "–" : numberText(data.commits));
-    setStat("language", data.language || "–");
+    setStat("language", (data.language || "–").toLowerCase());
     setStat("pushed", data.pushed ? agoText(data.pushed) : "–");
     setStat("created", data.created ? dateText(data.created) : "–");
 
@@ -189,20 +239,20 @@
 
     const list = $("#releases");
     if (!data.releases.length) {
-      list.innerHTML = `<li class="empty">No releases yet.</li>`;
+      list.innerHTML = `<li class="empty">no releases yet.</li>`;
       return;
     }
     const most = Math.max(1, ...data.releases.map((r) => r.downloads));
     list.innerHTML = data.releases.slice(0, 8).map((r) => `
       <li class="${r === latest ? "latest" : ""}">
-        <a href="${escape(r.url)}" title="${escape(r.tag)} on GitHub">
-          <span class="tag">${escape(r.tag)}<span class="when">${escape(dateText(r.date))}</span></span>
+        <a href="${escape(r.url)}" title="${escape(r.tag)} on github">
+          <span class="tag-name">${escape(r.tag)}<span class="when">${escape(dateText(r.date))}</span></span>
           <span class="bar" aria-hidden="true"><span style="width:${(r.downloads / most * 100).toFixed(1)}%"></span></span>
           <span class="count">${numberText(r.downloads)} ${r.downloads === 1 ? "download" : "downloads"}</span>
         </a>
       </li>`).join("");
     if (data.releases.length > 8) {
-      list.insertAdjacentHTML("beforeend", `<li class="empty"><a href="https://github.com/${REPO}/releases">See all ${data.releases.length} releases</a></li>`);
+      list.insertAdjacentHTML("beforeend", `<li class="empty"><a href="https://github.com/${REPO}/releases">see all ${data.releases.length} releases</a></li>`);
     }
   }
 
@@ -213,15 +263,134 @@
     stats.classList.add("loading");
     try {
       const data = await fetchGithub();
-      writeCache(data);
+      store.set(CACHE_KEY, JSON.stringify({ at: Date.now(), data }));
       show(data);
     } catch (_) {
-      $("#releases").innerHTML = `<li class="empty">Couldn't reach GitHub just now. <a href="https://github.com/${REPO}/releases">See the releases on GitHub</a>.</li>`;
-      $("#gh-note").innerHTML = `Numbers from <a href="https://github.com/${REPO}">gublans/gublan</a> couldn't load right now.`;
+      $("#releases").innerHTML = `<li class="empty">couldn't reach github just now. <a href="https://github.com/${REPO}/releases">see the releases on github</a>.</li>`;
+      $("#gh-note").innerHTML = `numbers from <a href="https://github.com/${REPO}">gublans/gublan</a> couldn't load right now.`;
     } finally {
       stats.classList.remove("loading");
     }
   }
 
   loadGithub();
+
+  // ----- the easter egg: click the gublan a few times ------------------------------------------------------
+  const LINES = ["hi!", "hello again", "hehe", "that tickles", "ok stop", "i'm warning you", "fine."];
+  const mascot = $("#mascot");
+  const bubble = $("#bubble");
+  let clicks = 0, lastClick = 0, bubbleTimer = null, raining = false, audio = null;
+
+  function blip(step) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const notes = step < 0 ? [523, 659, 784, 1047] : [392 + step * 55];
+      notes.forEach((frequency, i) => {
+        const osc = audio.createOscillator(), gain = audio.createGain();
+        const start = audio.currentTime + i * 0.08;
+        osc.type = "square";
+        osc.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.05, start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+        osc.connect(gain).connect(audio.destination);
+        osc.start(start);
+        osc.stop(start + 0.16);
+      });
+    } catch (_) { /* no sound: still fun */ }
+  }
+
+  function say(text) {
+    if (!bubble) return;
+    bubble.textContent = text;
+    bubble.classList.add("show");
+    clearTimeout(bubbleTimer);
+    bubbleTimer = setTimeout(() => bubble.classList.remove("show"), 1400);
+  }
+
+  function rain() {
+    raining = true;
+    const found = Number(store.get(EGG_KEY) || 0) + 1;
+    store.set(EGG_KEY, String(found));
+    blip(-1);
+    if (mascot) {
+      mascot.classList.remove("spin");
+      void mascot.offsetWidth;
+      mascot.classList.add("spin");
+    }
+    note(found === 1 ? "you found the gublan swarm" : `the gublan swarm, again (${found} times now)`, 5);
+    if (calm) { raining = false; return; }
+
+    const layer = document.createElement("div");
+    layer.className = "rain";
+    layer.setAttribute("aria-hidden", "true");
+    document.body.append(layer);
+    const width = innerWidth, floor = innerHeight;
+    const sizes = [25, 50, 50, 75];
+    const gublans = Array.from({ length: Math.min(60, Math.round(width / 22)) }, () => {
+      const size = sizes[Math.floor(Math.random() * sizes.length)];
+      const img = new Image(size, size);
+      img.src = "logo.png";
+      img.alt = "";
+      layer.append(img);
+      return {
+        img, size, x: Math.random() * (width - size), y: -size - Math.random() * floor * 0.9,
+        vx: (Math.random() - 0.5) * 120, vy: Math.random() * 200, spin: (Math.random() - 0.5) * 540, angle: 0,
+        flip: Math.random() < 0.5 ? -1 : 1,
+      };
+    });
+    let last = performance.now();
+    const started = last;
+    function step(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      for (const g of gublans) {
+        g.vy += 1700 * dt;
+        g.x += g.vx * dt;
+        g.y += g.vy * dt;
+        g.angle += g.spin * dt;
+        if (g.y + g.size > floor) {
+          g.y = floor - g.size;
+          g.vy *= -0.42;
+          g.vx *= 0.8;
+          g.spin *= 0.6;
+          if (Math.abs(g.vy) < 40) g.vy = 0;
+        }
+        if (g.x < 0 || g.x + g.size > width) { g.vx *= -1; g.x = Math.max(0, Math.min(width - g.size, g.x)); }
+        g.img.style.transform = `translate(${g.x}px, ${g.y}px) rotate(${g.angle}deg) scaleX(${g.flip})`;
+      }
+      const age = now - started;
+      if (age > 5200) layer.style.opacity = String(Math.max(0, 1 - (age - 5200) / 900));
+      if (age < 6100) requestAnimationFrame(step);
+      else { layer.remove(); raining = false; }
+    }
+    requestAnimationFrame(step);
+  }
+
+  for (const gublan of $$("[data-gublan]")) {
+    gublan.addEventListener("click", (event) => {
+      // the logo links home, and this is home: stay, scroll up, and count the click
+      if (gublan.matches("a")) {
+        event.preventDefault();
+        if (scrollY > 0) scrollTo({ top: 0, behavior: calm ? "auto" : "smooth" });
+      }
+      const now = performance.now();
+      clicks = now - lastClick < 1400 ? clicks + 1 : 1;
+      lastClick = now;
+      if (mascot) {
+        mascot.classList.remove("boop");
+        void mascot.offsetWidth;
+        mascot.classList.add("boop");
+      }
+      if (raining) return;
+      if (clicks >= LINES.length) {
+        clicks = 0;
+        say(LINES[LINES.length - 1]);
+        rain();
+      } else {
+        blip(clicks);
+        say(LINES[clicks - 1]);
+      }
+    });
+  }
 })();

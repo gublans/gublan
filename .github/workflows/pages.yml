@@ -16,6 +16,7 @@ on:
       - "examples/**"
       - "hello.gubl"
       - "studio/version.py"
+      - "studio/account.py"
       - "logo.png"
       - "tests/test_web_playground.py"
       - ".github/workflows/pages.yml"

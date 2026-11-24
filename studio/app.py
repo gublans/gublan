@@ -18,6 +18,7 @@ from tkinter import filedialog
 from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_value, parse_expression
 
 from . import blocks as blocks_module
+from . import account as accounts
 from . import collab, config, exporter, guard, plugins, sounds, textfiles, theme, updater, version
 from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
@@ -211,6 +212,9 @@ class GublanStudio:
         self.presence = StudioPresence(self)
         self.live = None
         self.live_status = None
+        self.account = accounts.Account()
+        self.account_busy = ""  # "", "signing in" or "syncing"
+        self.account_job = None
         self.root.report_callback_exception = self.report_error
         guard.install(root, self.report_error)
         self.crashed_last_time = guard.mark_running()
@@ -227,6 +231,7 @@ class GublanStudio:
         self.root.after(1500, self._offer_recovery)
         self.root.after(RECOVERY_MS, self._save_recovery)
         self.root.after(WATCH_MS, self._watch_files)
+        self.root.after(3000, self._account_tick)
         self.presence.refresh()
         self.root.protocol("WM_DELETE_WINDOW", self.exit)
 
@@ -580,6 +585,7 @@ class GublanStudio:
                 {"label": "show my status on discord", "command": lambda: self.set_option(
                     "discord_presence", not self.settings.get("discord_presence", True)),
                  "checked": bool(self.settings.get("discord_presence", True))},
+                *([("account (sync settings)", self._account_menu())] if accounts.configured() else []),
                 ("settings...", self.open_settings, "ctrl+,"),
             ],
             "help": [
@@ -2244,6 +2250,7 @@ class GublanStudio:
         self.status_indent.configure(text=f"{settings.get('indent', 4)} spaces")
         if save:
             config.save(settings)
+            self._account_soon()
         self.presence.refresh()
 
     def set_option(self, key, value):
@@ -2338,6 +2345,128 @@ class GublanStudio:
             self.flash(f"the folder is {folder}")
 
     # ----- live sessions ---------------------------------------------------------------------------------------
+    # ----- gublan account: sign in with discord, settings follow you (see account.py) -----------------------
+    def _account_menu(self):
+        if self.account_busy == "signing in":
+            return [("waiting for the browser (cancel)", accounts.cancel_sign_in)]
+        user = self.account.user()
+        if not user:
+            return [("sign in with discord...", self.account_sign_in)]
+        return [
+            {"label": f"signed in as {user['name']}", "enabled": False},
+            ("sync settings now", lambda: self.account_sync(manual=True)),
+            ("sign out", self.account_sign_out),
+            "-",
+            ("delete my saved settings...", self.account_delete),
+        ]
+
+    def _account_work(self, busy, work, done):
+        """run work() on a background thread, then done(result, error) on the tk thread."""
+        self.account_busy = busy
+
+        def run():
+            try:
+                result, error = work(), None
+            except accounts.AccountError as err:
+                result, error = None, err
+            except Exception as err:  # noqa: BLE001 - a sync problem must never take the studio down
+                result, error = None, accounts.AccountError(f"{type(err).__name__}: {err}")
+            self.queue.put(("call", lambda: finish(result, error)))
+
+        def finish(result, error):
+            self.account_busy = ""
+            done(result, error)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def account_sign_in(self):
+        if self.account_busy:
+            return
+        self.flash("finish signing in with discord in your browser...", seconds=30)
+
+        def done(session, error):
+            if error is not None:
+                if "cancelled" not in str(error):
+                    message(self.root, "sign in", "couldn't sign in with discord.", kind="error", details=str(error))
+                return
+            self.account.set_session(session)
+            user = self.account.user() or {"name": "you"}
+            self.toast(f"signed in as {user['name']}")
+            self.account_sync(first=True)
+
+        self._account_work("signing in", accounts.sign_in, done)
+
+    def account_sync(self, manual=False, first=False):
+        if self.account_busy or not self.account.signed_in:
+            return
+        before = dict(self.settings)
+
+        def done(merged, error):
+            if error is not None:
+                if manual or first or not self.account.signed_in:
+                    message(self.root, "sync settings", "couldn't sync your settings.", kind="error",
+                            details=str(error))
+                else:
+                    self.flash(f"settings sync failed: {error}")
+                return
+            # only take what changed in the cloud: anything changed here while syncing stays
+            changed = {key: value for key, value in merged.items() if before.get(key) != value}
+            if changed:
+                self.settings.update(changed)
+                self.apply_settings(self.settings)
+                self.flash("your settings from your gublan account are in")
+            elif manual or first:
+                self.flash("settings synced")
+
+        self._account_work("syncing", lambda: self.account.sync(before), done)
+
+    def _account_soon(self, delay=3000):
+        """sync a little after settings change, so a run of changes only syncs once."""
+        if not self.account.signed_in or not hasattr(self, "root"):
+            return
+        if self.account_job is not None:
+            self.root.after_cancel(self.account_job)
+        self.account_job = self.root.after(delay, self._account_due)
+
+    def _account_due(self):
+        self.account_job = None
+        if self.account.needs_sync(self.settings):
+            self.account_sync()
+
+    def _account_tick(self, count=0):
+        """every minute: sends settings saved without apply_settings (dialogs that call config.save). at start and
+        every five minutes it also fetches changes made on another computer."""
+        try:
+            if self.account.signed_in and not self.account_busy and \
+                    (count % 5 == 0 or self.account.needs_sync(self.settings)):
+                self.account_sync()
+        finally:
+            self.root.after(60000, lambda: self._account_tick(count + 1))
+
+    def account_sign_out(self):
+        if self.account_busy:
+            return
+        self._account_work("syncing", self.account.sign_out,
+                           lambda _result, _error: self.flash("signed out. your settings stay on this computer."))
+
+    def account_delete(self):
+        if self.account_busy:
+            return
+        if not confirm(self.root, "delete saved settings",
+                       "delete the settings saved in your gublan account? this computer keeps its own copy, and "
+                       "the website loses the settings and files it synced too.", yes="delete", danger=True):
+            return
+
+        def done(_result, error):
+            if error is not None:
+                message(self.root, "delete saved settings", "couldn't delete them.", kind="error",
+                        details=str(error))
+                return
+            self.account.forget()
+            self.flash("deleted your saved settings and signed out")
+
+        self._account_work("syncing", self.account.delete_data, done)
+
     def _live_menu(self):
         live = self.live
         if live is None:

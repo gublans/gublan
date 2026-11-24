@@ -194,6 +194,19 @@ The playground runs 2D games, text programs, keyboard and mouse input, buttons, 
 `save`/`load` (kept in your browser). 3D scenes, files, and pictures or sounds from your computer need Gublan
 Studio.
 
+### Gublan accounts
+
+Sign in with Discord to keep your settings in your Gublan account. In the playground, use the **sign in** button;
+in Gublan Studio, use **Tools > account (sync settings)**. The playground also keeps your files there. Your settings then
+follow you to any browser or computer where you sign in. When a setting changes in two places, the most recent change
+wins. Pane sizes, recent files and other things that belong to one computer stay local. **delete my saved data**
+(in the playground's settings, or the studio's account menu) removes everything stored in your account.
+
+Accounts run on [Supabase](https://supabase.com). The project URL and publishable key are in `studio/account.py`,
+and `web/build_site.py` copies them into the website's `account.js`. Both are public on purpose. Row-level security
+on the `user_data` table keeps each person's row private. Never put a `service_role`/secret key or the Discord
+client secret in this repository.
+
 It uses the same checker and translator as Gublan Studio's JavaScript export, running in the browser through
 [Pyodide](https://pyodide.org), so it always matches the current language. The website lives in `web/`: the home
 page in `web/home/` (published at <https://gublan.xyz/>) and the playground in `web/playground/` (published at

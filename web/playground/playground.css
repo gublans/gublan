@@ -40,6 +40,9 @@
   color-scheme: dark;
 }
 
+/* gublan.xyz is all square: no rounded corners anywhere, the same as the home page */
+*, *::before, *::after { border-radius: 0 !important; }
+
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f3f1ec;
@@ -89,7 +92,7 @@ body {
 }
 a { color: var(--accent-light); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-alt); }
+kbd { font: 12px var(--mono); text-transform: lowercase; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-alt); }
 
 /* the "animations" setting off (or the system asking for less motion) */
 .no-motion *, .no-motion *::before, .no-motion *::after {
@@ -137,6 +140,14 @@ kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid var(--border);
 @media (max-width: 1180px) { .site-tabs a[href^="https:"] { display: none; } }
 @media (max-width: 1040px) { .site-tabs { display: none; } }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
+/* the gublan account button: discord's mark or your avatar, then "sign in" or your name */
+button.account { max-width: 200px; padding: 0 10px 0 6px; }
+button.account .face { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: none; overflow: hidden; color: #8c9eff; }
+button.account .face svg { width: 16px; height: 16px; }
+button.account .face img { width: 20px; height: 20px; display: block; }
+button.account #account-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.account.signed-in { border-color: color-mix(in srgb, var(--accent-light) 45%, var(--border)); }
 
 button, select, .download {
   display: inline-flex;
@@ -480,7 +491,7 @@ body.resizing iframe { pointer-events: none; }
 .ref-search { position: sticky; top: 0; z-index: 1; padding: 8px 12px; background: var(--editor-bg); border-bottom: 1px solid var(--border); }
 .ref-search input { width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; }
 .reference { padding: 4px 0 12px; font-size: 13px; }
-.reference h3 { margin: 12px 14px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-light); }
+.reference h3 { margin: 12px 14px 4px; font-size: 12px; text-transform: lowercase; letter-spacing: .06em; color: var(--accent-light); }
 .reference .entry { padding: 6px 14px; border-left: 2px solid transparent; transition: background-color .15s, border-color .15s; }
 .reference .entry:hover { background: var(--hover); border-left-color: var(--accent); }
 .reference .entry.flash { animation: fx-line calc(1s * var(--speed)) ease-out; }
@@ -545,7 +556,7 @@ body.resizing iframe { pointer-events: none; }
 .drawer section:nth-child(3) { animation-delay: .08s; }
 .drawer section:nth-child(4) { animation-delay: .12s; }
 .drawer section:nth-child(5) { animation-delay: .16s; }
-.drawer h3 { margin: 6px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-light); }
+.drawer h3 { margin: 6px 0 8px; font-size: 12px; text-transform: lowercase; letter-spacing: .06em; color: var(--accent-light); }
 .setting { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
 .setting > span:first-child { color: var(--muted); }
 .setting select { width: 100%; max-width: none; height: 30px; }
@@ -568,6 +579,17 @@ body.resizing iframe { pointer-events: none; }
 .color-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 6px 0; font-size: 13px; }
 .drawer .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .drawer .about { margin: 2px 0 6px; font-size: 12px; color: var(--dim); }
+.drawer button.danger { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, var(--border)); }
+.drawer button.danger:hover { background: color-mix(in srgb, var(--error) 14%, var(--panel-alt)); }
+
+/* settings > account */
+#settings-account .who { display: flex; align-items: center; gap: 12px; margin: 4px 0 2px; }
+#settings-account .who img { width: 40px; height: 40px; flex: none; border: 1px solid var(--border); }
+#settings-account .who b { display: block; font-size: 14px; }
+#settings-account .who .about { margin: 2px 0 0; }
+#settings-account button.discord { gap: 8px; }
+#settings-account button.discord .face { display: inline-grid; place-items: center; width: 16px; height: 16px; }
+#settings-account button.discord svg { width: 16px; height: 16px; }
 .setting output { min-width: 44px; font: 12px var(--mono); color: var(--muted); text-align: right; }
 .text-field { width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--editor-bg); color: var(--text); font: inherit; }
 .keys { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
@@ -606,8 +628,8 @@ body.resizing iframe { pointer-events: none; }
 .palette input { width: 100%; height: 44px; padding: 0 16px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); font: 15px var(--sans); outline: none; }
 .palette ul { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow: auto; }
 .palette li { display: flex; justify-content: space-between; gap: 16px; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13.5px; }
-.palette li small { color: var(--dim); font: 12px var(--mono); white-space: nowrap; }
-.palette li .kind { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-right: 8px; }
+.palette li small { color: var(--dim); font: 12px var(--mono); white-space: nowrap; text-transform: lowercase; }
+.palette li .kind { color: var(--dim); font-size: 11px; text-transform: lowercase; letter-spacing: .05em; margin-right: 8px; }
 .palette li.chosen { background: var(--select); }
 .palette li mark { background: none; color: var(--accent-light); font-weight: 600; }
 
@@ -624,6 +646,8 @@ body.resizing iframe { pointer-events: none; }
   .actions button, .download { padding: 0 10px; }
   .actions button span, .download span { display: none; }
   .actions button.primary span { display: inline; }
+  .actions button.account { width: 32px; padding: 0; justify-content: center; }
+  .actions button.account .face { display: inline-grid; }
   select { max-width: 120px; }
   .stage-tools { opacity: 1; transform: none; }
   .setting { grid-template-columns: 1fr; gap: 4px; }

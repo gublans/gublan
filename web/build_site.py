@@ -7,6 +7,7 @@
 the site has two parts:
     /             the home page (web/home/): intro, downloads and live github numbers
     /playground/  the online playground (web/playground/)
+    /account.js   sign in with discord, used by both (web/account.js)
 
 the playground is copied together with the real gublan files it needs (the checker, the javascript translator,
 the javascript runtime, the modules and the examples), so the website always runs the same language as the studio.
@@ -124,6 +125,22 @@ def _home(out, version):
     _copy("logo.ico", out)
 
 
+def _account(out):
+    """account.js, shared by the home page and the playground, with the supabase project filled in from the studio
+    (studio/account.py), so the website and the app use one set of accounts. the url and the publishable key are
+    public by design; never put a secret or service_role key in either file."""
+    try:
+        found = _constants("studio/account.py")
+    except (OSError, SyntaxError):
+        found = {}
+    with open(os.path.join(WEB, "account.js"), "r", encoding="utf-8") as handle:
+        text = handle.read()
+    text = text.replace("{{SUPABASE_URL}}", str(found.get("SUPABASE_URL", ""))).replace(
+        "{{SUPABASE_KEY}}", str(found.get("SUPABASE_KEY", "")))
+    with open(os.path.join(out, "account.js"), "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
 def _playground(out, version):
     out = os.path.join(out, PLAYGROUND)
     for name in PAGE_FILES:
@@ -168,6 +185,7 @@ def build(out):
     os.makedirs(out)
     version = _version()
     _home(out, version)
+    _account(out)
     manifest = _playground(out, version)
     # github pages would otherwise run jekyll, which hides files and folders that start with an underscore
     open(os.path.join(out, ".nojekyll"), "w").close()
