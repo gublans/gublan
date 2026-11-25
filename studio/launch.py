@@ -48,6 +48,14 @@ def launch(argv=None):
         # GublanStudio.exe --mcp [project folder]: be an mcp server for ai helpers instead of opening a window
         import gublanmcp
         return gublanmcp.serve(argv[1] if len(argv) > 1 else None)
+    # GublanStudio.exe --run program.gubl ("run with gublan" in explorer): open it and start it straight away
+    run = bool(argv) and argv[0] == "--run"
+    if run:
+        argv = argv[1:]
+    paths = [os.path.abspath(path) for path in argv if os.path.exists(path)]
+    from . import shell
+    if paths and shell.forward(paths, run):
+        return 0  # a studio is already open: it took the files
     theme.enable_dpi_awareness()
     root = tk.Tk()
     root.withdraw()
@@ -57,7 +65,7 @@ def launch(argv=None):
     try:
         from .app import GublanStudio
         theme.setup_styles(root)
-        studio = GublanStudio(root, [path for path in argv if os.path.exists(path)])
+        studio = GublanStudio(root, paths, run=run)
     finally:
         splash.destroy()
     root.deiconify()

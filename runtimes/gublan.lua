@@ -1707,6 +1707,8 @@ local held, presses, mouse_held, clicks = {}, {}, {}, {}
 local mouse_x, mouse_y = 0, 0
 local focused, dragging, ui_label = nil, nil, nil
 local overlay, shown_error = nil, nil
+-- velocity and gravity, and the clicks each frame saw (filled in further down)
+local motion = {gravity = 0, clicks = {}, frame_clicks = {}, drawn = 0}
 
 local function rgb(value)
     if is_list(value) then
@@ -1914,7 +1916,7 @@ function G.focus(name)
     focused = name ~= nil and str(name) or nil
 end
 
-local FIELD_ALIASES = {width = "w", height = "h", radius = "r", rotation = "angle"}
+local FIELD_ALIASES = {width = "w", height = "h", radius = "r", rotation = "angle", depth = "d"}
 -- ----- the view, effects and tweens ---------------------------------------------------------------------------------------------
 local scroll_x, scroll_y, shake, shake_x, shake_y = 0, 0, nil, 0, 0
 local particles, tweens = {}, {}
@@ -1996,6 +1998,9 @@ local function tick_effects()
     local time_now = now()
     local step = math.min(0.1, math.max(0, time_now - effects_time))
     effects_time = time_now
+    if motion.tick then
+        motion.tick(step)
+    end
     for index = #tweens, 1, -1 do
         local tween = tweens[index]
         tween[6] = tween[6] + step
@@ -2036,6 +2041,8 @@ local function object_field(name, key)
         local was = found.submitted == true
         found.submitted = false
         return was
+    elseif (key == "vx" or key == "vy" or key == "vz") and found.x ~= nil then
+        return found[key] or 0
     elseif (key == "w" or key == "h") and found[key] == nil and found.picture then
         return key == "w" and found.picture:getWidth() or found.picture:getHeight()
     end
@@ -2053,6 +2060,9 @@ local function set_object_field(name, key, value)
     elseif key == "text" and found.type == "textbox" then
         found.text = str(value)
         found.cursor = #chars(found.text)
+    elseif key == "vx" or key == "vy" or key == "vz" then
+        found.vx, found.vy, found.vz = found.vx or 0, found.vy or 0, found.vz or 0
+        found[key] = value
     else
         found[key] = value
     end
@@ -2506,6 +2516,10 @@ local function on_press(x, y, button)
     if button ~= 1 then
         return
     end
+    motion.clicks[#motion.clicks + 1] = {x, y}
+    if #motion.clicks > 16 then
+        table.remove(motion.clicks, 1)
+    end
     if ui_label and x >= 20 and x <= 200 and y >= 20 and y <= 58 then
         G.ui = ui_label
     end
@@ -2570,6 +2584,8 @@ end
 
 function G.frame()
     pause(nil)
+    motion.frame_clicks, motion.clicks = motion.clicks, {}
+    motion.drawn = motion.drawn + 1
 end
 
 function G.wait(seconds)
@@ -2807,6 +2823,637 @@ function G.start(main, name)
         if not visible then
             held = {}
         end
+    end
+end
+
+-- ----- added in 1.0.9: files, movement, clicks and more functions -------------------------------------------------------------
+do
+    local WEEKDAYS = {"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"}
+    local FILE_LIMIT = 10 * 1024 * 1024
+    local OUTSIDE = "file paths stay inside your program's folder, like notes.txt or saves/one.txt"
+    local UI = {button = true, textbox = true, slider = true, checkbox = true}
+
+    function G.seed(value)
+        if type(value) ~= "number" then
+            local text, total = str(value), 0
+            for index = 1, #text do
+                total = (total * 31 + text:byte(index)) % 2147483647
+            end
+            value = total
+        end
+        math.randomseed(floor(value * 1000) % 2147483647)
+        math.random()
+    end
+
+    function G.pop(items, position)
+        if not is_list(items) then
+            fail("pop needs a list")
+        end
+        local size = #items
+        if size == 0 then
+            fail("that list is empty, so there is nothing to take")
+        end
+        if position == nil then
+            return table.remove(items)
+        end
+        if type(position) ~= "number" or position ~= floor(position) then
+            fail("list positions must be whole numbers")
+        end
+        if position < -size or position >= size then
+            fail("position " .. str(position) .. " is past the end (length " .. size .. ")")
+        end
+        if position < 0 then
+            position = size + position
+        end
+        return table.remove(items, position + 1)
+    end
+
+    -- ----- moving by itself
+    function G.velocity(name, vx, vy, vz)
+        local found = object(name)
+        if found.x == nil or found.y == nil then
+            fail("a " .. found.type .. " can't move by itself")
+        end
+        if vz ~= nil and vz ~= 0 then
+            fail("only 3d shapes can move along z")
+        end
+        found.vx, found.vy, found.vz = vx, vy, 0
+    end
+    function G.gravity(amount) motion.gravity = amount end
+    motion.tick = function(step)
+        if step <= 0 then
+            return
+        end
+        for _, found in pairs(objects) do
+            if found.vx ~= nil then
+                found.vy = found.vy + motion.gravity * step
+                local dx, dy = found.vx * step, found.vy * step
+                found.x, found.y = found.x + dx, found.y + dy
+                if found.type == "line" then
+                    found.x2, found.y2 = found.x2 + dx, found.y2 + dy
+                end
+            end
+        end
+    end
+
+    function G.screenshot(path)
+        if not window_open then
+            fail("add 'mode 2d' before you take a screenshot")
+        end
+        path = G.__file_path(path, "screenshot")
+        if not path:lower():match("%.png$") then
+            path = path .. ".png"
+        end
+        local folder = path:match("^(.*)/[^/]*$")
+        if folder then
+            love.filesystem.createDirectory(folder)
+        end
+        love.graphics.captureScreenshot(path)
+    end
+
+    -- ----- dates and time
+    local function today() return os.date("*t") end
+    function G.year() return today().year end
+    function G.month() return today().month end
+    function G.day() return today().day end
+    function G.hour() return today().hour end
+    function G.minute() return today().min end
+    function G.second() return today().sec end
+    function G.weekday() return WEEKDAYS[today().wday] end
+    function G.timetext(seconds)
+        local sign = seconds < 0 and "-" or ""
+        seconds = floor(abs(seconds))
+        local hours, minutes = floor(seconds / 3600), floor(seconds % 3600 / 60)
+        seconds = seconds % 60
+        if hours > 0 then
+            return string.format("%s%d:%02d:%02d", sign, hours, minutes, seconds)
+        end
+        return string.format("%s%d:%02d", sign, minutes, seconds)
+    end
+
+    -- ----- text
+    function G.left(text, count)
+        count = floor(count)
+        local letters = chars(str(text))
+        if count <= 0 then
+            return ""
+        end
+        return concat(letters, "", 1, math.min(count, #letters))
+    end
+    function G.right(text, count)
+        count = floor(count)
+        local letters = chars(str(text))
+        if count <= 0 then
+            return ""
+        end
+        return concat(letters, "", math.max(1, #letters - count + 1), #letters)
+    end
+    function G.matches(text, pattern)
+        local letters, wanted = chars(str(text):lower()), chars(str(pattern):lower())
+        -- can the first i letters match the first j pattern letters? (one row at a time)
+        local row = {[0] = true}
+        for j = 1, #wanted do
+            row[j] = row[j - 1] and wanted[j] == "*"
+        end
+        for i = 1, #letters do
+            local next_row = {[0] = false}
+            for j = 1, #wanted do
+                local mark = wanted[j]
+                if mark == "*" then
+                    next_row[j] = next_row[j - 1] or row[j]
+                else
+                    next_row[j] = row[j - 1] and (mark == "?" or mark == letters[i])
+                end
+            end
+            row = next_row
+        end
+        return row[#wanted] == true
+    end
+
+    -- ----- vectors and numbers
+    local function tidy(x)
+        return x
+    end
+    local function vector_parts(value, name)
+        if is_vec(value) then
+            if value.n == 3 then
+                return {value.x, value.y, value.z}, true
+            end
+            return {value.x, value.y}, true
+        end
+        if is_list(value) and (#value == 2 or #value == 3) then
+            local parts = {}
+            for index, part in ipairs(value) do
+                if type(part) ~= "number" then
+                    parts = nil
+                    break
+                end
+                parts[index] = part
+            end
+            if parts then
+                return parts, false
+            end
+        end
+        fail(name .. "() needs a vec2, a vec3 or a list of numbers, got '" .. str(value) .. "'")
+    end
+    function G.normalize(value)
+        local parts, is_vector = vector_parts(value, "normalize")
+        local length = 0
+        for _, part in ipairs(parts) do
+            length = length + part * part
+        end
+        length = sqrt(length)
+        if length > 0 then
+            for index, part in ipairs(parts) do
+                parts[index] = part / length
+            end
+        end
+        if is_vector then
+            return vec(#parts, parts[1], parts[2], parts[3])
+        end
+        return parts
+    end
+    function G.dot(first, second)
+        local a, b = vector_parts(first, "dot"), vector_parts(second, "dot")
+        if #a ~= #b then
+            fail("dot() needs two vectors of the same size")
+        end
+        local total = 0
+        for index = 1, #a do
+            total = total + a[index] * b[index]
+        end
+        return tidy(total)
+    end
+    function G.cross(first, second)
+        local a, b = vector_parts(first, "cross"), vector_parts(second, "cross")
+        local ax, ay, az = a[1], a[2], a[3] or 0
+        local bx, by, bz = b[1], b[2], b[3] or 0
+        return vec(3, ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx)
+    end
+    function G.percent(part, whole_amount)
+        if whole_amount == 0 then
+            return 0
+        end
+        return part / whole_amount * 100
+    end
+
+    -- ----- lists
+    function G.sample(items, count)
+        if type(items) == "string" then
+            items = chars(items)
+        elseif not is_list(items) then
+            fail("sample() needs a list, got '" .. str(items) .. "'")
+        end
+        local pool = {}
+        for index, value in ipairs(items) do
+            pool[index] = value
+        end
+        local wanted = math.max(0, math.min(floor(count), #pool))
+        local out = {}
+        for index = 1, wanted do
+            local pick = math.random(index, #pool)
+            pool[index], pool[pick] = pool[pick], pool[index]
+            out[index] = pool[index]
+        end
+        return out
+    end
+    function G.findindex(items, f)
+        if type(items) == "string" then
+            items = chars(items)
+        elseif not is_list(items) then
+            fail("findindex() needs a list, got '" .. str(items) .. "'")
+        end
+        for index, value in ipairs(items) do
+            if G.truthy(f(value)) then
+                return index - 1
+            end
+        end
+        return -1
+    end
+
+    -- ----- the mouse on objects
+    local function centre(value)
+        if is_vec(value) then
+            if value.n == 3 then
+                return {value.x, value.y, value.z}
+            end
+            return {value.x, value.y}
+        end
+        local found = object(value)
+        if found.type == "line" then
+            return {(found.x + found.x2) / 2, (found.y + found.y2) / 2}
+        end
+        local box = shape(found)
+        if box[1] == "circle" then
+            return {box[2], box[3]}
+        end
+        return {box[2] + box[4] / 2, box[3] + box[5] / 2}
+    end
+    local function point_on(found, x, y)
+        if found.hidden then
+            return false
+        end
+        if not UI[found.type] and not found.fixed then
+            x, y = x + scroll_x, y + scroll_y
+        end
+        local box = shape(found)
+        if box[1] == "circle" then
+            return (x - box[2]) ^ 2 + (y - box[3]) ^ 2 <= box[4] ^ 2
+        end
+        return x >= box[2] and x <= box[2] + box[4] and y >= box[3] and y <= box[3] + box[5]
+    end
+    function G.clicked(name)
+        if not window_open then
+            fail("add 'mode 2d' before you check the mouse")
+        end
+        local found = object(name)
+        if motion.drawn == 0 then
+            for index, click in ipairs(motion.clicks) do
+                if point_on(found, click[1], click[2]) then
+                    table.remove(motion.clicks, index)
+                    return true
+                end
+            end
+            return false
+        end
+        for _, click in ipairs(motion.frame_clicks) do
+            if point_on(found, click[1], click[2]) then
+                return true
+            end
+        end
+        return false
+    end
+    function G.hovering(name)
+        if not window_open then
+            fail("add 'mode 2d' before you check the mouse")
+        end
+        return point_on(object(name), mouse_x, mouse_y)
+    end
+    function G.distance(first, second)
+        local a, b = centre(first), centre(second)
+        local total = 0
+        for index = 1, math.min(#a, #b) do
+            total = total + (a[index] - b[index]) ^ 2
+        end
+        return sqrt(total)
+    end
+
+    -- ----- files. they stay inside the program's folder (with love2d: its save folder, then the game's own files)
+    local function file_path(relative, what)
+        relative = trim(str(relative))
+        if relative == "" then
+            fail("give the " .. (what or "file") .. " a name, like notes.txt")
+        end
+        local cleaned = relative:gsub("\\", "/")
+        if cleaned:sub(1, 1) == "/" or cleaned:find(":", 1, true) then
+            fail(OUTSIDE)
+        end
+        local pieces = {}
+        for piece in cleaned:gmatch("[^/]+") do
+            if piece == ".." then
+                fail(OUTSIDE)
+            end
+            if piece ~= "." then
+                pieces[#pieces + 1] = piece
+            end
+        end
+        return concat(pieces, "/")
+    end
+    G.__file_path = file_path
+
+    local base = nil
+    local function real(path)
+        if base == nil then
+            local script = type(arg) == "table" and arg[0] or ""
+            base = tostring(script):match("^(.*)[/\\][^/\\]*$") or "."
+        end
+        return path == "" and base or base .. "/" .. path
+    end
+    local lf = has_love and love.filesystem
+    local no_folders = "folders need love2d outside gublan: run this folder with love"
+
+    local function kind_of(path)
+        if lf then
+            if path == "" then
+                return "folder"
+            end
+            if lf.getInfo then
+                local info = lf.getInfo(path)
+                return info and (info.type == "directory" and "folder" or "file") or nil
+            end
+            return lf.isDirectory(path) and "folder" or lf.isFile(path) and "file" or nil
+        end
+        local handle = io.open(real(path), "rb")
+        if handle then
+            local _, _, code = handle:read(0)
+            handle:close()
+            return code == 21 and "folder" or "file"
+        end
+        return os.rename(real(path), real(path)) and "folder" or nil
+    end
+    local function size_of(path)
+        if lf then
+            if lf.getInfo then
+                return (lf.getInfo(path) or {}).size or 0
+            end
+            return lf.getSize(path)
+        end
+        local handle = io.open(real(path), "rb")
+        local size = handle:seek("end")
+        handle:close()
+        return size
+    end
+    local function raw_read(path)
+        if lf then
+            return lf.read(path)
+        end
+        local handle = io.open(real(path), "rb")
+        local text = handle:read("*a")
+        handle:close()
+        return text
+    end
+    local function raw_write(path, text, append, label)
+        if lf then
+            local folder = path:match("^(.*)/[^/]*$")
+            if folder then
+                lf.createDirectory(folder)
+            end
+            local ok, problem = (append and lf.append or lf.write)(path, text)
+            if not ok then
+                fail("could not write '" .. label .. "': " .. tostring(problem):lower())
+            end
+            return
+        end
+        local handle, problem = io.open(real(path), append and "ab" or "wb")
+        if not handle then
+            if path:find("/", 1, true) then
+                fail("could not write '" .. label .. "'. " .. no_folders)
+            end
+            fail("could not write '" .. label .. "': " .. tostring(problem):lower())
+        end
+        handle:write(text)
+        handle:close()
+    end
+
+    local function read_text(relative)
+        local path = file_path(relative)
+        local kind = kind_of(path)
+        if kind == "folder" then
+            fail("'" .. str(relative) .. "' is a folder, not a file")
+        elseif kind == nil then
+            fail("file '" .. str(relative) .. "' was not found")
+        elseif size_of(path) > FILE_LIMIT then
+            fail("file '" .. str(relative) .. "' is too big to read (the most is 10 mb)")
+        end
+        local text = raw_read(path) or ""
+        return (text:gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n"))
+    end
+    local function write_text(relative, text, append)
+        local path = file_path(relative)
+        if kind_of(path) == "folder" then
+            fail("'" .. str(relative) .. "' is a folder, not a file")
+        end
+        if #text > FILE_LIMIT then
+            fail("that is too much to write at once (the most is 10 mb)")
+        end
+        if append and kind_of(path) == "file" and size_of(path) > 0 then
+            local old = raw_read(path) or ""
+            local last = old:sub(-1)
+            if last ~= "\n" and last ~= "\r" then
+                text = "\n" .. text
+            end
+        end
+        raw_write(path, text, append, str(relative))
+    end
+    local function file_value(value)
+        if is_list(value) then
+            local parts = {}
+            for index, part in ipairs(value) do
+                parts[index] = str(part)
+            end
+            return concat(parts, "\n")
+        end
+        return str(value)
+    end
+
+    function G.writefile(path, value) write_text(path, file_value(value), false) end
+    function G.appendfile(path, value) write_text(path, file_value(value) .. "\n", true) end
+    function G.readfile(path) return read_text(path) end
+    function G.readlines(path) return G.lines(read_text(path)) end
+    function G.fileexists(path) return kind_of(file_path(path)) ~= nil end
+    function G.isfolder(path) return kind_of(file_path(path)) == "folder" end
+    function G.filesize(path)
+        local where = file_path(path)
+        if kind_of(where) ~= "file" then
+            fail("file '" .. str(path) .. "' was not found")
+        end
+        return size_of(where)
+    end
+    function G.deletefile(relative)
+        local path = file_path(relative)
+        if path == "" then
+            fail("gublan won't delete your program's own folder")
+        end
+        local kind = kind_of(path)
+        if kind == nil then
+            return
+        end
+        if kind == "folder" then
+            if not lf then
+                fail(no_folders)
+            end
+            if #lf.getDirectoryItems(path) > 0 then
+                fail("folder '" .. str(relative) .. "' is not empty. delete the files in it first")
+            end
+        end
+        local ok, problem
+        if lf then
+            ok = lf.remove(path)
+        else
+            ok, problem = os.remove(real(path))
+        end
+        if not ok then
+            fail("could not delete '" .. str(relative) .. "'" .. (problem and ": " .. tostring(problem):lower() or ""))
+        end
+    end
+    function G.makefolder(relative)
+        local path = file_path(relative, "folder")
+        local kind = kind_of(path)
+        if kind == "file" then
+            fail("'" .. str(relative) .. "' is already a file")
+        elseif kind == nil then
+            if not lf then
+                fail(no_folders)
+            end
+            lf.createDirectory(path)
+        end
+    end
+    function G.listfiles(relative)
+        local path = (relative == nil or trim(str(relative)) == "") and "" or file_path(relative, "folder")
+        if kind_of(path) ~= "folder" then
+            fail("'" .. str(relative or ".") .. "' is not a folder")
+        end
+        if not lf then
+            fail(no_folders)
+        end
+        local names = lf.getDirectoryItems(path)
+        table.sort(names, function(a, b) return a:lower() < b:lower() end)
+        return names
+    end
+    local function move_file(source_name, target_name, keep)
+        local source, target = file_path(source_name), file_path(target_name)
+        if kind_of(source) ~= "file" then
+            fail("file '" .. str(source_name) .. "' was not found")
+        end
+        if kind_of(target) == "folder" then
+            target = (target == "" and "" or target .. "/") .. source:match("([^/]*)$")
+        end
+        if not keep and not lf then
+            local ok, problem = os.rename(real(source), real(target))
+            if not ok then
+                fail("could not rename '" .. str(source_name) .. "': " .. tostring(problem):lower())
+            end
+            return
+        end
+        raw_write(target, raw_read(source) or "", false, str(target_name))
+        if not keep then
+            lf.remove(source)
+        end
+    end
+    function G.copyfile(source, target) move_file(source, target, true) end
+    function G.renamefile(source, target) move_file(source, target, false) end
+    function G.filename(path)
+        local cleaned = str(path):gsub("\\", "/"):gsub("/+$", "")
+        return cleaned:match("([^/]*)$")
+    end
+    function G.extension(path)
+        local name = str(path):gsub("\\", "/"):match("([^/]*)$")
+        local stripped = name:gsub("^%.+", ""):gsub("%.+$", "")
+        if not stripped:find(".", 1, true) then
+            return ""
+        end
+        return name:match("%.([^.]*)$")
+    end
+
+    -- ----- csv: rows of cells, like a spreadsheet saves them
+    local function csv_value(cell)
+        local cleaned = trim(cell)
+        if cleaned:match("^%-?0$") or cleaned:match("^%-?[1-9]%d*$") or cleaned:match("^%-?0%.%d+$")
+            or cleaned:match("^%-?[1-9]%d*%.%d+$") then
+            return tonumber(cleaned)
+        end
+        return cell
+    end
+    function G.fromcsv(text)
+        text = str(text)
+        local rows, row, cell, started, quoted = {}, {}, {}, false, false
+        local index, size = 1, #text
+        local function end_cell()
+            row[#row + 1] = csv_value(concat(cell))
+            cell, started = {}, false
+        end
+        while index <= size do
+            local letter = text:sub(index, index)
+            if quoted then
+                if letter == '"' then
+                    if text:sub(index + 1, index + 1) == '"' then
+                        cell[#cell + 1] = '"'
+                        index = index + 1
+                    else
+                        quoted = false
+                    end
+                else
+                    cell[#cell + 1] = letter
+                end
+            elseif letter == '"' and #cell == 0 then
+                quoted, started = true, true
+            elseif letter == "," then
+                end_cell()
+            elseif letter == "\r" or letter == "\n" then
+                if letter == "\r" and text:sub(index + 1, index + 1) == "\n" then
+                    index = index + 1
+                end
+                if #row == 0 and #cell == 0 and not started then
+                    rows[#rows + 1] = {}
+                else
+                    end_cell()
+                    rows[#rows + 1] = row
+                end
+                row = {}
+            else
+                cell[#cell + 1] = letter
+            end
+            index = index + 1
+        end
+        if #row > 0 or #cell > 0 or started then
+            end_cell()
+            rows[#rows + 1] = row
+        end
+        return rows
+    end
+    function G.tocsv(rows)
+        if not is_list(rows) then
+            fail("tocsv() needs a list of rows, got '" .. str(rows) .. "'")
+        end
+        for _, row in ipairs(rows) do
+            if not is_list(row) then
+                rows = {rows}
+                break
+            end
+        end
+        local out = {}
+        for _, row in ipairs(rows) do
+            local cells = {}
+            for index, value in ipairs(row) do
+                local text = str(value)
+                if text:find('[,"\r\n]') then
+                    text = '"' .. text:gsub('"', '""') .. '"'
+                end
+                cells[index] = text
+            end
+            out[#out + 1] = concat(cells, ",")
+        end
+        return (concat(out, "\n"):gsub("\n+$", ""))
     end
 end
 

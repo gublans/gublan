@@ -36,6 +36,9 @@
   const isMap = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Vector);
   const isNumber = (v) => typeof v === "number";
   const fail = (text) => { throw new GublanError(text); };
+  // seed makes random numbers repeat. until then they come from Math.random
+  let seeded = null;
+  const rand = () => (seeded ? seeded() : Math.random());
 
   // ----- values ------------------------------------------------------------------------------------------
   function str(value) {
@@ -231,7 +234,7 @@
   const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   G.shuffle_list = (items) => {
     for (let i = items.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rand() * (i + 1));
       [items[i], items[j]] = [items[j], items[i]];
     }
   };
@@ -285,17 +288,17 @@
       return degrees(Math.atan2(y2 - y1, x2 - x1));
     },
     random: (low, high) => {
-      if (low === undefined) return Math.random();
+      if (low === undefined) return rand();
       if (low > high) [low, high] = [high, low];
-      if (Number.isInteger(low) && Number.isInteger(high)) return low + Math.floor(Math.random() * (high - low + 1));
-      return low + Math.random() * (high - low);
+      if (Number.isInteger(low) && Number.isInteger(high)) return low + Math.floor(rand() * (high - low + 1));
+      return low + rand() * (high - low);
     },
     randint: (low, high) => {
       low = Math.trunc(low); high = Math.trunc(high);
       if (low > high) [low, high] = [high, low];
-      return low + Math.floor(Math.random() * (high - low + 1));
+      return low + Math.floor(rand() * (high - low + 1));
     },
-    chance: (percent) => Math.random() * 100 < percent,
+    chance: (percent) => rand() * 100 < percent,
     vec2: (x, y) => new Vector(x, y),
     vec3: (x, y, z) => new Vector(x, y, z),
     hsv: (hue, saturation, value) => {
@@ -365,7 +368,7 @@
     },
     decimals: (x, digits) => x.toFixed(digits),
     isnumber: (v) => typeof v === "number" || (typeof v === "string" && /^\s*-?(\d+\.?\d*|\.\d+)\s*$/.test(v)),
-    lines: (t) => str(t).split(/\r?\n/),
+    lines: (t) => { const out = str(t).split(/\r\n|\r|\n/); if (out[out.length - 1] === "") out.pop(); return out; },
     words: (t) => str(t).split(/\s+/).filter(Boolean),
     char: (c) => String.fromCodePoint(c),
     code: (letter) => str(letter).codePointAt(0),
@@ -426,7 +429,7 @@
     values: (values) => Object.values(values),
     indexof: (container, value) => (typeof container === "string" ? container.indexOf(str(value))
       : container.findIndex((v) => eq(v, value))),
-    choice: (items) => items[Math.floor(Math.random() * items.length)],
+    choice: (items) => items[Math.floor(rand() * items.length)],
     shuffle: (items) => { const copy = items.slice(); G.shuffle_list(copy); return copy; },
     unique: (items) => items.filter((v, i) => items.findIndex((w) => eq(v, w)) === i),
     count: (container, value) => {
@@ -572,7 +575,7 @@
       t = G.clamp(t, 0, 1);
       return one.map((c, i) => Math.floor(c + (two[i] - c) * t + 0.5));
     },
-    randomcolor: () => G.hsv(Math.random() * 360, 0.65, 0.95),
+    randomcolor: () => G.hsv(rand() * 360, 0.65, 0.95),
     cooldown: (name, seconds) => {
       const key = "cooldown:" + str(name), now = G.time(), last = timers.get(key);
       if (last === undefined || now - last >= seconds) { timers.set(key, now); return true; }
@@ -686,7 +689,8 @@
   const font = (size) => `${Math.max(6, Math.round(size * 0.72))}px "Segoe UI", Arial, sans-serif`;
 
   G.mode = function (kind = "2d") {
-    if (kind !== "2d") fail("only 2d windows can be used outside gublan");
+    if (kind !== "2d" && kind !== "3d") fail("choose either 2d or 3d");
+    mode3d = kind === "3d";
     if (!inBrowser) return;
     if (!canvas) {
       canvas = document.createElement("canvas");
@@ -705,7 +709,7 @@
     G.screen_width = Math.trunc(width);
     G.screen_height = Math.trunc(height);
     if (text !== undefined) title = str(text);
-    if (canvas) G.mode("2d");
+    if (canvas) G.mode(mode3d ? "3d" : "2d");
   };
   G.title = (text) => { title = str(text); if (inBrowser) document.title = title; };
   G.background = (...value) => { background = value.length === 3 ? value : value[0]; };
@@ -756,14 +760,14 @@
     if (count < 0 || count > 500) fail("particles can make from 0 to 500 at a time");
     const shade = rgb(color);
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2, velocity = speed * (0.25 + Math.random() * 0.75);
-      const life = 0.45 + Math.random() * 0.55;
-      particles.push([x, y, Math.cos(angle) * velocity, Math.sin(angle) * velocity, life, life, shade, 3 + Math.random() * 3]);
+      const angle = rand() * Math.PI * 2, velocity = speed * (0.25 + rand() * 0.75);
+      const life = 0.45 + rand() * 0.55;
+      particles.push([x, y, Math.cos(angle) * velocity, Math.sin(angle) * velocity, life, life, shade, 3 + rand() * 3]);
     }
     if (particles.length > 2000) particles.splice(0, particles.length - 2000);
   };
   const TWEEN_FIELDS = { x: "x", y: "y", z: "z", w: "w", width: "w", h: "h", height: "h", r: "r", radius: "r", angle: "angle",
-    rotation: "angle", opacity: "alpha", alpha: "alpha", size: "size" };
+    rotation: "angle", opacity: "alpha", alpha: "alpha", size: "size", d: "d", depth: "d", rx: "rx", rz: "rz" };
   function tweenStart(obj, key) {
     if (key === "alpha") return obj.alpha === undefined ? 1 : obj.alpha;
     if ((key === "w" || key === "h") && obj[key] === undefined && obj.picture) {
@@ -800,6 +804,7 @@
   function tickEffects() {
     const now = performance.now(), step = Math.min(0.1, Math.max(0, (now - effectsTime) / 1000));
     effectsTime = now;
+    tickMotion(step);
     if (tweens.length) {
       for (const tween of tweens.slice()) {
         const [obj, key, start, target, duration, elapsed, easing] = tween;
@@ -822,7 +827,7 @@
       if (shake[1] <= 0) { shake = null; shakeX = shakeY = 0; }
       else {
         const strength = (shake[0] * shake[1]) / shake[2];
-        shakeX = (Math.random() * 2 - 1) * strength; shakeY = (Math.random() * 2 - 1) * strength;
+        shakeX = (rand() * 2 - 1) * strength; shakeY = (rand() * 2 - 1) * strength;
       }
     }
   }
@@ -861,11 +866,16 @@
     if (!obj) fail(`there is no object named '${name}'`);
     return obj;
   }
-  const FIELD_ALIASES = { width: "w", height: "h", radius: "r", rotation: "angle" };
+  const FIELD_ALIASES = { width: "w", height: "h", radius: "r", rotation: "angle", depth: "d" };
   function objectField(name, key) {
     const obj = object(name);
     key = FIELD_ALIASES[key] || key;
     if (key === "visible") return !obj.hidden;
+    if (obj.type === "sphere" && key === "r") return obj.radius;
+    if (obj.type === "cube" && ["w", "h", "d"].includes(key)) return obj.size;
+    if ((obj.type === "cylinder" || obj.type === "cone") && (key === "w" || key === "d")) return obj.r * 2;
+    if (["vx", "vy", "vz"].includes(key) && obj.x !== undefined) return obj[key] || 0;
+    if ((key === "rx" || key === "rz") && SHAPES_3D.has(obj.type)) return obj[key] || 0;
     if (key === "focused") return focused === name;
     if (key === "submitted") { const was = !!obj.submitted; obj.submitted = false; return was; }
     if ((key === "w" || key === "h") && obj[key] === undefined && obj.picture) {
@@ -879,22 +889,36 @@
     key = FIELD_ALIASES[key] || key;
     if (key === "visible") obj.hidden = !G.truthy(value);
     else if (key === "text" && obj.type === "textbox") { obj.text = str(value); obj.cursor = obj.text.length; }
+    else if (["vx", "vy", "vz"].includes(key)) { obj.vx = obj.vx || 0; obj.vy = obj.vy || 0; obj.vz = obj.vz || 0; obj[key] = value; }
+    else if (obj.type === "sphere" && key === "r") obj.radius = value;
+    else if (obj.type === "cube" && ["w", "h", "d"].includes(key)) obj.size = value;
     else obj[key] = value;
   }
-  G.move = (name, dx, dy) => {
+  G.move = (name, dx, dy, dz = 0) => {
     const obj = object(name);
-    if (dx instanceof Vector) { dy = dx.y; dx = dx.x; }
+    if (dx instanceof Vector) { dz = dx.parts.length > 2 ? dx.z : 0; dy = dx.y; dx = dx.x; }
+    if (dz && !SHAPES_3D.has(obj.type)) fail("only 3d objects can move along z");
     obj.x += dx; obj.y += dy;
+    if (dz) obj.z += dz;
     if (obj.type === "line") { obj.x2 += dx; obj.y2 += dy; }
   };
-  G.place = (name, x, y) => {
+  G.place = (name, x, y, z) => {
     const obj = object(name);
     if (obj.type === "line") { obj.x2 += x - obj.x; obj.y2 += y - obj.y; }
     obj.x = x; obj.y = y;
+    if (z !== undefined) {
+      if (!SHAPES_3D.has(obj.type)) fail("only 3d objects have a z position");
+      obj.z = z;
+    }
   };
   G.resize = (name, w, h = w) => {
     const obj = object(name);
-    if (obj.type === "circle") obj.r = w;
+    if (w <= 0 || h <= 0) fail("sizes must be numbers greater than zero");
+    if (obj.type === "cube") obj.size = w;
+    else if (obj.type === "sphere") obj.radius = w;
+    else if (obj.type === "cylinder" || obj.type === "cone") { obj.r = w; obj.h = h; }
+    else if (obj.type === "plane") { obj.w = w; obj.d = h; }
+    else if (obj.type === "circle") obj.r = w;
     else if (obj.type === "text") obj.size = Math.trunc(w);
     else { obj.w = w; obj.h = h; }
   };
@@ -905,12 +929,16 @@
     if (focused === str(name)) focused = null;
   };
   G.exists = (name) => objects.has(str(name)) || objects.has("button:" + str(name));
-  G.animate = async (name, x, y, seconds) => {
-    const obj = object(name), sx = obj.x, sy = obj.y, begin = performance.now();
+  G.animate = async (name, x, y, ...rest) => {
+    const obj = object(name), sx = obj.x, sy = obj.y, sz = obj.z, begin = performance.now();
+    const deep = SHAPES_3D.has(obj.type);
+    if (deep !== (rest.length === 2)) fail(deep ? "animate a 3d shape with: animate <object> <x> <y> <z> <seconds>"
+      : "animate a 2d object with: animate <object> <x> <y> <seconds>");
+    const z = deep ? rest[0] : undefined, seconds = rest[rest.length - 1];
     for (;;) {
       const progress = seconds <= 0 ? 1 : Math.min(1, (performance.now() - begin) / 1000 / seconds);
       const eased = progress * progress * (3 - 2 * progress);
-      G.place(name, sx + (x - sx) * eased, sy + (y - sy) * eased);
+      G.place(name, sx + (x - sx) * eased, sy + (y - sy) * eased, deep ? sz + (z - sz) * eased : undefined);
       if (progress >= 1) return;
       await sleep(1 / 60);
     }
@@ -932,6 +960,8 @@
   G.touching = (first, second) => {
     let a = object(first), b = object(second);
     if (a.hidden || b.hidden) return false;
+    if (SHAPES_3D.has(a.type) && SHAPES_3D.has(b.type)) return touching3d(a, b);
+    if (SHAPES_3D.has(a.type) || SHAPES_3D.has(b.type)) fail("3d shapes can only touch other 3d shapes");
     a = shape(a); b = shape(b);
     if (a[0] === "circle" && b[0] === "circle") return (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2 <= (a[3] + b[3]) ** 2;
     if (a[0] === "rect" && b[0] === "rect") return a[1] <= b[1] + b[3] && b[1] <= a[1] + a[3] && a[2] <= b[2] + b[4] && b[2] <= a[2] + a[4];
@@ -954,8 +984,19 @@
   function draw() {
     tickEffects();
     if (!ctx) return;
-    ctx.fillStyle = rgb(background);
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (mode3d && render3d()) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(glCanvas, 0, 0);
+    } else {
+      ctx.fillStyle = rgb(background);
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (mode3d && glBroken) {
+        ctx.fillStyle = "rgb(200,200,200)";
+        ctx.font = font(20);
+        ctx.textBaseline = "top";
+        ctx.fillText("3d needs webgl, which this browser has switched off", 16, 16);
+      }
+    }
     ctx.textBaseline = "top";
     if (uiButton !== null) {
       ctx.fillStyle = "rgb(109,137,79)";
@@ -967,12 +1008,13 @@
     const items = [...objects];
     if (items.some(([, o]) => o.layer)) items.sort((a, b) => (a[1].layer || 0) - (b[1].layer || 0));
     for (const [name, obj] of items) {
-      if (obj.hidden) continue;
+      if (obj.hidden || SHAPES_3D.has(obj.type)) continue;
       const alpha = obj.alpha === undefined ? 1 : obj.alpha;
       if (alpha <= 0) continue;
       ctx.save();
       ctx.globalAlpha = alpha;
-      if (!UI_KINDS.has(obj.type) && !obj.fixed) ctx.translate(shakeX - scrollX, shakeY - scrollY);
+      // in 3d the flat things are drawn on top of the scene, where the view doesn't scroll
+      if (!UI_KINDS.has(obj.type) && !obj.fixed && !mode3d) ctx.translate(shakeX - scrollX, shakeY - scrollY);
       drawObject(name, obj);
       ctx.restore();
     }
@@ -1097,7 +1139,614 @@
     const current = performance.now();
     G.dt = Math.min(0.25, (current - lastFrame) / 1000);
     lastFrame = current;
+    frameClicks = clickList;
+    clickList = [];
+    framesDrawn++;
   };
+
+  // ----- added in 1.0.9: 3d shapes (drawn with webgl), files, movement and more functions -----------------------------
+  const SHAPES_3D = new Set(["cube", "sphere", "block", "cylinder", "cone", "plane"]);
+  const SIZE_FIELDS = { cube: ["size"], sphere: ["radius"], block: ["w", "h", "d"], cylinder: ["r", "h"], cone: ["r", "h"],
+    plane: ["w", "d"] };
+  let mode3d = false, camera = [0, 0, 0], cameraTurn = [0, 0], light = null, gravity = 0;
+  let clickList = [], frameClicks = [], framesDrawn = 0;
+
+  function safeChannels(value) {
+    try { return colorChannels(value); } catch (error) { return COLORS.white.slice(); }
+  }
+  function add3d(name, type, x, y, z, sizes, given) {
+    for (const value of [x, y, z, ...sizes]) {
+      if (typeof value !== "number" || !Number.isFinite(value)) fail(`${type} position and size must be numbers`);
+    }
+    if (sizes.some((value) => value <= 0)) fail(`${type} sizes must be greater than zero`);
+    const parts = { x, y, z, angle: 0 };
+    if (type !== "cube" && type !== "sphere") { parts.rx = 0; parts.rz = 0; }
+    SIZE_FIELDS[type].forEach((key, i) => { parts[key] = sizes[i]; });
+    const obj = add(name, type, parts);
+    if (given.length) {
+      const chosen = given.length === 3 ? given : given[0];
+      colorChannels(chosen);
+      obj.color = chosen;
+    }
+    return obj;
+  }
+  function object3d(name, action) {
+    const obj = object(name);
+    if (!SHAPES_3D.has(obj.type)) fail(`can't ${action} a ${obj.type}`);
+    return obj;
+  }
+  G.cube = (name, x, y, z, size, ...c) => add3d(name, "cube", x, y, z, [size], c);
+  G.sphere = (name, x, y, z, radius, ...c) => add3d(name, "sphere", x, y, z, [radius], c);
+  G.block = (name, x, y, z, w, h, d, ...c) => add3d(name, "block", x, y, z, [w, h, d], c);
+  G.cylinder = (name, x, y, z, r, h, ...c) => add3d(name, "cylinder", x, y, z, [r, h], c);
+  G.cone = (name, x, y, z, r, h, ...c) => add3d(name, "cone", x, y, z, [r, h], c);
+  G.plane = (name, x, y, z, w, d, ...c) => add3d(name, "plane", x, y, z, [w, d], c);
+  G.turn = (name, rx, ry, rz = 0) => { const obj = object3d(name, "turn"); obj.rx = rx; obj.angle = ry; obj.rz = rz; };
+  G.camera = (x, y, z, yaw, pitch) => {
+    if (x instanceof Vector) { camera = [x.x, x.y, x.z]; return; }
+    camera = [x, y, z];
+    if (yaw !== undefined) cameraTurn = [yaw, pitch === undefined ? 0 : pitch];
+  };
+  G.lookat = (x, y, z) => {
+    let point;
+    if (y === undefined) {
+      if (x instanceof Vector) point = [x.x, x.y, x.z];
+      else { const obj = object3d(x, "look at"); point = [obj.x, obj.y, obj.z]; }
+    } else point = [x, y, z];
+    const dx = point[0] - camera[0], dy = point[1] - camera[1], dz = point[2] - camera[2];
+    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-9) return;
+    cameraTurn = [degrees(Math.atan2(dx, -dz)), degrees(Math.atan2(-dy, Math.hypot(dx, dz)))];
+  };
+  G.walk = (forward, right = 0, up = 0) => {
+    const yaw = radians(cameraTurn[0]);
+    camera = [camera[0] + Math.sin(yaw) * forward + Math.cos(yaw) * right, camera[1] + up,
+      camera[2] - Math.cos(yaw) * forward + Math.sin(yaw) * right];
+  };
+  G.light = (x, y, z, brightness = 1) => {
+    if (!x && !y && !z) fail("the light needs a direction, like light 1 2 1");
+    if (brightness < 0 || brightness > 4) fail("light brightness goes from 0 to 4 (1 is normal)");
+    light = [x, y, z, brightness];
+  };
+  G.camerapos = () => new Vector(camera[0], camera[1], camera[2]);
+  G.camerayaw = () => cameraTurn[0];
+  G.camerapitch = () => cameraTurn[1];
+
+  // turns, as 3x3 rows (the same turns gublan gives a shape)
+  function turnRows(axis, deg) {
+    let [x, y, z] = axis;
+    const length = Math.hypot(x, y, z) || 1;
+    x /= length; y /= length; z /= length;
+    const a = radians(deg), c = Math.cos(a), s = Math.sin(a), t = 1 - c;
+    return [[t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+      [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+      [t * x * z - s * y, t * y * z + s * x, t * z * z + c]];
+  }
+  const rowsTimes = (a, b) => a.map((row) => [0, 1, 2].map((col) => row[0] * b[0][col] + row[1] * b[1][col] + row[2] * b[2][col]));
+  function shapeTurn(obj) {
+    if (obj.type === "cube" && obj.rx === undefined) return turnRows([1, 1, 0], obj.angle || 0);
+    let rows = turnRows([0, 1, 0], obj.angle || 0);
+    if (obj.rx) rows = rowsTimes(rows, turnRows([1, 0, 0], obj.rx));
+    if (obj.rz) rows = rowsTimes(rows, turnRows([0, 0, 1], obj.rz));
+    return rows;
+  }
+  function extents(obj) {
+    const t = obj.type;
+    if (t === "cube") return [obj.size / 2, obj.size / 2, obj.size / 2].map(Math.abs);
+    if (t === "sphere") return [obj.radius, obj.radius, obj.radius].map(Math.abs);
+    if (t === "cylinder" || t === "cone") return [Math.abs(obj.r), Math.abs(obj.h) / 2, Math.abs(obj.r)];
+    if (t === "plane") return [Math.abs(obj.w) / 2, 0, Math.abs(obj.d) / 2];
+    return [Math.abs(obj.w) / 2, Math.abs(obj.h) / 2, Math.abs(obj.d) / 2];
+  }
+  function box3d(obj) {
+    const half = extents(obj);
+    const reach = obj.type === "sphere" ? half
+      : shapeTurn(obj).map((row) => Math.abs(row[0]) * half[0] + Math.abs(row[1]) * half[1] + Math.abs(row[2]) * half[2]);
+    return [obj.x - reach[0], obj.y - reach[1], obj.z - reach[2], obj.x + reach[0], obj.y + reach[1], obj.z + reach[2]];
+  }
+  function touching3d(a, b) {
+    if (a.type === "sphere" && b.type === "sphere") {
+      return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2 <= (Math.abs(a.radius) + Math.abs(b.radius)) ** 2;
+    }
+    if (b.type === "sphere") [a, b] = [b, a];
+    if (a.type === "sphere") {
+      const box = box3d(b), centre = [a.x, a.y, a.z];
+      const gap = centre.reduce((total, v, i) => total + (v - Math.max(box[i], Math.min(box[i + 3], v))) ** 2, 0);
+      return gap <= a.radius ** 2;
+    }
+    const one = box3d(a), two = box3d(b);
+    return [0, 1, 2].every((i) => one[i] <= two[i + 3] && two[i] <= one[i + 3]);
+  }
+  function project(point) {
+    const width = canvas ? canvas.width : G.screen_width, height = canvas ? canvas.height : G.screen_height;
+    const yaw = radians(cameraTurn[0]), pitch = radians(cameraTurn[1]);
+    const dx = point[0] - camera[0], dy = point[1] - camera[1], dz = point[2] - camera[2];
+    const x = dx * Math.cos(yaw) + dz * Math.sin(yaw);
+    let z = -dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    const y = dy * Math.cos(pitch) - z * Math.sin(pitch);
+    z = dy * Math.sin(pitch) + z * Math.cos(pitch);
+    if (z > -0.1) return null;
+    const focal = 1 / Math.tan(radians(45) / 2), aspect = width / height;
+    return [((focal / aspect) * x / -z + 1) / 2 * width, (1 - (focal * y) / -z) / 2 * height];
+  }
+  function screenBox(obj) {
+    const b = box3d(obj), points = [];
+    for (const x of [b[0], b[3]]) for (const y of [b[1], b[4]]) for (const z of [b[2], b[5]]) {
+      const p = project([x, y, z]);
+      if (p) points.push(p);
+    }
+    if (!points.length) return null;
+    return [Math.min(...points.map((p) => p[0])), Math.min(...points.map((p) => p[1])),
+      Math.max(...points.map((p) => p[0])), Math.max(...points.map((p) => p[1]))];
+  }
+  function pointOn(obj, mx, my) {
+    if (obj.hidden) return false;
+    if (SHAPES_3D.has(obj.type)) {
+      const b = screenBox(obj);
+      return !!b && b[0] <= mx && mx <= b[2] && b[1] <= my && my <= b[3];
+    }
+    if (!UI_KINDS.has(obj.type) && !obj.fixed && !mode3d) { mx += scrollX; my += scrollY; }
+    const s = shape(obj);
+    if (s[0] === "circle") return (mx - s[1]) ** 2 + (my - s[2]) ** 2 <= s[3] ** 2;
+    return s[1] <= mx && mx <= s[1] + s[3] && s[2] <= my && my <= s[2] + s[4];
+  }
+  function centre(value) {
+    if (value instanceof Vector) return value.parts.slice();
+    const obj = object(value);
+    if (SHAPES_3D.has(obj.type)) return [obj.x, obj.y, obj.z];
+    if (obj.type === "line") return [(obj.x + obj.x2) / 2, (obj.y + obj.y2) / 2];
+    const s = shape(obj);
+    return s[0] === "circle" ? [s[1], s[2]] : [s[1] + s[3] / 2, s[2] + s[4] / 2];
+  }
+  G.clicked = (name) => {
+    const obj = object(name);
+    if (!framesDrawn) {
+      const index = clickList.findIndex(([x, y]) => pointOn(obj, x, y));
+      if (index < 0) return false;
+      clickList.splice(index, 1);
+      return true;
+    }
+    return frameClicks.some(([x, y]) => pointOn(obj, x, y));
+  };
+  G.hovering = (name) => pointOn(object(name), mouse[0], mouse[1]);
+  G.distance = (a, b) => {
+    const one = centre(a), two = centre(b), size = Math.min(one.length, two.length);
+    return Math.hypot(...one.slice(0, size).map((v, i) => v - two[i]));
+  };
+  G.screenpos = (name) => {
+    const obj = object(name);
+    if (SHAPES_3D.has(obj.type)) {
+      const p = project([obj.x, obj.y, obj.z]);
+      return p ? new Vector(Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100) : null;
+    }
+    const [x, y] = centre(name), still = UI_KINDS.has(obj.type) || obj.fixed;
+    return new Vector(still ? x : x - scrollX, still ? y : y - scrollY);
+  };
+
+  // moving by itself
+  G.velocity = (name, vx, vy, vz = 0) => {
+    const obj = object(name);
+    if (obj.x === undefined || obj.y === undefined) fail(`a ${obj.type} can't move by itself`);
+    if (vz && !SHAPES_3D.has(obj.type)) fail("only 3d shapes can move along z");
+    obj.vx = vx; obj.vy = vy; obj.vz = vz;
+  };
+  G.gravity = (amount) => { gravity = amount; };
+  function tickMotion(step) {
+    if (step <= 0) return;
+    for (const obj of objects.values()) {
+      if (obj.vx === undefined) continue;
+      const three = SHAPES_3D.has(obj.type);
+      if (gravity) obj.vy += (three ? -gravity : gravity) * step;
+      const dx = obj.vx * step, dy = obj.vy * step;
+      obj.x += dx; obj.y += dy;
+      if (obj.type === "line") { obj.x2 += dx; obj.y2 += dy; }
+      if (three && obj.vz) obj.z += obj.vz * step;
+    }
+  }
+
+  // ----- the 3d window: webgl draws the shapes on a canvas of its own, which is copied under the 2d things ------------
+  let glCanvas = null, gl = null, glProgram = null, glBroken = false;
+  const meshes = new Map();
+  const M = {
+    times(a, b) {
+      const out = new Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+        out[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+      }
+      return out;
+    },
+    move: (x, y, z) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1],
+    turn: (rows) => [rows[0][0], rows[1][0], rows[2][0], 0, rows[0][1], rows[1][1], rows[2][1], 0,
+      rows[0][2], rows[1][2], rows[2][2], 0, 0, 0, 0, 1],
+    perspective(fov, aspect, near, far) {
+      const f = 1 / Math.tan(radians(fov) / 2);
+      return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, (2 * far * near) / (near - far), 0];
+    },
+  };
+  // the faces of a shape around its middle, as triangles: x y z nx ny nz for every corner
+  function meshData(type, sizes) {
+    const out = [];
+    const face = (normal, corners) => {
+      for (let i = 1; i < corners.length - 1; i++) {
+        for (const corner of [corners[0], corners[i], corners[i + 1]]) out.push(...corner, ...normal);
+      }
+    };
+    const box = (hx, hy, hz) => {
+      face([0, 0, 1], [[-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]]);
+      face([0, 0, -1], [[hx, -hy, -hz], [-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz]]);
+      face([0, 1, 0], [[-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz]]);
+      face([0, -1, 0], [[-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz]]);
+      face([1, 0, 0], [[hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz]]);
+      face([-1, 0, 0], [[-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz]]);
+    };
+    const sides = 24;
+    if (type === "cube") box(sizes[0] / 2, sizes[0] / 2, sizes[0] / 2);
+    else if (type === "block") box(sizes[0] / 2, sizes[1] / 2, sizes[2] / 2);
+    else if (type === "plane") {
+      const hx = sizes[0] / 2, hz = sizes[1] / 2;
+      face([0, 1, 0], [[-hx, 0, hz], [hx, 0, hz], [hx, 0, -hz], [-hx, 0, -hz]]);
+    } else if (type === "sphere") {
+      const r = sizes[0], rings = 16;
+      const at = (ring, seg) => {
+        const lat = (Math.PI * ring) / rings, lon = (2 * Math.PI * seg) / sides;
+        const n = [Math.sin(lat) * Math.sin(lon), Math.cos(lat), Math.sin(lat) * Math.cos(lon)];
+        return [n.map((v) => v * r), n];
+      };
+      for (let ring = 0; ring < rings; ring++) for (let seg = 0; seg < sides; seg++) {
+        const corners = [at(ring + 1, seg), at(ring + 1, seg + 1), at(ring, seg + 1), at(ring, seg)];
+        for (const [a, b, c] of [[0, 1, 2], [0, 2, 3]]) for (const k of [a, b, c]) out.push(...corners[k][0], ...corners[k][1]);
+      }
+    } else {
+      const r = sizes[0], h = sizes[1], half = h / 2, slope = Math.hypot(r, h) || 1;
+      const ring = Array.from({ length: sides }, (_, i) => [r * Math.sin((2 * Math.PI * i) / sides), r * Math.cos((2 * Math.PI * i) / sides)]);
+      for (let i = 0; i < sides; i++) {
+        const [x1, z1] = ring[i], [x2, z2] = ring[(i + 1) % sides], middle = (2 * Math.PI * (i + 0.5)) / sides;
+        if (type === "cylinder") face([Math.sin(middle), 0, Math.cos(middle)], [[x1, -half, z1], [x2, -half, z2], [x2, half, z2], [x1, half, z1]]);
+        else face([(Math.sin(middle) * h) / slope, r / slope, (Math.cos(middle) * h) / slope], [[x1, -half, z1], [x2, -half, z2], [0, half, 0]]);
+      }
+      face([0, -1, 0], ring.slice().reverse().map(([x, z]) => [x, -half, z]));
+      if (type === "cylinder") face([0, 1, 0], ring.map(([x, z]) => [x, half, z]));
+    }
+    return new Float32Array(out);
+  }
+  function startGl() {
+    if (gl || glBroken || !inBrowser) return !!gl;
+    glCanvas = document.createElement("canvas");
+    gl = glCanvas.getContext("webgl", { antialias: true }) || glCanvas.getContext("experimental-webgl");
+    if (!gl) { glBroken = true; return false; }
+    const shader = (kind, source) => {
+      const made = gl.createShader(kind);
+      gl.shaderSource(made, source);
+      gl.compileShader(made);
+      return made;
+    };
+    glProgram = gl.createProgram();
+    gl.attachShader(glProgram, shader(gl.VERTEX_SHADER, `
+      attribute vec3 aPos; attribute vec3 aNormal;
+      uniform mat4 uProjection; uniform mat4 uModelView;
+      uniform vec3 uColor; uniform vec3 uLight; uniform float uAmbient; uniform float uDiffuse;
+      varying vec3 vColor;
+      void main() {
+        vec3 n = normalize((uModelView * vec4(aNormal, 0.0)).xyz);
+        vColor = min(uColor * (0.2 + uAmbient + uDiffuse * max(dot(n, uLight), 0.0)), vec3(1.0));
+        gl_Position = uProjection * uModelView * vec4(aPos, 1.0);
+      }`));
+    gl.attachShader(glProgram, shader(gl.FRAGMENT_SHADER, `
+      precision mediump float; varying vec3 vColor;
+      void main() { gl_FragColor = vec4(vColor, 1.0); }`));
+    gl.linkProgram(glProgram);
+    if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS)) { glBroken = true; gl = null; return false; }
+    return true;
+  }
+  function meshFor(obj) {
+    const sizes = SIZE_FIELDS[obj.type].map((key) => Math.abs(Number(obj[key]) || 0));
+    const key = obj.type + ":" + sizes.join(",");
+    let mesh = meshes.get(key);
+    if (!mesh) {
+      if (meshes.size > 400) { meshes.forEach((m) => gl.deleteBuffer(m.buffer)); meshes.clear(); }
+      const data = meshData(obj.type, sizes), buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      mesh = { buffer, count: data.length / 6 };
+      meshes.set(key, mesh);
+    }
+    return mesh;
+  }
+  function render3d() {
+    if (!startGl()) return false;
+    const width = canvas.width, height = canvas.height;
+    if (glCanvas.width !== width || glCanvas.height !== height) { glCanvas.width = width; glCanvas.height = height; }
+    gl.viewport(0, 0, width, height);
+    const sky = safeChannels(background);
+    gl.clearColor(sky[0] / 255, sky[1] / 255, sky[2] / 255, 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(glProgram);
+    const where = (name) => gl.getUniformLocation(glProgram, name);
+    const viewRows = rowsTimes(turnRows([1, 0, 0], cameraTurn[1]), turnRows([0, 1, 0], cameraTurn[0]));
+    const view = M.turn(viewRows);
+    let direction = [0.35, 0.8, 1.0], ambient = 0.32, diffuse = 0.85;
+    if (light) {
+      direction = viewRows.map((row) => row[0] * light[0] + row[1] * light[1] + row[2] * light[2]);
+      ambient = 0.32 * Math.min(light[3], 1.5);
+      diffuse = 0.85 * light[3];
+    }
+    const length = Math.hypot(...direction) || 1;
+    gl.uniform3f(where("uLight"), direction[0] / length, direction[1] / length, direction[2] / length);
+    gl.uniform1f(where("uAmbient"), ambient);
+    gl.uniform1f(where("uDiffuse"), diffuse);
+    gl.uniformMatrix4fv(where("uProjection"), false, new Float32Array(M.perspective(45, width / height, 0.1, 100)));
+    const position = gl.getAttribLocation(glProgram, "aPos"), normal = gl.getAttribLocation(glProgram, "aNormal");
+    gl.enableVertexAttribArray(position);
+    gl.enableVertexAttribArray(normal);
+    for (const obj of objects.values()) {
+      if (!SHAPES_3D.has(obj.type) || obj.hidden) continue;
+      const mesh = meshFor(obj);
+      const model = M.times(M.move(obj.x - camera[0], obj.y - camera[1], obj.z - camera[2]), M.turn(shapeTurn(obj)));
+      gl.uniformMatrix4fv(where("uModelView"), false, new Float32Array(M.times(view, model)));
+      const shade = safeChannels(obj.color);
+      gl.uniform3f(where("uColor"), shade[0] / 255, shade[1] / 255, shade[2] / 255);
+      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buffer);
+      gl.vertexAttribPointer(position, 3, gl.FLOAT, false, 24, 0);
+      gl.vertexAttribPointer(normal, 3, gl.FLOAT, false, 24, 12);
+      gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+    }
+    return true;
+  }
+
+  // ----- small helpers -------------------------------------------------------------------------------------------------
+  G.seed = (value) => {
+    let hash = 2166136261;
+    for (const letter of str(value)) hash = mul32(hash ^ letter.codePointAt(0), 16777619);
+    let state = hash >>> 0;
+    seeded = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = mul32(t ^ (t >>> 15), t | 1);
+      t ^= t + mul32(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  G.pop = (items, position) => {
+    if (!Array.isArray(items)) fail("pop needs a list");
+    if (!items.length) fail("the list is empty, so there is nothing to take");
+    if (position === undefined) return items.pop();
+    if (!Number.isInteger(position) || position < -items.length || position >= items.length) {
+      fail(`position ${str(position)} is past the end (length ${items.length})`);
+    }
+    return items.splice(position < 0 ? items.length + position : position, 1)[0];
+  };
+  G.screenshot = (name) => {
+    if (!canvas) fail("add 'mode 2d' or 'mode 3d' before you take a screenshot");
+    draw();
+    let file = filePath(name);
+    if (!/\.png$/i.test(file)) file += ".png";
+    const url = canvas.toDataURL("image/png");
+    if (typeof root.GUBLAN_SCREENSHOT === "function") { root.GUBLAN_SCREENSHOT(file, url); return; }
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.split("/").pop();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  // ----- dates, text, vectors and lists ---------------------------------------------------------------------------------
+  const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const vectorParts = (value, name) => {
+    if (value instanceof Vector) return [value.parts.slice(), true];
+    if (Array.isArray(value) && (value.length === 2 || value.length === 3) && value.every(isNumber)) return [value.slice(), false];
+    return fail(`${name}() needs a vec2, a vec3 or a list of numbers, got '${str(value)}'`);
+  };
+  Object.assign(G, {
+    year: () => new Date().getFullYear(),
+    month: () => new Date().getMonth() + 1,
+    day: () => new Date().getDate(),
+    hour: () => new Date().getHours(),
+    minute: () => new Date().getMinutes(),
+    second: () => new Date().getSeconds(),
+    weekday: () => WEEKDAYS[new Date().getDay()],
+    timetext: (seconds) => {
+      const sign = seconds < 0 ? "-" : "";
+      let left = Math.floor(Math.abs(seconds));
+      const hours = Math.floor(left / 3600), minutes = Math.floor((left % 3600) / 60);
+      left %= 60;
+      const two = (n) => String(n).padStart(2, "0");
+      return hours ? `${sign}${hours}:${two(minutes)}:${two(left)}` : `${sign}${minutes}:${two(left)}`;
+    },
+    left: (text, n) => (n <= 0 ? "" : Array.from(str(text)).slice(0, Math.trunc(n)).join("")),
+    right: (text, n) => (n <= 0 ? "" : Array.from(str(text)).slice(-Math.trunc(n)).join("")),
+    matches: (text, pattern) => {
+      const source = Array.from(str(pattern)).map((c) => (c === "*" ? "[\\s\\S]*" : c === "?" ? "[\\s\\S]"
+        : c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("");
+      return new RegExp("^" + source + "$", "iu").test(str(text));
+    },
+    normalize: (value) => {
+      const [parts, vector] = vectorParts(value, "normalize"), size = Math.hypot(...parts);
+      const out = size ? parts.map((v) => v / size) : parts;
+      return vector ? new Vector(...out) : out;
+    },
+    dot: (a, b) => {
+      const one = vectorParts(a, "dot")[0], two = vectorParts(b, "dot")[0];
+      if (one.length !== two.length) fail("dot() needs two vectors of the same size");
+      return one.reduce((total, v, i) => total + v * two[i], 0);
+    },
+    cross: (a, b) => {
+      const [ax, ay, az = 0] = vectorParts(a, "cross")[0], [bx, by, bz = 0] = vectorParts(b, "cross")[0];
+      return new Vector(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+    },
+    percent: (part, whole) => (whole ? (part / whole) * 100 : 0),
+    sample: (items, n) => {
+      const copy = Array.from(listOf(items));
+      G.shuffle_list(copy);
+      return copy.slice(0, Math.max(0, Math.min(Math.trunc(n), copy.length)));
+    },
+    findindex: (items, f) => Array.from(listOf(items)).findIndex((v) => G.truthy(f(v))),
+  });
+
+  // ----- files: next to the program in node, and kept in the browser's storage on a web page --------------------------------
+  function filePath(relative) {
+    const text = str(relative).trim();
+    if (!text) fail("give the file a name, like notes.txt");
+    const cleaned = text.replace(/\\/g, "/");
+    if (cleaned.startsWith("/") || cleaned.includes(":") || cleaned.split("/").includes("..")) {
+      fail("file paths stay inside your program's folder, like notes.txt or saves/one.txt");
+    }
+    return cleaned.split("/").filter((piece) => piece && piece !== ".").join("/");
+  }
+  const FILE_LIMIT = 10 * 1024 * 1024;
+  const files = (() => {
+    if (!inBrowser) {
+      const fs = require("fs"), path = require("path");
+      const base = typeof require !== "undefined" && require.main && require.main.filename
+        ? path.dirname(require.main.filename) : process.cwd();
+      const full = (p) => (p ? path.join(base, ...p.split("/")) : base);
+      return {
+        read: (p) => { try { return fs.readFileSync(full(p), "utf8").replace(/^﻿/, "").replace(/\r\n?/g, "\n"); } catch (e) { return null; } },
+        write: (p, text) => { fs.mkdirSync(path.dirname(full(p)), { recursive: true }); fs.writeFileSync(full(p), text); },
+        isFile: (p) => { try { return fs.statSync(full(p)).isFile(); } catch (e) { return false; } },
+        isFolder: (p) => { try { return fs.statSync(full(p)).isDirectory(); } catch (e) { return false; } },
+        list: (p) => fs.readdirSync(full(p)),
+        remove: (p) => { if (fs.statSync(full(p)).isDirectory()) fs.rmdirSync(full(p)); else fs.unlinkSync(full(p)); },
+        folder: (p) => fs.mkdirSync(full(p), { recursive: true }),
+      };
+    }
+    const prefix = () => "gublan-file:" + saveName + ":";
+    const store = () => { try { return root.localStorage; } catch (e) { return null; } };
+    const given = () => root.GUBLAN_FILES || {};
+    const keys = () => {
+      const s = store(), out = [];
+      if (s) for (let i = 0; i < s.length; i++) { const k = s.key(i); if (k && k.startsWith(prefix())) out.push(k.slice(prefix().length)); }
+      for (const k of Object.keys(given())) if (!out.includes(k)) out.push(k);
+      return out;
+    };
+    const read = (p) => {
+      const s = store(), kept = s ? s.getItem(prefix() + p) : null;
+      if (kept !== null) return kept;
+      return Object.prototype.hasOwnProperty.call(given(), p) ? str(given()[p]) : null;
+    };
+    const isFile = (p) => read(p) !== null && !p.endsWith("/");
+    const isFolder = (p) => !p || keys().some((k) => k.startsWith(p + "/"));
+    return {
+      read: (p) => (isFile(p) ? read(p) : null),
+      write: (p, text) => {
+        const s = store();
+        if (!s) fail("this page can't keep files");
+        try { s.setItem(prefix() + p, text); } catch (e) { fail("the browser's storage is full"); }
+      },
+      isFile, isFolder,
+      list: (p) => {
+        const start = p ? p + "/" : "", names = new Set();
+        for (const k of keys()) if (k.startsWith(start) && k.length > start.length) names.add(k.slice(start.length).split("/")[0]);
+        return [...names];
+      },
+      remove: (p) => {
+        const s = store();
+        if (s) { s.removeItem(prefix() + p); s.removeItem(prefix() + p + "/"); }
+      },
+      folder: (p) => { const s = store(); if (s && !isFolder(p)) s.setItem(prefix() + p + "/", ""); },
+    };
+  })();
+  function readText(relative) {
+    const p = filePath(relative);
+    if (files.isFolder(p) && !files.isFile(p)) fail(`'${str(relative)}' is a folder, not a file`);
+    const text = files.read(p);
+    if (text === null) fail(`file '${str(relative)}' was not found`);
+    return text;
+  }
+  const fileText = (value) => (Array.isArray(value) ? value.map(str).join("\n") : str(value));
+  function writeText(relative, text, append) {
+    const p = filePath(relative);
+    if (files.isFolder(p) && !files.isFile(p)) fail(`'${str(relative)}' is a folder, not a file`);
+    if (text.length > FILE_LIMIT) fail("that is too much to write at once (the most is 10 mb)");
+    if (append) {
+      const old = files.read(p);
+      if (old) text = old + (/[\r\n]$/.test(old) ? "" : "\n") + text;
+    }
+    files.write(p, text);
+  }
+  function csvRows(text) {
+    const rows = [];
+    let row = [], cell = "", quoted = false, started = false;
+    text = str(text);
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else cell += c;
+      } else if (c === '"' && !cell) { quoted = true; started = true; }
+      else if (c === ",") { row.push(cell); cell = ""; started = true; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        if (started || cell) row.push(cell);
+        rows.push(row); row = []; cell = ""; started = false;
+      } else { cell += c; started = true; }
+    }
+    if (started || cell) { row.push(cell); rows.push(row); }
+    return rows;
+  }
+  const csvValue = (cell) => {
+    const t = cell.trim();
+    if (/^-?(0|[1-9][0-9]*)$/.test(t)) return parseInt(t, 10);
+    if (/^-?(0|[1-9][0-9]*)\.[0-9]+$/.test(t)) return parseFloat(t);
+    return cell;
+  };
+  Object.assign(G, {
+    writefile: (name, value) => writeText(name, fileText(value), false),
+    appendfile: (name, value) => writeText(name, fileText(value) + "\n", true),
+    readfile: (name) => readText(name),
+    readlines: (name) => { const text = readText(name); const out = text.split("\n"); if (out[out.length - 1] === "") out.pop(); return out; },
+    fileexists: (name) => { const p = filePath(name); return files.isFile(p) || files.isFolder(p); },
+    isfolder: (name) => files.isFolder(filePath(name)),
+    listfiles: (name = "") => {
+      const p = str(name).trim() ? filePath(name) : "";
+      if (!files.isFolder(p)) fail(`'${str(name) || "."}' is not a folder`);
+      return files.list(p).sort((a, b) => compare(a.toLowerCase(), b.toLowerCase()));
+    },
+    filesize: (name) => {
+      const p = filePath(name), text = files.read(p);
+      if (text === null) fail(`file '${str(name)}' was not found`);
+      return typeof TextEncoder !== "undefined" ? new TextEncoder().encode(text).length : text.length;
+    },
+    filename: (name) => str(name).replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop(),
+    extension: (name) => {
+      const base = str(name).replace(/\\/g, "/").split("/").pop();
+      return base.replace(/^\.+|\.+$/g, "").includes(".") ? base.slice(base.lastIndexOf(".") + 1) : "";
+    },
+    fromcsv: (text) => csvRows(text).map((row) => row.map(csvValue)),
+    tocsv: (rows) => {
+      if (!Array.isArray(rows)) fail(`tocsv() needs a list of rows, got '${str(rows)}'`);
+      if (rows.length && !rows.every(Array.isArray)) rows = [rows];
+      const cell = (v) => { const t = str(v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+      return rows.map((row) => row.map(cell).join(",")).join("\n");
+    },
+    deletefile: (name) => {
+      const p = filePath(name);
+      if (!p) fail("gublan won't delete your program's own folder");
+      if (files.isFolder(p) && !files.isFile(p)) {
+        if (files.list(p).length) fail(`folder '${str(name)}' is not empty. delete the files in it first`);
+        files.remove(p);
+      } else if (files.isFile(p)) files.remove(p);
+    },
+    makefolder: (name) => {
+      const p = filePath(name);
+      if (files.isFile(p)) fail(`'${str(name)}' is already a file`);
+      files.folder(p);
+    },
+    copyfile: (from, to) => {
+      const text = readText(from);
+      let target = filePath(to);
+      if (files.isFolder(target) && !files.isFile(target)) target += "/" + filePath(from).split("/").pop();
+      files.write(target, text);
+    },
+    renamefile: (from, to) => {
+      const source = filePath(from), text = readText(from);
+      let target = filePath(to);
+      if (files.isFolder(target) && !files.isFile(target)) target += "/" + source.split("/").pop();
+      files.write(target, text);
+      if (target !== source) files.remove(source);
+    },
+  });
 
   // ----- keys and the mouse ------------------------------------------------------------------------------------------
   function keyName(event) {
@@ -1149,16 +1798,23 @@
       const box = canvas.getBoundingClientRect();
       return [(event.clientX - box.left) * (canvas.width / box.width), (event.clientY - box.top) * (canvas.height / box.height)];
     };
-    canvas.addEventListener("mousemove", (event) => {
+    canvas.style.touchAction = "none";
+    canvas.addEventListener("pointermove", (event) => {
       mouse = where(event);
       if (dragging && objects.has(dragging)) slide(objects.get(dragging), mouse[0]);
     });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-    canvas.addEventListener("mousedown", (event) => {
+    canvas.addEventListener("pointerdown", (event) => {
       mouse = where(event);
-      mouseHeld.add(event.button);
-      clicks.add(event.button);
-      if (event.button !== 0) return;
+      const button = event.button < 0 ? 0 : event.button;
+      mouseHeld.add(button);
+      clicks.add(button);
+      if (button !== 0) return;
+      clickList.push(mouse.slice());
+      if (clickList.length > 16) clickList.shift();
+      if (event.pointerType !== "mouse" && canvas.setPointerCapture) {
+        try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* the finger already lifted */ }
+      }
       const [mx, my] = mouse;
       if (uiButton !== null && mx >= 20 && mx <= 200 && my >= 20 && my <= 58) G.ui = uiButton;
       let chosen = null;
@@ -1174,8 +1830,8 @@
       focused = chosen;
       canvas.focus();
     });
-    window.addEventListener("mouseup", (event) => {
-      mouseHeld.delete(event.button);
+    window.addEventListener("pointerup", (event) => {
+      mouseHeld.delete(event.button < 0 ? 0 : event.button);
       dragging = null;
       objects.forEach((obj) => { if (obj.type === "button") G.buttons[obj.variable] = 0; });
     });
@@ -1355,7 +2011,7 @@
     if (wave === "noise") {
       const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * seconds)), audioContext.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < data.length; i++) data[i] = rand() * 2 - 1;
       source = audioContext.createBufferSource();
       source.buffer = buffer;
     } else {

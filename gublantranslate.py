@@ -47,8 +47,9 @@ LANGUAGES = {
 ALIASES = {"py": "python", "js": "javascript", "web": "javascript", "html": "javascript", "love": "lua",
            "love2d": "lua"}
 
-# commands that only make sense in 3d (not translated yet: they become todo comments)
-THREE_D = {"cube", "sphere", "camera"}
+# commands that only make sense in 3d. javascript draws them with webgl; in python and lua they become todo comments
+THREE_D = {"cube", "sphere", "camera", "block", "cylinder", "cone", "plane", "turn", "lookat", "walk", "light"}
+THREE_D_FUNCTIONS = {"screenpos", "camerapos", "camerayaw", "camerapitch"}
 # commands that open a window
 WINDOW_COMMANDS = {"mode", "window", "box", "circle", "line", "text", "image", "sprite", "button", "ui", "textbox",
                    "slider", "checkbox", "background", "frame", "ellipse", "polygon", "particles"}
@@ -57,24 +58,27 @@ STORES = {
     "add": (1,), "sub": (1,), "mul": (1,), "div": (1,), "calc": (1,), "random": (1,), "time": (1,),
     "list": (1,), "map": (1,), "item": (3,), "length": (2,), "lookup": (3,), "has": (3,), "touching": (1,),
     "key": (1,), "keypressed": (1,), "mouse": (1, 2), "mousebutton": (1,), "input": (1,), "load": (2,),
-    "vec2": (1,), "vec3": (1,), "get": (2,),
+    "vec2": (1,), "vec3": (1,), "get": (2,), "readfile": (2,), "pop": (2,),
 }
 LOOPS = {"loop", "forever", "while", "until", "for"}
 # builtins whose answer is always true or false (no truthiness wrapper needed in javascript and lua)
 BOOLEAN_FUNCTIONS = {"contains", "keydown", "keypressed", "mousedown", "mousepressed", "touching", "exists",
                      "chance", "startswith", "endswith", "isnumber", "overlap", "saved", "any", "every",
-                     "between", "cooldown", "pulse", "after"}
+                     "between", "cooldown", "pulse", "after", "matches", "clicked", "hovering", "fileexists",
+                     "isfolder"}
 TEXT_FUNCTIONS = {"str", "string", "upper", "lower", "trim", "join", "replace", "pad", "decimals", "capitalize",
-                  "char", "tojson", "date", "clock", "type", "commas", "ordinal", "plural"}
+                  "char", "tojson", "date", "clock", "type", "commas", "ordinal", "plural", "weekday", "timetext",
+                  "left", "right", "readfile", "filename", "extension", "tocsv"}
 NUMBER_FUNCTIONS = {"abs", "min", "max", "round", "floor", "ceil", "sqrt", "sin", "cos", "tan", "atan2", "rad",
                     "deg", "clamp", "lerp", "sign", "dist", "len", "num", "number", "int", "random", "mousex",
                     "mousey", "time", "mag", "pow", "asin", "acos", "atan", "sum", "indexof", "count", "average",
                     "wrap", "remap", "approach", "angleto", "now", "code", "textwidth", "log", "exp", "noise",
                     "randint", "hypot", "fract", "smoothstep", "snap", "ease", "gcd", "median", "product",
-                    "scrollx", "scrolly"}
+                    "scrollx", "scrolly", "year", "month", "day", "hour", "minute", "second", "dot", "percent",
+                    "findindex", "distance", "filesize", "camerayaw", "camerapitch"}
 LIST_FUNCTIONS = {"range", "sort", "reverse", "keys", "values", "split", "shuffle", "unique", "map", "filter", "sortby",
                   "zip", "flat", "lines", "words", "chunk", "enumerate", "without", "fill", "entries", "wraptext",
-                  "mixcolor", "randomcolor"}
+                  "mixcolor", "randomcolor", "sample", "readlines", "listfiles", "fromcsv"}
 # commands that have to wait for the screen in javascript (so they are awaited, and so is anything calling them)
 JS_WAITS = {"frame", "wait", "input", "popup", "animate", "get"}
 
@@ -365,6 +369,7 @@ def _number_text(value):
 
 # ----- the shared part of every language --------------------------------------------------------------------------
 class _Writer:
+    SUPPORTS_3D = False
     UNIT = "    "
     COMMENT = "#"
     RESERVED = set()
@@ -676,8 +681,9 @@ class _Writer:
 
     def statement(self, line):
         cmd = line.cmd
-        if cmd in THREE_D or (cmd == "mode" and len(line.parts) > 1 and line.parts[1] == "3d") or (
-                cmd == "spin" and len(line.parts) > 1 and str(line.parts[1]) in self.objects_3d):
+        if not self.SUPPORTS_3D and (cmd in THREE_D or (cmd == "mode" and len(line.parts) > 1 and line.parts[1] == "3d")
+                                     or (cmd in ("spin", "velocity") and len(line.parts) > 1
+                                         and str(line.parts[1]) in self.objects_3d)):
             self.notes.add("3d scenes are not translated yet. those lines are left as todo comments.")
             self.todo(line, "3d is not translated yet")
             return
@@ -1067,6 +1073,103 @@ class _Writer:
     def c_forget(self, line):
         self.call("forget", self.object_name(line.parts[1]))
 
+    # ----- 1.0.9: 3d shapes (javascript only), files, movement and small helpers -------------------------------
+    def shape_call(self, line, numbers):
+        parts = line.parts
+        args = [self.object_name(parts[1])] + [self.val(token) for token in parts[2:2 + numbers]]
+        if len(parts) > 2 + numbers:
+            args.extend(self.color_args(parts[2 + numbers:]))
+        self.call(line.cmd, *args)
+
+    def c_cube(self, line):
+        self.shape_call(line, 4)
+
+    def c_sphere(self, line):
+        self.shape_call(line, 4)
+
+    def c_block(self, line):
+        self.shape_call(line, 6)
+
+    def c_cylinder(self, line):
+        self.shape_call(line, 5)
+
+    def c_cone(self, line):
+        self.shape_call(line, 5)
+
+    def c_plane(self, line):
+        self.shape_call(line, 5)
+
+    def c_turn(self, line):
+        self.call("turn", self.object_name(line.parts[1]), *[self.val(token) for token in line.parts[2:5]])
+
+    def c_camera(self, line):
+        self.call("camera", *[self.val(token) for token in line.parts[1:6]])
+
+    def c_lookat(self, line):
+        parts = line.parts
+        if len(parts) == 2:
+            token = str(parts[1])
+            self.call("lookat", self.val(parts[1]) if self.is_variable(token) else self.object_name(parts[1]))
+            return
+        self.call("lookat", *[self.val(token) for token in parts[1:4]])
+
+    def c_walk(self, line):
+        self.call("walk", *[self.val(token) for token in line.parts[1:4]])
+
+    def c_light(self, line):
+        self.call("light", *[self.val(token) for token in line.parts[1:5]])
+
+    def c_velocity(self, line):
+        self.call("velocity", self.object_name(line.parts[1]), *[self.val(token) for token in line.parts[2:5]])
+
+    def c_gravity(self, line):
+        self.call("gravity", self.val(line.parts[1]))
+
+    def c_seed(self, line):
+        self.call("seed", self.val(line.parts[1]))
+
+    def c_screenshot(self, line):
+        self.call("screenshot", self.object_name(line.parts[1]))
+
+    def file_value(self, tokens):
+        """what writefile and appendfile write: a list variable is written one item a line."""
+        if len(tokens) == 1 and not isinstance(tokens[0], QuotedText) and self.is_variable(str(tokens[0])):
+            return self.val(tokens[0])
+        return self.text_of(tokens)
+
+    def c_writefile(self, line):
+        self.call("writefile", self.object_name(line.parts[1]), self.file_value(line.parts[2:]))
+
+    def c_appendfile(self, line):
+        self.call("appendfile", self.object_name(line.parts[1]), self.file_value(line.parts[2:]))
+
+    def c_readfile(self, line):
+        self.store(self.target(str(line.parts[2])), self.builtin("readfile", self.object_name(line.parts[1])))
+
+    def c_deletefile(self, line):
+        self.call("deletefile", self.object_name(line.parts[1]))
+
+    def c_makefolder(self, line):
+        self.call("makefolder", self.object_name(line.parts[1]))
+
+    def c_copyfile(self, line):
+        self.call("copyfile", self.object_name(line.parts[1]), self.object_name(line.parts[2]))
+
+    def c_renamefile(self, line):
+        self.call("renamefile", self.object_name(line.parts[1]), self.object_name(line.parts[2]))
+
+    def c_pop(self, line):
+        parts = line.parts
+        args = [ast.Name(str(parts[1]))] + ([self.val(parts[3])] if len(parts) > 3 else [])
+        self.store(self.target(str(parts[2])), ast.Call(func=ast.Name("__G_pop__"), args=args, keywords=[]))
+
+    def c_swap(self, line):
+        first, second = (self.name_code(str(token)) for token in line.parts[1:3])
+        self.emit(self.swap_code(first, second))
+
+    def swap_code(self, first, second):
+        return f"{first}, {second} = {second}, {first}"
+
     # ----- facts about expressions ----------------------------------------------------------------------------
     def is_text(self, node):
         if isinstance(node, ast.Constant):
@@ -1381,6 +1484,10 @@ class _Python(_Writer):
                 return f"G.ask({args[0]})"
             if name == "__fetch__":
                 return f"G.fetch({args[0]})"
+            if name.startswith("__G_"):
+                return f"G.{name[4:-2]}({', '.join(args)})"
+            if name in THREE_D_FUNCTIONS and not self.is_variable(name) and name not in self.functions:
+                raise ValueError("3d is not translated yet")
             if self.is_variable(name) or name in self.functions:
                 return f"{self.name_code(name) if self.is_variable(name) else self.ident(name)}({', '.join(args)})"
             if name in EXPRESSION_FUNCTIONS:
@@ -1630,6 +1737,10 @@ class _Python(_Writer):
 
 class _JavaScript(_Writer):
     LANGUAGE = "javascript"
+    SUPPORTS_3D = True
+
+    def swap_code(self, first, second):
+        return f"[{first}, {second}] = [{second}, {first}];"
     COMMENT = "//"
     RESERVED = _JS_RESERVED
     PREC = {"arrow": 1, "?": 2, "||": 3, "&&": 4, "|": 5, "^": 6, "&": 7, "==": 8, "cmp": 9, "<<": 10, ">>": 10,
@@ -1897,6 +2008,8 @@ class _JavaScript(_Writer):
                 return f"G.ask({args[0]})", True
             if name == "__fetch__":
                 return f"G.fetch({args[0]})", True
+            if name.startswith("__G_"):
+                return f"G.{name[4:-2]}({', '.join(args)})", False
             if self.is_variable(name):
                 return f"{self.name_code(name)}({', '.join(args)})", False
             if name in self.functions:
@@ -2388,6 +2501,10 @@ class _Lua(_Writer):
                 return f"G.ask({args[0]})"
             if name == "__fetch__":
                 return f"G.fetch({args[0]})"
+            if name.startswith("__G_"):
+                return f"G.{name[4:-2]}({', '.join(args)})"
+            if name in THREE_D_FUNCTIONS and not self.is_variable(name) and name not in self.functions:
+                raise ValueError("3d is not translated yet")
             if self.is_variable(name):
                 return f"{self.name_code(name)}({', '.join(args)})"
             if name in self.functions:

@@ -11,6 +11,10 @@ signed-in person read and write their own row. never put the service_role key or
 the user_data row holds {"settings": {"studio": {...}, "playground": {...}}, "project": {...}}. the studio only
 changes settings.studio and leaves the rest alone.
 
+publishing puts a program on gublan.xyz/explore: a row in the creations table (docs/supabase_creations.sql) that
+anyone can read and only its maker can change. share_link needs no account at all: like the playground's share
+button, the whole program travels inside the link.
+
 nothing here touches tk. the studio calls the slow parts from a background thread and hands the results back through
 its queue (see GublanStudio's account methods in app.py).
 """
@@ -20,6 +24,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -27,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+import zlib
 from datetime import datetime, timezone
 
 from . import config, version
@@ -41,6 +47,10 @@ CALLBACK_PATH = "/auth/callback"
 SIGN_IN_TIMEOUT = 300
 TIMEOUT = 15
 REFRESH_EARLY = 120  # refresh a session this many seconds before it runs out
+
+PLAYGROUND = "https://gublan.xyz/playground/"
+MAX_PUBLISH = 200_000  # characters in all the files together, the same as the playground
+DATA_ENDINGS = (".txt", ".csv", ".tsv", ".json", ".md", ".dat", ".log")
 
 # settings that belong to this computer rather than to the person: they never leave it
 LOCAL_ONLY = frozenset({
@@ -99,6 +109,99 @@ def _request(method, path, body=None, token=None, headers=None):
         return json.loads(raw) if raw.strip() else None
     except ValueError as err:
         raise AccountError("the gublan account server sent something unexpected") from err
+
+
+# ----- links and the files that go with a program ---------------------------------------------------------
+def _base64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def share_link(files, current):
+    """the playground's own share link: one program is "#z=", a program with other files is "#p=" (json of
+    {files: [{name, text}], current}). both are raw deflate in url-safe base64, so the playground reads them as
+    if its share button had made them. files is a list of (name, text)."""
+    files = [(str(name), str(text)) for name, text in files]
+    if not files:
+        raise ValueError("there's nothing to share")
+    many = len(files) > 1 or not files[0][0].lower().endswith(".gubl")
+    if many:
+        body = json.dumps({"files": [{"name": name, "text": text} for name, text in files], "current": current},
+                          ensure_ascii=False, separators=(",", ":"))
+    else:
+        body = files[0][1]
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    data = packer.compress(body.encode("utf-8")) + packer.flush()
+    return PLAYGROUND + "#" + ("p=" if many else "z=") + _base64url(data)
+
+
+def read_share_link(link):
+    """the other way round: (files, current) from a playground link, or None if it isn't one."""
+    match = re.search(r"#([zp])=([\w-]+)$", str(link).strip())
+    if not match:
+        return None
+    raw = match.group(2)
+    try:
+        data = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+        text = zlib.decompress(data, -15).decode("utf-8")
+        if match.group(1) == "z":
+            return [("shared.gubl", text)], "shared.gubl"
+        found = json.loads(text)
+        files = [(str(item["name"]), str(item["text"])) for item in found.get("files", [])
+                 if isinstance(item, dict) and "name" in item and "text" in item]
+    except (ValueError, zlib.error, UnicodeDecodeError, AttributeError, TypeError):
+        return None
+    return (files, str(found.get("current") or files[0][0])) if files else None
+
+
+def creation_link(creation_id):
+    return PLAYGROUND + "?c=" + urllib.parse.quote(str(creation_id), safe="")
+
+
+def is_data_file(name):
+    return str(name).lower().endswith(DATA_ENDINGS)
+
+
+def uses_3d(files):
+    return any(not is_data_file(name) and re.search(r"^\s*mode\s+3d\b", text, re.M) for name, text in files)
+
+
+_INCLUDE = re.compile(r"^\s*include\s+(.+?)\s*$", re.M)
+_DATA_NAME = re.compile(r"[\w.-]+\.(?:" + "|".join(ending[1:] for ending in DATA_ENDINGS) + r")\b", re.I)
+
+
+def program_files(path, text):
+    """what a program needs on gublan.xyz, as [(name, text)]: the program first, then the .gubl files it includes
+    and the text files it names (level.txt, scores.csv...) when they sit next to it. the website keeps files in one
+    flat list, so only the file names travel, not folders. pictures and sounds stay behind."""
+    folder = os.path.dirname(os.path.abspath(path)) if path else None
+    main = os.path.basename(path) if path else "program.gubl"
+    if not main.lower().endswith(".gubl"):
+        main += ".gubl"
+    found = [(main, text)]
+    seen = {main.lower()}
+    if not folder:
+        return found
+    waiting = [text]
+    while waiting:
+        source = waiting.pop()
+        names = [name.strip().strip("\"'") for name in _INCLUDE.findall(source)]
+        names = [name if name.lower().endswith(".gubl") else name + ".gubl" for name in names if name]
+        names += [name.strip("\"'") for name in _DATA_NAME.findall(source)]
+        for name in names:
+            where = os.path.join(folder, name)
+            short = os.path.basename(name)
+            if short.lower() in seen or not os.path.isfile(where):
+                continue
+            try:
+                with open(where, "r", encoding="utf-8") as handle:
+                    content = handle.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            seen.add(short.lower())
+            found.append((short, content))
+            if short.lower().endswith(".gubl"):
+                waiting.append(content)
+    return found
 
 
 def pkce_pair():
@@ -399,6 +502,63 @@ class Account:
         with self.lock:
             self.state.pop("synced", None)
             self._write()
+
+    # published creations (gublan.xyz/explore)
+    def published(self, path):
+        """what this program was published as, by the person signed in now: {"id", "title", "about"} or None."""
+        user = self.user()
+        key = os.path.normcase(os.path.abspath(path)) if path else None
+        with self.lock:
+            found = (self.state.get("published") or {}).get(key) if key else None
+        if not found or not user or found.get("user") != user["id"]:
+            return None
+        return found
+
+    def _remember(self, path, saved):
+        if not path:
+            return
+        key = os.path.normcase(os.path.abspath(path))
+        with self.lock:
+            published = dict(self.state.get("published") or {})
+            if saved is None:
+                published.pop(key, None)
+            else:
+                published[key] = saved
+            self.state["published"] = published
+            self._write()
+
+    def publish(self, path, title, about, files, main, creation_id=None):
+        """blocking: publish files ([(name, text)]) to gublan.xyz, or update creation_id. gives back the saved row."""
+        user_id = self._user_id()
+        title = str(title or "").strip()[:80]
+        if not title:
+            raise AccountError("give it a name first")
+        size = sum(len(text) for _name, text in files)
+        if size > MAX_PUBLISH:
+            raise AccountError(f"that's {size:,} characters. creations can be up to {MAX_PUBLISH:,}.")
+        fields = {"title": title, "about": str(about or "").strip()[:1000], "files": dict(files), "main": main,
+                  "uses_3d": bool(uses_3d(files))}
+        listed = "id,title,about,author,uses_3d,user_id,created_at,updated_at,main"
+        prefer = {"Prefer": "return=representation"}
+        if creation_id:
+            clean = re.sub(r"[^\w-]", "", str(creation_id))
+            rows = _request("PATCH", f"/rest/v1/creations?id=eq.{clean}&select={listed}", fields, token=self.token(),
+                            headers=prefer)
+            if not rows:
+                raise AccountError("that creation isn't yours any more, or it was taken down")
+        else:
+            rows = _request("POST", f"/rest/v1/creations?select={listed}", fields, token=self.token(), headers=prefer)
+            if not rows:
+                raise AccountError("the server didn't say what it saved")
+        saved = rows[0]
+        self._remember(path, {"id": saved["id"], "user": user_id, "title": saved.get("title", title),
+                              "about": saved.get("about", "")})
+        return saved
+
+    def unpublish(self, path, creation_id):
+        clean = re.sub(r"[^\w-]", "", str(creation_id))
+        _request("DELETE", f"/rest/v1/creations?id=eq.{clean}&user_id=eq.{self._user_id()}", token=self.token())
+        self._remember(path, None)
 
     def needs_sync(self, settings):
         with self.lock:

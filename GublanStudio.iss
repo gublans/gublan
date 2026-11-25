@@ -49,9 +49,30 @@ RestartApplications=no
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+ChangesAssociations=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "gublfiles"; Description: "Open .gubl files with Gublan Studio, and add ""run with gublan"" to their right-click menu"; GroupDescription: "File types:"
+
+[Registry]
+; .gubl files: double-click opens them in the studio, right click > run with gublan starts them (GublanStudio.exe
+; --run), and new > gublan program makes an empty one. studio\shell.py writes the same keys from
+; tools > open .gubl files from explorer, for the portable exe.
+Root: HKA; Subkey: "Software\Classes\.gubl"; ValueType: string; ValueName: ""; ValueData: "GublanStudio.gubl"; Flags: uninsdeletevalue; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\.gubl"; ValueType: string; ValueName: "Content Type"; ValueData: "text/plain"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\.gubl"; ValueType: string; ValueName: "PerceivedType"; ValueData: "text"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\.gubl\OpenWithProgids"; ValueType: string; ValueName: "GublanStudio.gubl"; ValueData: ""; Flags: uninsdeletevalue; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\.gubl\ShellNew"; ValueType: string; ValueName: "NullFile"; ValueData: ""; Flags: uninsdeletekey; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl"; ValueType: string; ValueName: ""; ValueData: "gublan program"; Flags: uninsdeletekey; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\GublanStudio.exe,0"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell"; ValueType: string; ValueName: ""; ValueData: "open"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell\open"; ValueType: string; ValueName: ""; ValueData: "open in gublan studio"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\GublanStudio.exe"" ""%1"""; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell\run"; ValueType: string; ValueName: ""; ValueData: "run with gublan"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell\run"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\GublanStudio.exe,0"; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\GublanStudio.gubl\shell\run\command"; ValueType: string; ValueName: ""; ValueData: """{app}\GublanStudio.exe"" --run ""%1"""; Tasks: gublfiles
+Root: HKA; Subkey: "Software\Classes\Applications\GublanStudio.exe\SupportedTypes"; ValueType: string; ValueName: ".gubl"; ValueData: ""; Flags: uninsdeletekey
 
 [Files]
 Source: "dist\GublanStudio.exe"; DestDir: "{app}"; Flags: ignoreversion

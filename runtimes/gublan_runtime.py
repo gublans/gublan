@@ -1305,6 +1305,7 @@ def _tick_effects():
     current = _time.perf_counter()
     step = _min(0.1, _max(0.0, current - _effects_time))
     _effects_time = current
+    _tick_motion(step)
     for item in list(_tweens):
         obj, key, start_value, target, duration, elapsed, easing = item
         item[5] = elapsed + step
@@ -1412,12 +1413,14 @@ def _object(name):
     return obj
 
 
-_ALIASES = {"width": "w", "height": "h", "radius": "r", "rotation": "angle"}
+_ALIASES = {"width": "w", "height": "h", "radius": "r", "rotation": "angle", "depth": "d"}
 
 
 def _object_field(name, key):
     obj = _object(name)
     key = _ALIASES.get(key, key)
+    if key in ("vx", "vy", "vz") and "x" in obj:
+        return obj.get(key, 0)
     if key == "visible":
         return not obj.get("hidden", False)
     if key == "focused":
@@ -1440,6 +1443,10 @@ def _set_object_field(name, key, value):
         obj["hidden"] = not value
     elif key == "text" and obj["type"] == "textbox":
         obj["text"], obj["cursor"] = str(value), _len(str(value))
+    elif key in ("vx", "vy", "vz"):
+        for part in ("vx", "vy", "vz"):
+            obj.setdefault(part, 0)
+        obj[key] = value
     else:
         obj[key] = value
 
@@ -1694,6 +1701,8 @@ def _pump():
             if event.button != 1:
                 continue
             mx, my = event.pos
+            _click_list.append((mx, my))
+            del _click_list[:-16]
             if _ui_button is not None and 20 <= mx <= 200 and 20 <= my <= 58:
                 ui = _ui_button
             chosen = None
@@ -1746,12 +1755,14 @@ def clear():
 
 
 def frame():
-    global dt, _last_frame
+    global dt, _last_frame, _frame_clicks, _click_list, _frames_drawn
     if _screen is not None:
         _pump()
         _render()
     else:
         _tick_effects()
+    _frame_clicks, _click_list = _click_list, []
+    _frames_drawn += 1
     target = 1.0 / _max(1, _fps)
     left = _last_frame + target - _time.perf_counter()
     if left > 0:
@@ -1976,6 +1987,404 @@ def volume(value):
     _volume = clamp(value, 0, 1)
     if _pygame() and _pg.mixer.get_init():
         _pg.mixer.music.set_volume(_volume)
+
+
+# ----- added in 1.0.9: files, movement, clicks and more functions ------------------------------------------------------
+import csv as _csv  # noqa: E402
+import io as _io  # noqa: E402
+
+_gravity = 0
+_click_list = []
+_frame_clicks = []
+_frames_drawn = 0
+_base_dir = None
+_FILE_LIMIT = 10 * 1024 * 1024
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _whole(value):
+    return _int(value) if isinstance(value, float) and value.is_integer() else value
+
+
+def seed(value):
+    _random.seed(value if isinstance(value, (_int, float)) and not isinstance(value, bool) else str(value))
+
+
+def pop(items, position=None):
+    if not isinstance(items, list):
+        raise GublanError("pop needs a list")
+    if not items:
+        raise GublanError("that list is empty, so there is nothing to take")
+    if position is None:
+        return items.pop()
+    if isinstance(position, bool) or not isinstance(position, _int):
+        raise GublanError("list positions must be whole numbers")
+    if not -_len(items) <= position < _len(items):
+        raise GublanError(f"position {position} is past the end (length {_len(items)})")
+    return items.pop(position)
+
+
+def velocity(name, vx, vy, vz=0):
+    obj = _object(name)
+    if "x" not in obj or "y" not in obj:
+        raise GublanError(f"a {obj['type']} can't move by itself")
+    if vz:
+        raise GublanError("only 3d shapes can move along z")
+    obj["vx"], obj["vy"], obj["vz"] = vx, vy, 0
+
+
+def gravity(amount):
+    global _gravity
+    _gravity = amount
+
+
+def _tick_motion(step):
+    if step <= 0:
+        return
+    for obj in list(_objects.values()):
+        if not isinstance(obj, dict) or "vx" not in obj:
+            continue
+        if _gravity:
+            obj["vy"] += _gravity * step
+        dx, dy = obj["vx"] * step, obj["vy"] * step
+        obj["x"] += dx
+        obj["y"] += dy
+        if obj["type"] == "line":
+            obj["x2"] += dx
+            obj["y2"] += dy
+
+
+def screenshot(path):
+    if _screen is None:
+        raise GublanError("add 'mode 2d' before you take a screenshot")
+    path = _file_path(path, "screenshot")
+    if not path.lower().endswith(".png"):
+        path += ".png"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _pg.image.save(_screen, path)
+
+
+# dates and time
+def year():
+    return _time.localtime().tm_year
+
+
+def month():
+    return _time.localtime().tm_mon
+
+
+def day():
+    return _time.localtime().tm_mday
+
+
+def hour():
+    return _time.localtime().tm_hour
+
+
+def minute():
+    return _time.localtime().tm_min
+
+
+def second():
+    return _time.localtime().tm_sec
+
+
+def weekday():
+    return _WEEKDAYS[_time.localtime().tm_wday]
+
+
+def timetext(seconds):
+    sign = "-" if seconds < 0 else ""
+    seconds = _int(math.floor(_abs(seconds)))
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    if hours:
+        return f"{sign}{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{sign}{minutes}:{seconds:02d}"
+
+
+# text
+def left(value, count):
+    count = _int(count)
+    return "" if count <= 0 else str(value)[:count]
+
+
+def right(value, count):
+    count = _int(count)
+    return "" if count <= 0 else str(value)[-count:]
+
+
+def matches(value, pattern):
+    regex = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in str(pattern))
+    return re.fullmatch(regex, str(value), re.IGNORECASE | re.DOTALL) is not None
+
+
+# vectors and numbers
+def _vector(value, name):
+    if isinstance(value, Vector):
+        return [float(part) for part in value.parts], Vector
+    if isinstance(value, list) and _len(value) in (2, 3) and _all(
+            not isinstance(item, bool) and isinstance(item, (_int, float)) for item in value):
+        return [float(item) for item in value], list
+    raise GublanError(f"{name}() needs a vec2, a vec3 or a list of numbers, got '{str(value)}'")
+
+
+def normalize(value):
+    values, kind = _vector(value, "normalize")
+    length = math.sqrt(_sum(v * v for v in values))
+    values = [v / length for v in values] if length else values
+    return Vector(*values) if kind is Vector else [_whole(v) for v in values]
+
+
+def dot(first, second):
+    a, b = _vector(first, "dot")[0], _vector(second, "dot")[0]
+    if _len(a) != _len(b):
+        raise GublanError("dot() needs two vectors of the same size")
+    return _whole(_sum(x * y for x, y in _zip(a, b)))
+
+
+def cross(first, second):
+    a, b = _vector(first, "cross")[0], _vector(second, "cross")[0]
+    ax, ay, az = a + [0.0] * (3 - _len(a))
+    bx, by, bz = b + [0.0] * (3 - _len(b))
+    return Vector(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx)
+
+
+def percent(part, whole):
+    return 0 if not whole else _whole(part / whole * 100)
+
+
+# lists
+def sample(items, count):
+    if not isinstance(items, (list, _str)):
+        raise GublanError(f"sample() needs a list, got '{str(items)}'")
+    items = list(items)
+    return _random.sample(items, _max(0, _min(_int(count), _len(items))))
+
+
+def findindex(items, function):
+    for index, item in _enumerate(_sequence(items)):
+        if function(item):
+            return index
+    return -1
+
+
+# the mouse on objects
+def _centre(value):
+    if isinstance(value, Vector):
+        return [float(part) for part in value.parts]
+    obj = _object(value)
+    if obj["type"] == "line":
+        return [(obj["x"] + obj["x2"]) / 2, (obj["y"] + obj["y2"]) / 2]
+    shape = _shape(obj)
+    if shape[0] == "circle":
+        return [shape[1], shape[2]]
+    return [shape[1] + shape[3] / 2, shape[2] + shape[4] / 2]
+
+
+def _point_on(obj, mx, my):
+    if obj.get("hidden"):
+        return False
+    if obj["type"] not in _UI_KINDS and not obj.get("fixed"):
+        mx, my = mx + _scroll[0], my + _scroll[1]
+    shape = _shape(obj)
+    if shape[0] == "circle":
+        return (mx - shape[1]) ** 2 + (my - shape[2]) ** 2 <= shape[3] ** 2
+    _, x, y, w, h = shape
+    return x <= mx <= x + w and y <= my <= y + h
+
+
+def clicked(name):
+    if _screen is None:
+        raise GublanError("add 'mode 2d' before you check the mouse")
+    obj = _object(name)
+    if _frames_drawn == 0:
+        _pump()
+        for click in list(_click_list):
+            if _point_on(obj, *click):
+                _click_list.remove(click)
+                return True
+        return False
+    return _any(_point_on(obj, *click) for click in _frame_clicks)
+
+
+def hovering(name):
+    if _screen is None:
+        raise GublanError("add 'mode 2d' before you check the mouse")
+    _pump()
+    return _point_on(_object(name), *_pg.mouse.get_pos())
+
+
+def distance(first, second):
+    a, b = _centre(first), _centre(second)
+    size = _min(_len(a), _len(b))
+    return _whole(math.sqrt(_sum((x - y) ** 2 for x, y in _zip(a[:size], b[:size]))))
+
+
+# files. they stay inside the program's folder
+def _folder():
+    if _base_dir:
+        return _base_dir
+    main = sys.modules.get("__main__")
+    where = getattr(main, "__file__", None)
+    return os.path.dirname(os.path.abspath(where)) if where else os.getcwd()
+
+
+def _file_path(relative, what="file"):
+    relative = str(relative).strip()
+    if not relative:
+        raise GublanError(f"give the {what} a name, like notes.txt")
+    cleaned = relative.replace("\\", "/")
+    if cleaned.startswith("/") or ":" in cleaned or ".." in cleaned.split("/"):
+        raise GublanError("file paths stay inside your program's folder, like notes.txt or saves/one.txt")
+    base = _folder()
+    pieces = [piece for piece in cleaned.split("/") if piece not in ("", ".")]
+    return os.path.abspath(os.path.join(base, *pieces)) if pieces else base
+
+
+def _read_text(relative):
+    path = _file_path(relative)
+    if os.path.isdir(path):
+        raise GublanError(f"'{relative}' is a folder, not a file")
+    if not os.path.isfile(path):
+        raise GublanError(f"file '{relative}' was not found")
+    if os.path.getsize(path) > _FILE_LIMIT:
+        raise GublanError(f"file '{relative}' is too big to read (the most is 10 mb)")
+    with open(path, "r", encoding="utf-8-sig", errors="replace", newline=None) as handle:
+        return handle.read()
+
+
+def _write_text(relative, value, append=False):
+    path = _file_path(relative)
+    if os.path.isdir(path):
+        raise GublanError(f"'{relative}' is a folder, not a file")
+    if _len(value) > _FILE_LIMIT:
+        raise GublanError("that is too much to write at once (the most is 10 mb)")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if append and os.path.isfile(path) and os.path.getsize(path):
+        with open(path, "rb") as handle:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) not in (b"\n", b"\r"):
+                value = "\n" + value
+    with open(path, "a" if append else "w", encoding="utf-8", newline="") as handle:
+        handle.write(value)
+
+
+def _file_value(value):
+    return "\n".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+
+def writefile(path, value):
+    _write_text(path, _file_value(value))
+
+
+def appendfile(path, value):
+    _write_text(path, _file_value(value) + "\n", append=True)
+
+
+def readfile(path):
+    return _read_text(path)
+
+
+def readlines(path):
+    return _read_text(path).splitlines()
+
+
+def deletefile(relative):
+    path = _file_path(relative)
+    if path == _folder():
+        raise GublanError("gublan won't delete your program's own folder")
+    if os.path.isdir(path):
+        if os.listdir(path):
+            raise GublanError(f"folder '{relative}' is not empty. delete the files in it first")
+        os.rmdir(path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
+def makefolder(relative):
+    path = _file_path(relative, "folder")
+    if os.path.isfile(path):
+        raise GublanError(f"'{relative}' is already a file")
+    os.makedirs(path, exist_ok=True)
+
+
+def _move_file(source_name, target_name, keep):
+    source, target = _file_path(source_name), _file_path(target_name)
+    if not os.path.isfile(source):
+        raise GublanError(f"file '{source_name}' was not found")
+    if os.path.isdir(target):
+        target = os.path.join(target, os.path.basename(source))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if keep:
+        with open(source, "rb") as reading, open(target, "wb") as writing:
+            writing.write(reading.read())
+    else:
+        os.replace(source, target)
+
+
+def copyfile(source, target):
+    _move_file(source, target, True)
+
+
+def renamefile(source, target):
+    _move_file(source, target, False)
+
+
+def fileexists(path):
+    return os.path.exists(_file_path(path))
+
+
+def isfolder(path):
+    return os.path.isdir(_file_path(path))
+
+
+def filesize(path):
+    where = _file_path(path)
+    if not os.path.isfile(where):
+        raise GublanError(f"file '{path}' was not found")
+    return os.path.getsize(where)
+
+
+def listfiles(path=""):
+    where = _file_path(path, "folder") if str(path).strip() else _folder()
+    if not os.path.isdir(where):
+        raise GublanError(f"'{path}' is not a folder")
+    return sorted(os.listdir(where), key=_str.lower)
+
+
+def filename(path):
+    return str(path).replace("\\", "/").rstrip("/").split("/")[-1]
+
+
+def extension(path):
+    base = str(path).replace("\\", "/").split("/")[-1]
+    return base.rsplit(".", 1)[1] if "." in base.strip(".") else ""
+
+
+def _csv_value(cell):
+    cleaned = cell.strip()
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)", cleaned):
+        return _int(cleaned)
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)[.][0-9]+", cleaned):
+        return float(cleaned)
+    return cell
+
+
+def fromcsv(value):
+    return [[_csv_value(cell) for cell in row] for row in _csv.reader(_io.StringIO(str(value)))]
+
+
+def tocsv(rows):
+    if not isinstance(rows, list):
+        raise GublanError(f"tocsv() needs a list of rows, got '{str(rows)}'")
+    if rows and not _all(isinstance(row, list) for row in rows):
+        rows = [rows]
+    out = _io.StringIO()
+    writer = _csv.writer(out, lineterminator="\n")
+    for row in rows:
+        writer.writerow([str(cell) for cell in row])
+    return out.getvalue().rstrip("\n")
 
 
 # ----- starting -----------------------------------------------------------------------------------------------------------

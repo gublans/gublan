@@ -15,13 +15,14 @@ CATEGORY_TITLES = {
     "lists and maps": "lists and maps",
     "display": "the window and colours",
     "2d": "2d shapes, text and pictures",
-    "3d": "3d",
+    "3d": "3d shapes, the camera and the light",
     "ui": "buttons, textboxes, sliders and checkboxes",
     "objects": "moving and changing shapes",
     "input": "keyboard, mouse and questions",
     "sound": "sound and music",
     "web": "the web",
     "saving": "saving values between runs",
+    "files": "files: reading and writing text files",
     "discord": "your discord status",
     "plugins": "commands from plugins",
 }
@@ -37,6 +38,14 @@ CATEGORY_NOTES = {
     "saving": "saved values are kept in a small file for each program (on windows in `%APPDATA%\\Gublan\\saves`), "
               "so a high score or the level someone reached is still there next time. inside expressions, "
               "`load(\"name\", default)` gives a saved value and `saved(\"name\")` checks for one.",
+    "files": "files are read from and written to your program's folder (and the folders inside it), so a "
+             "program can keep notes, logs, levels or a table of scores. paths look like `notes.txt` or "
+             "`levels/one.txt`, and gublan won't go outside the program's folder. `readfile(\"notes.txt\")`, "
+             "`readlines()`, `fileexists()`, `listfiles()`, `fromcsv()` and `tocsv()` work inside expressions.",
+    "3d": "3d shapes are placed by their middle. x goes right, y goes up and minus z goes away from you, so a "
+          "camera at 0 0 0 sees a shape at 0 0 -8. every shape takes a colour at the end, like "
+          "`block wall 0 0 -8 4 2 0.5 sand`. in gublan studio, tools > 3d scene editor lets you place and drag "
+          "shapes with the mouse, and writes these lines for you.",
     "discord": """while the discord app is open, `presence` lines change the status on your discord profile. in gublan
 studio they replace the studio's own status while the program runs (settings, under discord, turns this off).
 exported games show it too. discord updates every few seconds, so setting it often is fine.

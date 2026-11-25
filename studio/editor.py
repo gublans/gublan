@@ -388,8 +388,13 @@ proc {W} {{args}} {{
         top = self.text.yview()[0]
         cursor = self.text.index("insert")
         self.text.edit_separator()
-        self.text.delete("1.0", "end")
-        self.text.insert("1.0", value)
+        # tk splits a delete followed by an insert into two undo steps; one ctrl+z must bring the old text back
+        self.text.configure(autoseparators=False)
+        try:
+            self.text.delete("1.0", "end")
+            self.text.insert("1.0", value)
+        finally:
+            self.text.configure(autoseparators=True)
         self.text.edit_separator()
         self.text.mark_set("insert", cursor)
         self.text.yview_moveto(top)

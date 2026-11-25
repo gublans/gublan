@@ -1,0 +1,73 @@
+// dodge 3d: left and right move the cube. keep away from the falling blocks
+mode 3d
+background #1b1f24
+camera 0 4 2
+lookat 0 0 -8
+
+plane floor 0 -0.5 -8 10 16 #2d3440
+cube player 0 0 -4 0.8 moss
+text hud 16 16 score 0
+text tip 16 44 left and right to dodge
+
+score = 0
+made = 0
+alive = true
+rocks = []
+next_rock = 0
+
+function drop_rock
+    made += 1
+    name = "rock" + str(made)
+    block {name} {random(-4, 4)} 7 {random(-7, -3)} 0.9 0.9 0.9 orange
+    velocity {name} 0 0 {random(0.5, 1.5)}
+    append rocks {name}
+end
+
+function clear_rocks
+    for rock in rocks
+        delete {rock}
+    end
+    rocks = []
+end
+
+gravity 5
+forever
+    if alive
+        if keydown("left")
+            move player {-6 * dt} 0
+        end
+        if keydown("right")
+            move player {6 * dt} 0
+        end
+        player.x = clamp(player.x, -4.5, 4.5)
+        next_rock -= dt
+        if next_rock <= 0
+            call drop_rock
+            next_rock = max(0.3, 1 - score * 0.02)
+        end
+        landed = []
+        for rock in rocks
+            if touching("player", rock)
+                alive = false
+                paint player red
+                text tip 16 44 hit! press space to try again
+            elseif rock.y < -2
+                append landed {rock}
+            end
+        end
+        for rock in landed
+            delete {rock}
+            remove rocks {rock}
+            score += 1
+        end
+        text hud 16 16 score {score}
+    elseif keypressed("space")
+        call clear_rocks
+        score = 0
+        alive = true
+        paint player moss
+        player.x = 0
+        text tip 16 44 left and right to dodge
+    end
+    frame
+end

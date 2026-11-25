@@ -1,0 +1,42 @@
+// bouncy balls: velocity and gravity. click anywhere to drop another ball
+window 640 400 bouncy balls
+mode 2d
+background #141414
+gravity 900
+
+color gray
+text hud 16 16 click to drop a ball
+balls = []
+made = 0
+
+function drop x y
+    made += 1
+    name = "ball" + str(made)
+    color {randomcolor()}
+    circle {name} {x} {y} {random(10, 22)}
+    velocity {name} {random(-160, 160)} 0
+    append balls {name}
+    if len(balls) > 25
+        delete {balls[0]}
+        delete balls 0
+    end
+end
+
+call drop 320 60
+forever
+    if mousepressed()
+        call drop {mousex()} {mousey()}
+    end
+    for ball in balls
+        if ball.y > 400 - ball.r
+            ball.y = 400 - ball.r
+            ball.vy = -ball.vy * 0.78
+        end
+        if ball.x < ball.r or ball.x > 640 - ball.r
+            ball.x = clamp(ball.x, ball.r, 640 - ball.r)
+            ball.vx = -ball.vx
+        end
+    end
+    text hud 16 16 click to drop a ball. {len(balls)} bouncing
+    frame
+end

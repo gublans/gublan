@@ -12,6 +12,16 @@
 //   GublanAccount.save(fields)      upsert some of the row's columns
 //   GublanAccount.deleteData()
 //   GublanAccount.onChange(fn)      fn(user) whenever someone signs in or out (in any tab)
+//
+// creations: programs people publish to gublan.xyz. anyone can look at them; only their owner can change them.
+//   GublanAccount.creation(id)      one creation with its files: {id, title, about, author, files, main, uses_3d,
+//                                   user_id, created_at, updated_at}, or null
+//   GublanAccount.creations(opts)   a page of creations without their files, newest first.
+//                                   opts: {search, mine, only3d, limit, offset}
+//   GublanAccount.publish(row)      publish {title, about, files, main, uses_3d}, or update one of yours with
+//                                   row.id. gives back the saved creation. the server fills in the author.
+//   GublanAccount.unpublish(id)     take one of yours down
+//   GublanAccount.creationLink(id)  where anyone can play it
 (function () {
   "use strict";
   const SUPABASE_URL = "{{SUPABASE_URL}}".replace(/\/+$/, "");
@@ -170,11 +180,71 @@
     await request("DELETE", `/rest/v1/user_data?user_id=eq.${encodeURIComponent(me())}`, undefined, await token());
   }
 
+  // ----- creations -------------------------------------------------------------------------------------------
+  const LISTED = "id,title,about,author,uses_3d,user_id,created_at,updated_at";
+  const SITE = "https://gublan.xyz";
+
+  // signed in people read with their token, everyone else as the public
+  async function maybeToken() {
+    try { return user() ? await token() : undefined; } catch (_) { return undefined; }
+  }
+
+  async function creation(id) {
+    if (!configured) throw new Error("accounts aren't set up on this site");
+    const clean = String(id || "").replace(/[^\w-]/g, "");
+    if (!clean) return null;
+    const rows = await request("GET", `/rest/v1/creations?select=${LISTED},files,main&id=eq.${clean}`, undefined, await maybeToken());
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  }
+
+  async function creations(options) {
+    if (!configured) throw new Error("accounts aren't set up on this site");
+    const { search = "", mine = false, only3d = null, limit = 24, offset = 0 } = options || {};
+    const query = new URLSearchParams({ select: LISTED, order: "created_at.desc", limit: String(limit), offset: String(offset) });
+    if (mine) query.set("user_id", "eq." + me());
+    if (only3d !== null && only3d !== undefined) query.set("uses_3d", "eq." + Boolean(only3d));
+    // letters, numbers and spaces only: the rest mean something to the database's filter language
+    const words = String(search).toLowerCase().replace(/[^\p{L}\p{N} _-]+/gu, " ").trim().slice(0, 60);
+    if (words) query.set("or", `(title.ilike.*${words}*,author.ilike.*${words}*,about.ilike.*${words}*)`);
+    const rows = await request("GET", "/rest/v1/creations?" + query, undefined, await maybeToken());
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  async function publish(row) {
+    me();
+    const fields = { title: String(row.title || "").trim().slice(0, 80), about: String(row.about || "").trim().slice(0, 1000),
+      files: row.files, main: String(row.main || ""), uses_3d: Boolean(row.uses_3d) };
+    if (!fields.title) throw new Error("give it a name first");
+    const prefer = { Prefer: "return=representation" };
+    if (row.id) {
+      const clean = String(row.id).replace(/[^\w-]/g, "");
+      const rows = await request("PATCH", `/rest/v1/creations?id=eq.${clean}&select=${LISTED},main`, fields, await token(), prefer);
+      if (Array.isArray(rows) && rows.length) return rows[0];
+      throw new Error("that creation isn't yours any more, or it was taken down");
+    }
+    const rows = await request("POST", `/rest/v1/creations?select=${LISTED},main`, fields, await token(), prefer);
+    if (!Array.isArray(rows) || !rows.length) throw new Error("the server didn't say what it saved");
+    return rows[0];
+  }
+
+  async function unpublish(id) {
+    const clean = String(id || "").replace(/[^\w-]/g, "");
+    await request("DELETE", `/rest/v1/creations?id=eq.${clean}&user_id=eq.${encodeURIComponent(me())}`, undefined, await token());
+  }
+
+  // the playground plays it. a copy of the site on another address links to itself.
+  function creationLink(id) {
+    const here = /^https?:$/.test(location.protocol) && location.hostname !== "gublan.xyz" ? location.origin : SITE;
+    const root = here === SITE ? "/" : location.pathname.replace(/\/(playground|explore)\/.*$/, "/").replace(/[^/]*$/, "");
+    return `${here}${root}playground/?c=${encodeURIComponent(id)}`;
+  }
+
   const ready = configured ? finishSignIn() : Promise.resolve(false);
   ready.catch(() => { /* the page shows it: GublanAccount.ready rejects with the reason */ });
 
   window.GublanAccount = {
     configured, ready, user, signIn, signOut, load, save, deleteData,
+    creation, creations, publish, unpublish, creationLink,
     onChange(listener) { listeners.add(listener); return () => listeners.delete(listener); },
   };
 })();

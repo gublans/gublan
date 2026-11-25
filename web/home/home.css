@@ -1,4 +1,5 @@
 /* gublan.xyz. the site's look: a soft black, a soft green, square corners, room to breathe, all lowercase. */
+[hidden] { display: none !important; }
 :root {
   --bg: #1b1d19;
   --bg-soft: #20231e;

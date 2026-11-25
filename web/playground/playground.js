@@ -4,8 +4,10 @@
 // the translated program runs with gublan_runtime.js inside a sandboxed iframe, the same way a program
 // exported from gublan studio as a web page runs. web/build_site.py copies all of those files next to this one.
 //
-// the page keeps a small project (several .gubl files, so include works), its settings and saved games in
-// this browser's storage. nothing is sent anywhere: sharing puts the program in the link itself.
+// the page keeps a small project (.gubl programs, so include works, and data files that programs can read with
+// readfile), its settings, saved games and the files programs write in this browser's storage. sharing puts the
+// program in the link itself. nothing is sent anywhere unless you sign in (settings and files sync) or publish
+// a creation to gublan.xyz (?c=<id> plays it).
 (function () {
   "use strict";
 
@@ -44,6 +46,12 @@
   const PROJECT_KEY = KEY + "project";
   const SETTINGS_KEY = KEY + "settings";
   const SAVES_KEY = KEY + "saves";
+  const FILE_PREFIX = "gublan-file:"; // how the runtime keeps a program's files: gublan-file:<program>:<path>
+  // project files that aren't programs: text a program reads with readfile, readlines and fromcsv
+  const DATA_FILE = /\.(txt|csv|tsv|json|md|dat|log)$/i;
+  const isData = (file) => Boolean(file) && DATA_FILE.test(file.name);
+  const touch = matchMedia("(pointer: coarse)");
+  const narrow = matchMedia("(max-width: 820px)");
 
   // the same word lists gublan studio's editor uses (studio/meta.py). the bridge fills in the rest.
   const FLOW = new Set(["assert", "break", "case", "catch", "const", "continue", "elif", "else", "elseif", "end", "for",
@@ -55,7 +63,7 @@
   const EXPRESSION_LINES = new Set(["if", "elseif", "elif", "while", "return", "set", "for", "call", "calc"]);
   const COLOR_COMMANDS = new Set(["color", "paint", "background"]);
   const CATEGORY_ORDER = ["basics", "control", "functions", "testing", "lists and maps", "display", "2d", "3d", "ui",
-    "objects", "input", "sound", "web", "saving", "discord", "plugins"];
+    "objects", "input", "sound", "web", "saving", "files", "discord", "plugins"];
   const INDENT = "    ";
   const PAD_TOP = 12;
   const PAD_LEFT = 14;
@@ -73,7 +81,7 @@
     smoothCaret: true, caretStyle: "line", caretBlink: "fade", caretMotion: "glide", caretWidth: 2, typing: "fade",
     autoPairs: true, autoEnd: true, suggestions: true, hints: true, lineHighlight: true, rainbow: true,
     sounds: true, soundPack: "soft", volume: 45, typingSounds: false,
-    split: 0.5, splitY: 0.6, game: {},
+    split: 0.5, splitY: 0.6, game: {}, touchPad: "auto",
   };
 
   let settings = Object.assign({}, DEFAULTS);
@@ -93,6 +101,10 @@
   let saveTimer = 0;
   const cloud = { timer: 0, busy: false, again: false, status: "", last: 0 }; // gublan account sync (see below)
   let lastText = "";
+  let plainText = false; // the open file is data, so it isn't coloured or completed like gublan
+  let lastProgram = ""; // the program run while a data file is open
+  let viewing = null; // a published creation being played (?c=<id>): {id, title, author, files, main, ...}
+  let frameWindow = false; // the running program has made its window
   let charWidth = 8;
   let lineHeight = 21;
   let fx = []; // letters that were just typed: {from, to, kind, born}
@@ -379,6 +391,7 @@
     updateCaret(true);
     updateHint();
     moveTabIndicator();
+    if (typeof showPad === "function" && document.body.dataset.view) showPad();
   }
 
   // ----- the editor: highlighting -------------------------------------------------------------------------
@@ -489,8 +502,8 @@
     const length = line.length;
     if (!length) return "";
     const kinds = new Array(length).fill("");
-    for (const [kind, a, b] of lineTokens(line)) for (let i = a; i < b && i < length; i++) kinds[i] = "t-" + kind;
-    if (settings.rainbow) {
+    if (!plainText) for (const [kind, a, b] of lineTokens(line)) for (let i = a; i < b && i < length; i++) kinds[i] = "t-" + kind;
+    if (settings.rainbow && !plainText) {
       let depth = 0;
       for (let i = 0; i < length; i++) {
         if (kinds[i] === "t-string" || kinds[i] === "t-comment") continue;
@@ -806,7 +819,7 @@
     }
     const indent = leading(current);
     const rest = source.value.slice(source.selectionStart, lineEnd(source.selectionStart));
-    if (opensBlock(current) && settings.autoEnd && !rest.trim() && needsEnd()) {
+    if (!plainText && opensBlock(current) && settings.autoEnd && !rest.trim() && needsEnd()) {
       const at = source.selectionStart;
       insert("\n" + indent + INDENT + "\n" + indent + "end");
       const inside = at + 1 + indent.length + INDENT.length;
@@ -911,7 +924,7 @@
   }
 
   function showCompletion(force) {
-    if (!reference || (!settings.suggestions && !force)) return closeCompletion();
+    if (!reference || plainText || (!settings.suggestions && !force)) return closeCompletion();
     const context = completionContext(force);
     if (!context) return closeCompletion();
     const items = suggestions(context);
@@ -981,6 +994,12 @@
 
   function updateHint() {
     if (!settings.hints) return;
+    if (plainText) {
+      const file = currentFile();
+      hintbar.innerHTML = `<span class="hint-about">a data file. a program reads it with <code>readfile ${escapeHtml(file ? file.name : "")} text</code> or <code>readlines("${escapeHtml(file ? file.name : "")}")</code></span>`;
+      lastHint = "";
+      return;
+    }
     const index = source.selectionStart;
     const start = lineStart(index);
     const line = source.value.slice(start, lineEnd(index));
@@ -1070,13 +1089,13 @@
     } else if (event.altKey && !mod(event) && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       event.preventDefault();
       moveLines(event.key === "ArrowDown");
-    } else if (event.key === "Backspace" && settings.autoPairs && source.selectionStart === source.selectionEnd) {
+    } else if (event.key === "Backspace" && settings.autoPairs && !plainText && source.selectionStart === source.selectionEnd) {
       const at = source.selectionStart, value = source.value;
       if (at > 0 && PAIRS[value[at - 1]] && PAIRS[value[at - 1]] === value[at]) {
         event.preventDefault();
         replaceRange(at - 1, at + 1, "", at - 1);
       }
-    } else if (settings.autoPairs && !mod(event) && !event.altKey && event.key.length === 1 && autoPair(event)) {
+    } else if (settings.autoPairs && !plainText && !mod(event) && !event.altKey && event.key.length === 1 && autoPair(event)) {
       event.preventDefault();
     }
     if (/^(Arrow|Home|End|Page)/.test(event.key)) scheduleCaret(true);
@@ -1251,17 +1270,37 @@
   // ----- files ------------------------------------------------------------------------------------------
   const currentFile = () => project.files.find((file) => file.name === project.current) || project.files[0];
 
+  // programs end in .gubl. data files keep their own ending (.txt, .csv, .json...), so readfile finds them.
   function cleanName(name) {
-    let base = String(name || "").split(/[\\/]/).pop().replace(/\.(gubl|gub|txt)$/i, "");
-    base = base.replace(/[^\w\- ]+/g, "").trim().slice(0, 40) || "program";
-    return base + ".gubl";
+    const raw = String(name || "").split(/[\\/]/).pop().trim();
+    const data = DATA_FILE.exec(raw);
+    let base = raw.replace(/\.(gubl|gub)$/i, "").replace(DATA_FILE, "");
+    base = base.replace(/[^\w\- ]+/g, "").trim().slice(0, 40) || (data ? "notes" : "program");
+    return base + (data ? data[0].toLowerCase() : ".gubl");
+  }
+  // "level.txt", 2 -> "level 2.txt"
+  function numbered(name, n) {
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? `${name.slice(0, dot)} ${n}${name.slice(dot)}` : `${name} ${n}`;
   }
   function uniqueName(name, except) {
     const wanted = cleanName(name);
     const taken = (candidate) => project.files.some((file) => file !== except && file.name.toLowerCase() === candidate.toLowerCase());
     if (!taken(wanted)) return wanted;
-    const base = wanted.slice(0, -5);
-    for (let n = 2; ; n++) if (!taken(`${base} ${n}.gubl`)) return `${base} ${n}.gubl`;
+    for (let n = 2; ; n++) if (!taken(numbered(wanted, n))) return numbered(wanted, n);
+  }
+  const programs = () => project.files.filter((file) => !isData(file));
+  // the program that runs: the open file, or the last program that was open when a data file is
+  function programFile() {
+    const current = currentFile();
+    if (current && !isData(current)) return current;
+    return programs().find((file) => file.name === lastProgram) || programs()[0] || null;
+  }
+  // every project file by name, for include and readfile
+  function projectFiles() {
+    const files = {};
+    for (const file of project.files) files[file.name] = file === currentFile() ? source.value : file.text;
+    return files;
   }
 
   function saveProject(now) {
@@ -1269,6 +1308,7 @@
     const write = () => storage.set(PROJECT_KEY, JSON.stringify({
       files: project.files.map(({ name, text, pristine }) => ({ name, text, pristine: Boolean(pristine) })),
       current: project.current,
+      published: project.published || null,
     }));
     if (now) write();
     else saveTimer = setTimeout(write, 400);
@@ -1284,6 +1324,9 @@
     if (project.current !== name) rememberView();
     const file = project.files.find((f) => f.name === name) || project.files[0];
     project.current = file.name;
+    plainText = isData(file);
+    if (!plainText) lastProgram = file.name;
+    editorPane.classList.toggle("data-file", plainText);
     source.value = file.text;
     lastText = file.text;
     fx = [];
@@ -1311,10 +1354,13 @@
   }
 
   function newFile() {
-    const asked = window.prompt("name for the new file:", uniqueName("helpers"));
+    const asked = window.prompt("name for the new file (end it in .txt or .csv for a data file):", uniqueName("helpers"));
     if (asked === null) return;
-    addFile(asked, "// " + cleanName(asked).slice(0, -5) + "\n");
-    toast(`made ${currentFile().name}. use it from another file with: include ${currentFile().name}`);
+    const name = cleanName(asked);
+    const data = DATA_FILE.test(name);
+    addFile(asked, data ? "" : "// " + name.replace(/\.gubl$/, "") + "\n");
+    const made = currentFile().name;
+    toast(data ? `made ${made}. a program reads it with: readfile ${made} text` : `made ${made}. use it from another file with: include ${made}`);
     play("open");
   }
 
@@ -1355,7 +1401,7 @@
     const many = project.files.length > 1;
     for (const file of project.files) {
       const chosen = file.name === project.current;
-      const tab = h("button", { class: "file-tab", role: "tab", "aria-selected": String(chosen), "data-name": file.name,
+      const tab = h("button", { class: "file-tab" + (isData(file) ? " data" : ""), role: "tab", "aria-selected": String(chosen), "data-name": file.name,
         title: "double-click (or f2) to rename" + (many ? ", delete to remove" : "") },
       h("span", { class: "name", text: file.name }),
       many ? h("span", { class: "close", role: "button", "aria-label": "delete " + file.name, title: "delete this file", text: "×" }) : null);
@@ -1394,26 +1440,27 @@
     if ([...(event.dataTransfer?.types || [])].includes("Files")) event.preventDefault();
   });
   editor.addEventListener("drop", (event) => {
-    const files = [...(event.dataTransfer?.files || [])].filter((file) => /\.(gubl|gub|txt)$/i.test(file.name));
+    const files = [...(event.dataTransfer?.files || [])].filter((file) => /\.(gubl|gub)$/i.test(file.name) || DATA_FILE.test(file.name));
     if (!files.length) return;
     event.preventDefault();
     openFiles(files);
   });
 
   // ----- checking ---------------------------------------------------------------------------------------
-  function syncFiles() {
+  function syncFiles(files) {
     if (!bridge || !bridge.set_files) return;
-    const files = {};
-    for (const file of project.files) files[file.name] = file.text;
-    try { bridge.set_files(JSON.stringify(files)); } catch (_) { /* include just won't find them */ }
+    try { bridge.set_files(JSON.stringify(files || projectFiles())); } catch (_) { /* include just won't find them */ }
   }
 
   function check() {
     if (!bridge) return;
-    try {
-      problems = JSON.parse(bridge.check(source.value));
-    } catch (error) {
-      problems = [{ line: 0, severity: "error", message: "the checker stopped: " + error.message }];
+    if (plainText) problems = []; // a data file: nothing to check
+    else {
+      try {
+        problems = JSON.parse(bridge.check(source.value));
+      } catch (error) {
+        problems = [{ line: 0, severity: "error", message: "the checker stopped: " + error.message }];
+      }
     }
     render();
     updateCaret(false);
@@ -1437,6 +1484,9 @@
     count.hidden = problems.length === 0;
     count.textContent = text;
     count.classList.toggle("warn", errors === 0);
+    const viewCount = $("view-count");
+    viewCount.hidden = errors === 0;
+    viewCount.textContent = String(errors);
     if (!problems.length) list.append(h("li", { class: "empty", text: "no problems found." }));
     problems.forEach((problem, index) => {
       const item = h("li", { class: problem.severity || "error" },
@@ -1452,15 +1502,16 @@
     }
   }
 
-  function translate(text, name) {
-    syncFiles();
+  function translate(text, name, files) {
+    syncFiles(files);
     return JSON.parse(bridge.translate(text, name));
   }
-  const programName = () => (currentFile() ? currentFile().name.replace(/\.gubl$/, "") : "program");
+  const programName = () => (programFile() ? programFile().name.replace(/\.gubl$/, "") : "program");
 
   function showJavaScript() {
     if (!bridge) return;
-    const result = translate(source.value, programName());
+    const program = programFile();
+    const result = translate(program === currentFile() ? source.value : program ? program.text : "", programName());
     $("javascript").textContent = result.ok ? result.code : "// " + result.error;
   }
 
@@ -1472,6 +1523,7 @@
       $("panel-" + tab.dataset.tab).hidden = !chosen;
     }
     if (name === "javascript") showJavaScript();
+    if (name === "files") renderSavedFiles();
     moveTabIndicator();
     applySplit();
   }
@@ -1593,8 +1645,9 @@
   }
 
   // runs inside the sandboxed frame before the runtime: sends prints, errors and saves back to this page
-  function frameBoot(saved, runtime, code, style) {
+  function frameBoot(saved, runtime, code, style, given) {
     const send = (message) => parent.postMessage(Object.assign({ gublan: true }, message), "*");
+    window.GUBLAN_FILES = given || {}; // the project's files: readfile finds them (what the program writes wins)
     const data = saved;
     const store = {
       getItem: (key) => (Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null),
@@ -1615,6 +1668,12 @@
       send({ type: "error", text: "error: " + (reason && reason.message ? reason.message : String(reason)) });
     });
     addEventListener("message", (event) => {
+      // the on-screen buttons on phones press keys
+      if (event.data && event.data.gublanKey) {
+        const { key, code, down } = event.data.gublanKey;
+        dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key, code, bubbles: true, cancelable: true }));
+        return;
+      }
       if (!event.data || event.data.gublanAsk !== "picture") return;
       const canvas = document.querySelector("canvas");
       let picture = null;
@@ -1636,13 +1695,13 @@
     add(code);
   }
 
-  function frameDocument(code, style) {
+  function frameDocument(code, style, files) {
     // "<" is escaped so the code can never close the <script> it sits in
     const json = (value) => JSON.stringify(value).replace(/</g, String.fromCharCode(92) + "u003c");
-    const boot = `(${frameBoot.toString()})(${json(saves())}, ${json(runtimeSource)}, ${json(code)}, ${json(style)});`;
+    const boot = `(${frameBoot.toString()})(${json(saves())}, ${json(runtimeSource)}, ${json(code)}, ${json(style)}, ${json(files || {})});`;
     const backdrop = getComputedStyle(stage).backgroundColor;
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>
-html, body { margin: 0; height: 100%; background: ${backdrop}; overflow: hidden; }
+html, body { margin: 0; height: 100%; background: ${backdrop}; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
 #gublan-stage { display: flex; align-items: center; justify-content: center; height: 100%; padding: 12px; box-sizing: border-box; }
 canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24px rgba(0,0,0,.35); }
 </style></head><body><div id="gublan-stage"></div><script>${boot}</script></body></html>`;
@@ -1666,33 +1725,57 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     }
     document.body.classList.remove("running");
     stopButton.disabled = true;
-    showStageNote(IDLE_NOTE);
+    frameWindow = false;
+    showPad();
+    showStageNote(viewing ? "press <kbd>play</kbd> to start it again." : IDLE_NOTE);
     if (wasRunning || !quiet) showProblems();
+  }
+
+  // what run starts: the published creation being played, or this project's program
+  function runSource() {
+    if (viewing) {
+      const files = viewing.files;
+      const main = files.find((f) => f.name === viewing.main && !isData(f)) || files.find((f) => !isData(f));
+      if (!main) return null;
+      const given = {};
+      for (const file of files) given[file.name] = file.text;
+      return { text: main.text, name: main.name.replace(/\.gubl$/, ""), files: given };
+    }
+    const program = programFile();
+    if (!program) return null;
+    return { text: program === currentFile() ? source.value : program.text, name: programName(), files: projectFiles(), program };
   }
 
   function run(demo) {
     if (!bridge) return;
     stop(true);
-    let text = source.value, name = programName();
-    if (demo === true) {
-      text = manifest.game?.demo || "popup hello\n";
-      name = "game window preview";
-    } else check();
-    const result = translate(text, name);
+    const chosen = demo === true ? { text: manifest.game?.demo || "popup hello\n", name: "game window preview", files: {} } : runSource();
+    if (!chosen) {
+      toast("add a .gubl program to run. data files are read by programs.", "bad");
+      play("error");
+      return;
+    }
+    let { text, name } = chosen;
+    const elsewhere = demo !== true && !viewing && chosen.program !== currentFile(); // run from a data file
+    if (demo !== true && !viewing && !elsewhere) check();
+    const result = translate(text, name, chosen.files);
+    usedKeys = keysIn(text, chosen.files);
     openTab("output");
     if (output.textContent) say("");
     if (!result.ok) {
+      if (elsewhere) selectFile(chosen.program.name, true); // its problems show up
       say(result.error, "error");
       setStatus("fix the problems first", "bad");
       play("error");
       const first = problems.find((p) => p.line && (p.severity || "error") === "error");
-      if (first) {
+      if (first && !viewing) {
         openTab("problems");
         goToLine(first.line, "error");
-      }
+        setView("code");
+      } else setView("output");
       return;
     }
-    if (demo !== true) $("javascript").textContent = result.code;
+    if (demo !== true && !viewing) $("javascript").textContent = result.code;
     for (const note of result.notes) say("note: " + note, "note");
 
     frameName = name;
@@ -1701,9 +1784,11 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     frame.title = "your program";
     // scripts, alerts and prompts only: no access to this page, its storage or its cookies
     frame.setAttribute("sandbox", "allow-scripts allow-modals");
-    frame.srcdoc = frameDocument(result.code, gameStyle());
-    showStageNote("Running…");
+    frame.srcdoc = frameDocument(result.code, gameStyle(), chosen.files);
+    frameWindow = false;
+    showStageNote("starting…");
     stage.append(frame);
+    setView("game");
     frame.addEventListener("load", () => frame && frame.focus());
     stopButton.disabled = false;
     document.body.classList.add("running");
@@ -1711,24 +1796,41 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     play("run");
   }
 
+  let printWait = 0;
   window.addEventListener("message", (event) => {
     if (!frame || event.source !== frame.contentWindow || !event.data || !event.data.gublan) return;
     const message = event.data;
-    if (message.type === "print") say(message.text);
-    else if (message.type === "error") {
+    if (message.type === "print") {
+      say(message.text);
+      // a program that only prints goes to output. wait a moment first: a hidden frame never draws its window
+      if (!frameWindow && view === "game" && !printWait) {
+        const running = frame;
+        printWait = setTimeout(() => {
+          printWait = 0;
+          if (frame === running && !frameWindow && view === "game") setView("output");
+        }, 700);
+      }
+    } else if (message.type === "error") {
       say(message.text, "error");
+      if (view === "game") setView("output");
       setStatus("stopped with an error", "bad");
       if (!frameFailed) play("error");
       frameFailed = true;
       statusText.classList.add("bad");
     } else if (message.type === "window") {
       stageNote.hidden = true;
-      frame.focus();
+      if (!frameWindow) {
+        frameWindow = true;
+        if (view === "output") setView("game");
+        showPad();
+      }
+      if (!touch.matches) frame.focus();
     } else if (message.type === "save") {
       const all = saves();
       if (message.value === null) delete all[message.key];
       else all[message.key] = message.value;
       storage.set(SAVES_KEY, JSON.stringify(all));
+      if (String(message.key).startsWith(FILE_PREFIX)) filesChanged();
     } else if (message.type === "picture") {
       if (!message.data) {
         toast("this program has no window to take a picture of", "bad");
@@ -1744,7 +1846,10 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
         play("done");
       }
       stopButton.disabled = true;
-      if (!stageNote.hidden) showStageNote("this program has no window. what it printed is below.");
+      if (!stageNote.hidden) {
+        showStageNote(narrow.matches ? "this program has no window. what it printed is under output." : "this program has no window. what it printed is below.");
+        if (view === "game") setView("output");
+      }
     }
   });
 
@@ -1766,12 +1871,17 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
   $("restart").addEventListener("click", () => run(frameName === "game window preview" ? true : undefined));
   $("screenshot").addEventListener("click", screenshot);
   $("fullscreen").addEventListener("click", fullscreen);
-  stage.addEventListener("click", () => frame && frame.focus());
+  stage.addEventListener("click", (event) => { if (frame && !touch.matches && !event.target.closest(".pad")) frame.focus(); });
 
   // a single web page with the runtime and program inside, that works anywhere
   function exportPage() {
     if (!bridge) return;
-    const result = translate(source.value, programName());
+    const program = programFile();
+    if (!program) {
+      toast("add a .gubl program first", "bad");
+      return;
+    }
+    const result = translate(program === currentFile() ? source.value : program.text, programName());
     if (!result.ok) {
       toast("fix the problems first", "bad");
       play("error");
@@ -1779,6 +1889,8 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
     }
     const safe = (text) => text.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
     const style = gameStyle();
+    const data = project.files.filter(isData);
+    const dataFiles = data.length ? Object.fromEntries(data.map((file) => [file.name, file === currentFile() ? source.value : file.text])) : null;
     const title = escapeHtml(programName());
     const page = `<!doctype html>
 <html>
@@ -1795,7 +1907,7 @@ canvas { max-width: 100%; max-height: 100%; outline: none; box-shadow: 0 4px 24p
 </head>
 <body>
 <div id="gublan-stage"><pre id="gublan-log"></pre></div>
-${style ? `<script>globalThis.GUBLAN_STYLE = ${JSON.stringify(style).replace(/</g, "\\u003c")};</script>\n` : ""}<script>
+${style ? `<script>globalThis.GUBLAN_STYLE = ${JSON.stringify(style).replace(/</g, "\\u003c")};</script>\n` : ""}${dataFiles ? `<script>globalThis.GUBLAN_FILES = ${JSON.stringify(dataFiles).replace(/</g, "\\u003c")};</script>\n` : ""}<script>
 ${safe(runtimeSource)}
 </script>
 <script>
@@ -1844,7 +1956,7 @@ ${safe(result.code)}
   }
 
   async function share() {
-    const many = project.files.length > 1;
+    const many = project.files.length > 1 || plainText;
     const body = many ? JSON.stringify({ files: project.files.map(({ name, text }) => ({ name, text })), current: project.current }) : source.value;
     const link = location.href.split("#")[0] + "#" + await pack(body, many);
     history.replaceState(null, "", link);
@@ -1905,7 +2017,7 @@ ${safe(result.code)}
       } else addFile(name, text, true);
       saveProject(true);
       play("open");
-      if (!example.web) say(`note: ${example.title} uses 3d, which only works in gublan studio`, "note");
+      setView("code");
     } catch (error) {
       say("couldn't open that example: " + error.message, "error");
       play("error");
@@ -2288,6 +2400,13 @@ ${safe(result.code)}
         checkRow("highlight the line i'm on", "lineHighlight"),
         checkRow("rainbow brackets", "rainbow")),
       h("section", {},
+        h("h3", { text: "phones and tablets" }),
+        ...choiceRow("on-screen buttons", "touchPad", [["auto", "on touch screens"], ["on", "always"], ["off", "never"]], {
+          auto: "while a game runs, buttons for the keys it uses (arrows, space, letters) show over it on touch screens.",
+          on: "the game's keys show as buttons over it everywhere, even with a mouse.",
+          off: "no buttons over the game.",
+        })),
+      h("section", {},
         h("h3", { text: "cursor and typing" }),
         checkRow("smooth cursor", "smoothCaret"),
         ...choiceRow("cursor shape", "caretStyle", [["line", "line"], ["block", "block"], ["underline", "underline"]]),
@@ -2438,7 +2557,7 @@ ${safe(result.code)}
     for (const file of remote) {
       if (out.some((f) => f.text === file.text)) continue;
       let name = file.name;
-      for (let n = 2; out.some((f) => f.name.toLowerCase() === name.toLowerCase()); n++) name = file.name.replace(/\.gubl$/, ` ${n}.gubl`);
+      for (let n = 2; out.some((f) => f.name.toLowerCase() === name.toLowerCase()); n++) name = numbered(file.name, n);
       out.push({ name, text: file.text });
     }
     return out;
@@ -2616,12 +2735,487 @@ ${safe(result.code)}
     openSettings("settings-keys");
   });
 
+  // ----- files the programs saved (writefile, appendfile, makefolder): they live in this browser --------------
+  function savedFiles() {
+    const out = [];
+    for (const [key, value] of Object.entries(saves())) {
+      if (!key.startsWith(FILE_PREFIX) || typeof value !== "string") continue;
+      const rest = key.slice(FILE_PREFIX.length);
+      const colon = rest.indexOf(":");
+      if (colon < 0) continue;
+      const path = rest.slice(colon + 1);
+      if (!path || path.endsWith("/")) continue; // a folder marker
+      out.push({ key, program: rest.slice(0, colon), path, text: value });
+    }
+    return out.sort((a, b) => a.program.localeCompare(b.program) || a.path.localeCompare(b.path));
+  }
+  const sizeText = (text) => {
+    const bytes = new TextEncoder().encode(text).length;
+    return bytes < 1024 ? `${bytes} bytes` : `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} kb`;
+  };
+
+  let filesTimer = 0;
+  function filesChanged() {
+    clearTimeout(filesTimer);
+    filesTimer = setTimeout(() => {
+      if (!$("panel-files").hidden) renderSavedFiles();
+      const count = $("files-count");
+      const total = savedFiles().length;
+      count.hidden = total === 0;
+      count.textContent = String(total);
+    }, 120);
+  }
+
+  function deleteSaved(list) {
+    const all = saves();
+    for (const file of list) delete all[file.key];
+    storage.set(SAVES_KEY, JSON.stringify(all));
+    play("close");
+    filesChanged();
+  }
+
+  function openSaved(file) {
+    let name = file.path.split("/").pop();
+    if (!DATA_FILE.test(name) && !/\.gubl$/i.test(name)) name += ".txt";
+    addFile(name, file.text);
+    saveProject(true);
+    setView("code");
+    play("open");
+    toast(`opened a copy of ${file.path} as ${currentFile().name}`);
+  }
+
+  function renderSavedFiles() {
+    const box = $("saved-files");
+    box.textContent = "";
+    const list = savedFiles();
+    if (!list.length) {
+      box.append(h("p", { class: "empty", text: "nothing yet. files your programs make with writefile, appendfile and copyfile show up here, and stay in this browser. programs can also read the data files in your project (.txt, .csv, .json)." }));
+      return;
+    }
+    let last = null;
+    for (const file of list) {
+      if (file.program !== last) {
+        box.append(h("h3", { text: "made by " + file.program }));
+        last = file.program;
+      }
+      const covers = project.files.some((f) => f.name === file.path);
+      box.append(h("div", { class: "saved-file" },
+        h("div", { class: "saved-name" },
+          h("code", { text: file.path }),
+          h("small", { text: sizeText(file.text) + (covers ? ". programs read this instead of the project's " + file.path : "") })),
+        h("div", { class: "saved-buttons" },
+          h("button", { type: "button", text: "open", title: "open a copy in the editor", onclick: () => openSaved(file) }),
+          h("button", { type: "button", text: "download", onclick: () => { download(file.path.split("/").pop(), file.text); play("save"); } }),
+          h("button", { type: "button", class: "danger", text: "delete", onclick: () => deleteSaved([file]) }))));
+    }
+    box.append(h("div", { class: "saved-foot" }, h("button", { type: "button", class: "danger", text: "delete them all", onclick: () => {
+      if (window.confirm(`delete all ${list.length} saved ${list.length === 1 ? "file" : "files"}? programs start again without them.`)) deleteSaved(list);
+    } })));
+  }
+
+  // ----- publishing to gublan.xyz --------------------------------------------------------------------------
+  // anyone with the link can play what you publish, and it shows up on gublan.xyz/explore. project.published
+  // remembers this project's creation, so publishing again updates it instead of making another.
+  const MAX_PUBLISH = 200000;
+  const publishBack = $("publish-back");
+
+  function closePublish() {
+    if (publishBack.hidden) return;
+    leave(publishBack, 180, () => { publishBack.hidden = true; });
+  }
+
+  function publishField(label, input) {
+    return h("label", { class: "field" }, h("span", { text: label }), input);
+  }
+
+  function myCreation() {
+    const user = signedIn();
+    return user && project.published && project.published.user === user.id ? project.published : null;
+  }
+
+  function openPublish() {
+    const account = cloudAccount();
+    const body = $("publish-body");
+    body.textContent = "";
+    if (!account) {
+      body.append(h("p", { text: "publishing needs gublan.xyz's account server, and this copy of the playground doesn't have one. share a link instead: it holds the whole program." }),
+        h("div", { class: "row" }, h("button", { type: "button", class: "primary", text: "copy a link", onclick: () => { closePublish(); share(); } })));
+    } else if (!signedIn()) {
+      body.append(h("p", { text: "sign in with discord to publish. everyone can play what you publish and look at its code, and it shows up on gublan.xyz/explore." }),
+        h("div", { class: "row" },
+          h("button", { type: "button", class: "primary", text: "sign in with discord", onclick: startSignIn }),
+          h("button", { type: "button", text: "explore what people made", onclick: () => { location.href = "../explore/"; } })));
+    } else {
+      const mine = myCreation();
+      const runnable = programs();
+      const title = h("input", { id: "pub-title", type: "text", maxlength: "80", spellcheck: "true", value: mine ? mine.title : (programName() === "program" ? "" : programName().replace(/[_-]+/g, " ")), placeholder: "what is it called?" });
+      const about = h("textarea", { id: "pub-about", maxlength: "1000", rows: "3", placeholder: "how to play, or what it does (you can leave this empty)" });
+      about.value = mine ? mine.about || "" : "";
+      const main = h("select", { id: "pub-main" }, runnable.map((file) => h("option", { value: file.name, text: file.name, selected: file === programFile() })));
+      if (mine && mine.main && runnable.some((f) => f.name === mine.main)) main.value = mine.main;
+      const size = JSON.stringify(projectFiles()).length;
+      body.append(
+        publishField("name", title),
+        publishField("about it", about),
+        runnable.length > 1 ? publishField("runs first", main) : null,
+        h("p", { class: "about", text: `publishes all ${project.files.length} ${project.files.length === 1 ? "file" : "files"} in this project (${sizeText(JSON.stringify(projectFiles()))}). everyone can play it and see its code.` }),
+        size > MAX_PUBLISH ? h("p", { class: "about bad", text: "that's more than 200 kb, which is too big to publish. move some data out first." }) : null,
+        mine ? h("p", { class: "about" }, "this project is published at ", h("a", { href: account.creationLink(mine.id), target: "_blank", rel: "noopener", text: account.creationLink(mine.id).replace(/^https?:\/\//, "") })) : null,
+        h("div", { class: "row" },
+          h("button", { type: "button", class: "primary", id: "pub-go", text: mine ? "update it" : "publish", disabled: size > MAX_PUBLISH, onclick: () => publishProject(false) }),
+          mine ? h("button", { type: "button", text: "publish as a new one", disabled: size > MAX_PUBLISH, onclick: () => publishProject(true) }) : null,
+          mine ? h("button", { type: "button", text: "copy link", onclick: () => copyText(account.creationLink(mine.id), "link copied") }) : null,
+          mine ? h("button", { type: "button", class: "danger", text: "take it down", onclick: () => unpublishProject(mine) }) : null),
+        h("p", { class: "about" }, h("a", { href: "../explore/?mine=1", text: "everything you published" })));
+      requestAnimationFrame(() => title.focus());
+    }
+    publishBack.hidden = false;
+    arrive(publishBack);
+    play("open");
+  }
+
+  async function copyText(text, said) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(said);
+      play("notify");
+    } catch (_) {
+      window.prompt("copy this:", text);
+    }
+  }
+
+  async function publishProject(asNew) {
+    const account = cloudAccount();
+    const user = signedIn();
+    if (!account || !user) return;
+    const title = $("pub-title").value.trim();
+    if (!title) {
+      toast("give it a name first", "bad");
+      $("pub-title").focus();
+      return;
+    }
+    const files = projectFiles();
+    const mainBox = $("pub-main");
+    const main = mainBox ? mainBox.value : (programFile() ? programFile().name : "");
+    if (!main) {
+      toast("add a .gubl program to publish", "bad");
+      return;
+    }
+    const mine = asNew ? null : myCreation();
+    const buttons = [...$("publish-body").querySelectorAll("button")];
+    buttons.forEach((button) => { button.disabled = true; });
+    setStatus(mine ? "updating…" : "publishing…", "busy");
+    try {
+      const saved = await account.publish({
+        id: mine ? mine.id : null, title, about: $("pub-about").value, files, main,
+        uses_3d: Object.entries(files).some(([name, text]) => !DATA_FILE.test(name) && /^\s*mode\s+3d\b/m.test(text)),
+      });
+      project.published = { id: saved.id, user: user.id, title: saved.title, about: saved.about, main: saved.main };
+      saveProject(true);
+      const link = account.creationLink(saved.id);
+      setStatus(mine ? "updated" : "published", "good");
+      play("done");
+      try {
+        await navigator.clipboard.writeText(link);
+        toast(mine ? "updated. the link is copied" : "published! the link is copied");
+      } catch (_) {
+        toast(mine ? "updated" : "published!");
+      }
+      openPublish();
+    } catch (error) {
+      buttons.forEach((button) => { button.disabled = false; });
+      setStatus("couldn't publish", "bad");
+      const why = String(error.message || error).toLowerCase();
+      toast(/relation|does not exist|404/.test(why) ? "publishing isn't switched on for this site yet" : "couldn't publish: " + why, "bad");
+      play("error");
+    }
+  }
+
+  async function unpublishProject(mine) {
+    if (!window.confirm(`take "${mine.title}" down? its link stops working. your files stay here.`)) return;
+    try {
+      await cloudAccount().unpublish(mine.id);
+      project.published = null;
+      saveProject(true);
+      toast("taken down");
+      play("close");
+      openPublish();
+    } catch (error) {
+      toast("couldn't take it down: " + String(error.message).toLowerCase(), "bad");
+    }
+  }
+
+  $("publish").addEventListener("click", () => (publishBack.hidden ? openPublish() : closePublish()));
+  $("publish-close").addEventListener("click", closePublish);
+  publishBack.addEventListener("click", (event) => { if (event.target === publishBack) closePublish(); });
+
+  // ----- playing a published creation (?c=<id>) -------------------------------------------------------------
+  // the creation runs on its own: your project isn't touched until you press "remix".
+  async function openCreation(id) {
+    const account = cloudAccount();
+    if (!account) {
+      say("this copy of the playground can't open published creations", "error");
+      return;
+    }
+    document.body.classList.add("player");
+    $("creation").hidden = false;
+    $("creation-title").textContent = "getting it…";
+    $("creation-by").textContent = "";
+    $("creation-about").hidden = true;
+    for (const button of ["creation-play", "creation-code", "creation-link"]) $(button).hidden = true;
+    setView("game");
+    const missing = (title, why) => {
+      $("creation-title").textContent = title;
+      $("creation-by").textContent = why;
+      showStageNote('nothing to play. <a href="../explore/">see what people made</a>, or close this to write your own.');
+    };
+    let found = null;
+    try {
+      found = await account.creation(id);
+    } catch (error) {
+      const why = String(error.message || error).toLowerCase();
+      missing("couldn't get it", /relation|does not exist|schema cache|\(404\)/.test(why)
+        ? "publishing isn't switched on for this site yet." : why);
+      return;
+    }
+    if (!found) {
+      missing("nothing here", "this creation was taken down, or the link is wrong.");
+      return;
+    }
+    const files = Object.entries(found.files || {})
+      .filter(([name, text]) => typeof name === "string" && typeof text === "string")
+      .map(([name, text]) => ({ name: cleanName(name), text }));
+    if (!files.length) {
+      missing("this creation is empty", "");
+      return;
+    }
+    for (const button of ["creation-play", "creation-code", "creation-link"]) $(button).hidden = false;
+    viewing = Object.assign({}, found, { files, main: cleanName(found.main || files[0].name) });
+    document.title = `${found.title} - gublan`;
+    $("creation-title").textContent = found.title;
+    const made = new Date(found.updated_at || found.created_at);
+    const day = Number.isNaN(made.getTime()) ? "" : ", " + made.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }).toLowerCase();
+    $("creation-by").textContent = `by ${String(found.author || "someone").toLowerCase()}${day}${found.uses_3d ? ". 3d" : ""}`;
+    $("creation-about").textContent = found.about || "";
+    $("creation-about").hidden = !found.about;
+    const user = signedIn();
+    $("creation-code").textContent = user && user.id === found.user_id ? "edit it" : "remix it";
+    if (bridge) run();
+  }
+
+  // see the code: the creation's files join your project, and the playground goes back to normal
+  function remixCreation() {
+    if (!viewing) return;
+    const user = signedIn();
+    const mine = user && user.id === viewing.user_id;
+    const shown = viewing;
+    leaveCreation();
+    takeShared({ files: shown.files.map(({ name, text }) => ({ name, text })), current: shown.main });
+    if (mine) project.published = { id: shown.id, user: user.id, title: shown.title, about: shown.about || "", main: shown.main };
+    else if (project.published && project.published.id === shown.id) project.published = null;
+    saveProject(true);
+    setView("code");
+    toast(mine ? "your creation is open. publish updates it." : "it's in your files now. change anything, then publish your own.");
+  }
+
+  function leaveCreation() {
+    stop(true);
+    viewing = null;
+    document.body.classList.remove("player");
+    $("creation").hidden = true;
+    document.title = "gublan playground";
+    const params = new URLSearchParams(location.search);
+    params.delete("c");
+    const rest = params.toString();
+    history.replaceState(null, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
+    showStageNote(IDLE_NOTE);
+    setView("code");
+  }
+
+  $("creation-play").addEventListener("click", () => run());
+  $("creation-code").addEventListener("click", remixCreation);
+  $("creation-link").addEventListener("click", () => viewing && copyText(cloudAccount().creationLink(viewing.id), "link copied"));
+  $("creation-close").addEventListener("click", leaveCreation);
+
+  // ----- phones: one pane at a time, symbols over the keyboard, buttons for the game's keys -------------------
+  let view = "code"; // what a narrow screen shows: code, game or output
+  let usedKeys = []; // the keys the running program asks about
+  let padKeys = "";
+
+  function setView(name) {
+    if (!["code", "game", "output"].includes(name)) return;
+    const changed = view !== name;
+    view = name;
+    document.body.dataset.view = name;
+    for (const button of document.querySelectorAll("#views [data-view]")) button.setAttribute("aria-pressed", String(button.dataset.view === name));
+    if (narrow.matches && changed) {
+      if (name !== "code" && document.activeElement === source) source.blur();
+      requestAnimationFrame(() => {
+        if (name === "code") { measure(); updateCaret(true); }
+        if (name === "output") moveTabIndicator();
+      });
+    }
+    showPad();
+  }
+
+  // the keys a program checks: keydown("left"), keypressed("space"), key jump up, keypressed go return
+  const KEY_EVENTS = {
+    up: ["ArrowUp", "ArrowUp"], down: ["ArrowDown", "ArrowDown"], left: ["ArrowLeft", "ArrowLeft"], right: ["ArrowRight", "ArrowRight"],
+    space: [" ", "Space"], return: ["Enter", "Enter"], escape: ["Escape", "Escape"], tab: ["Tab", "Tab"],
+    backspace: ["Backspace", "Backspace"], delete: ["Delete", "Delete"], "left shift": ["Shift", "ShiftLeft"],
+    "right shift": ["Shift", "ShiftRight"], "left ctrl": ["Control", "ControlLeft"], "left alt": ["Alt", "AltLeft"],
+  };
+  const KEY_ALIASES = { esc: "escape", enter: "return", spacebar: "space", shift: "left shift", ctrl: "left ctrl",
+    control: "left ctrl", alt: "left alt", arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right" };
+  const KEY_LABELS = { up: "▲", down: "▼", left: "◀", right: "▶", return: "enter", escape: "esc", "left shift": "shift",
+    "right shift": "shift", "left ctrl": "ctrl", "left alt": "alt", backspace: "⌫" };
+
+  function keysIn(text, files) {
+    const found = [];
+    const bodies = [text].concat(Object.entries(files || {}).filter(([name]) => /\.gubl$/i.test(name)).map(([, body]) => body));
+    for (const body of bodies) {
+      for (const match of String(body).matchAll(/key(?:down|pressed)\s*\(\s*["']([^"'{}]+)["']\s*\)/gi)) found.push(match[1]);
+      for (const match of String(body).matchAll(/^[ \t]*(?:key|keypressed)[ \t]+\w+[ \t]+([^{}\n]+?)[ \t]*$/gim)) found.push(match[1]);
+    }
+    const keys = [];
+    for (let name of found) {
+      name = name.trim().toLowerCase();
+      name = KEY_ALIASES[name] || name;
+      if ((KEY_EVENTS[name] || name.length === 1) && !keys.includes(name)) keys.push(name);
+    }
+    return keys;
+  }
+
+  function pressKey(name, down) {
+    if (!frame) return;
+    const [key, code] = KEY_EVENTS[name] || [name, /^[a-z]$/.test(name) ? "Key" + name.toUpperCase() : /^\d$/.test(name) ? "Digit" + name : ""];
+    frame.contentWindow.postMessage({ gublanKey: { key, code, down } }, "*");
+  }
+
+  function padWanted() {
+    return settings.touchPad === "on" || (settings.touchPad !== "off" && touch.matches);
+  }
+
+  function padButton(name, extra) {
+    const button = h("button", { type: "button", class: "pad-key " + (extra || ""), "data-key": name, "aria-label": name, text: KEY_LABELS[name] || name });
+    const release = () => {
+      if (!button.classList.contains("down")) return;
+      button.classList.remove("down");
+      pressKey(name, false);
+    };
+    button.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      try { button.setPointerCapture(event.pointerId); } catch (_) { /* a mouse that left already */ }
+      button.classList.add("down");
+      pressKey(name, true);
+      if (navigator.vibrate && settings.sounds) navigator.vibrate(6);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(type, release);
+    button.addEventListener("contextmenu", (event) => event.preventDefault());
+    return button;
+  }
+
+  function showPad() {
+    const pad = $("pad");
+    if (!pad) return;
+    const on = Boolean(frame) && frameWindow && padWanted() && usedKeys.length > 0 && (view === "game" || !narrow.matches);
+    pad.hidden = !on;
+    if (!on) return;
+    const signature = usedKeys.join("|");
+    if (signature === padKeys) return;
+    padKeys = signature;
+    pad.textContent = "";
+    const cross = (names, label) => {
+      if (!names.some((name) => usedKeys.includes(name))) return null;
+      const [up, left, down, right] = names;
+      return h("div", { class: "pad-cross", "aria-label": label },
+        usedKeys.includes(up) ? padButton(up, "up") : null,
+        usedKeys.includes(left) ? padButton(left, "left") : null,
+        usedKeys.includes(down) ? padButton(down, "down") : null,
+        usedKeys.includes(right) ? padButton(right, "right") : null);
+    };
+    const arrows = cross(["up", "left", "down", "right"], "arrow keys");
+    const wasd = cross(["w", "a", "s", "d"], "w a s d");
+    const crossed = new Set(["up", "left", "down", "right"].concat(wasd ? ["w", "a", "s", "d"] : []));
+    const rest = usedKeys.filter((name) => !crossed.has(name)).slice(0, 8);
+    pad.append(h("div", { class: "pad-side" }, arrows || wasd),
+      h("div", { class: "pad-side right" }, arrows && wasd ? wasd : null, rest.length ? h("div", { class: "pad-buttons" }, rest.map((name) => padButton(name))) : null));
+  }
+
+  // a row of the symbols gublan needs, which phone keyboards hide
+  const KEYBAR = ["tab", "{", "}", "(", ")", '"', "=", "+", "-", "*", "/", "<", ">", "[", "]", ",", ".", ":", "_", "#", "end", "←", "→", "undo", "redo"];
+  function keybarPress(label) {
+    if (label === "tab") {
+      if (source.selectionStart !== source.selectionEnd) indentSelection(false);
+      else insert(INDENT);
+    } else if (label === "←" || label === "→") {
+      source.focus();
+      const at = label === "←" ? Math.max(0, source.selectionStart - 1) : Math.min(source.value.length, source.selectionEnd + 1);
+      source.setSelectionRange(at, at);
+      scheduleCaret(true);
+    } else if (label === "undo" || label === "redo") {
+      source.focus();
+      document.execCommand(label);
+    } else if (settings.autoPairs && !plainText && PAIRS[label] && source.selectionStart === source.selectionEnd) {
+      insert(label + PAIRS[label]);
+      const at = source.selectionStart - 1;
+      source.setSelectionRange(at, at);
+      scheduleCaret(true);
+    } else insert(label);
+    play("type");
+  }
+
+  function startPhone() {
+    const keybar = $("keybar");
+    for (const label of KEYBAR) {
+      const button = h("button", { type: "button", tabindex: "-1", text: label, class: label.length > 1 ? "word" : "" });
+      // pointerdown, so the editor keeps the keyboard open
+      button.addEventListener("pointerdown", (event) => { event.preventDefault(); keybarPress(label); });
+      button.addEventListener("click", (event) => { if (event.detail === 0) keybarPress(label); }); // keyboard and switch users
+      keybar.append(button);
+    }
+    for (const button of document.querySelectorAll("#views [data-view]")) {
+      button.addEventListener("click", () => {
+        setView(button.dataset.view);
+        play("click");
+      });
+    }
+    const fit = () => {
+      document.body.classList.toggle("touch", touch.matches);
+      const viewport = window.visualViewport;
+      if (viewport) {
+        // phones cover the bottom of the page with the keyboard: keep the editor and the symbols above it
+        document.documentElement.style.setProperty("--app-height", Math.round(viewport.height) + "px");
+        const typing = touch.matches && window.screen && viewport.height < window.screen.height * 0.6 && document.activeElement === source;
+        document.body.classList.toggle("keyboard", Boolean(typing));
+        if (narrow.matches && viewport.offsetTop) window.scrollTo(0, 0);
+      }
+      applySplit();
+      showPad();
+    };
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", fit);
+      window.visualViewport.addEventListener("scroll", fit);
+    }
+    source.addEventListener("focus", () => setTimeout(fit, 300));
+    source.addEventListener("blur", () => setTimeout(fit, 100));
+    for (const query of [touch, narrow]) {
+      if (query.addEventListener) query.addEventListener("change", fit);
+    }
+    setView(viewing ? "game" : "code");
+    fit();
+  }
+
   // ----- the command palette ---------------------------------------------------------------------------
   function actions() {
     const list = [
       ["run the program", "Ctrl+Enter", () => run()],
       ["stop the program", "Esc", () => stop()],
       ["share a link to this program", "", share],
+      ["publish to gublan.xyz", "", () => openPublish()],
+      ["explore what people made", "", () => { location.href = "../explore/"; }],
+      ["files your programs saved", "", () => { setView("output"); openTab("files"); }],
+      [padWanted() ? "hide the on-screen buttons" : "show the on-screen buttons", "", () => setSetting("touchPad", padWanted() ? "off" : "on")],
       ["new file", "Ctrl+Alt+N", newFile],
       ["open .gubl files from this computer", "Ctrl+O", () => $("open-file").click()],
       ["download this file", "Ctrl+Shift+S", () => { download(currentFile().name, source.value); play("save"); }],
@@ -2652,7 +3246,7 @@ ${safe(result.code)}
     }
     for (const file of project.files) list.push({ kind: "file", title: file.name, keys: "", go: () => selectFile(file.name) });
     for (const example of manifest.examples) {
-      list.push({ kind: "example", title: example.title, keys: example.web ? "" : "3d, studio only", go: () => openExample(example) });
+      list.push({ kind: "example", title: example.title, keys: example["3d"] ? "3d" : "", go: () => openExample(example) });
     }
     if (reference) {
       for (const command of reference.commands) {
@@ -2808,7 +3402,8 @@ ${safe(result.code)}
       event.preventDefault();
       tidyIndentation();
     } else if (event.key === "Escape") {
-      if (!palette.hidden) closePalette();
+      if (!publishBack.hidden) closePublish();
+      else if (!palette.hidden) closePalette();
       else if (!drawer.hidden) closeSettings();
       else if (!findbar.hidden) closeFind();
       else if (frame) stop();
@@ -2837,7 +3432,7 @@ ${safe(result.code)}
     if (!boot) return;
     boot.classList.add("gone");
     setTimeout(() => boot.remove(), 600 * (speed() || 0.01));
-    showStageNote(IDLE_NOTE);
+    if (!document.body.classList.contains("player")) showStageNote(IDLE_NOTE); // a creation link says its own thing
   }
 
   async function loadGublan() {
@@ -2888,7 +3483,7 @@ ${safe(result.code)}
         for (const file of stored.files) {
           if (file && typeof file.text === "string") files.push({ name: cleanName(file.name), text: file.text, pristine: Boolean(file.pristine) });
         }
-        if (files.length) return { files, current: stored.current };
+        if (files.length) return { files, current: stored.current, published: stored.published || null };
       }
     } catch (_) { /* no project yet */ }
     try {
@@ -2920,19 +3515,22 @@ ${safe(result.code)}
     progress("files", 0.05);
     applySettings();
     $("version").textContent = manifest.version;
+    const groups = { "2d": h("optgroup", { label: "2d and text" }), "3d": h("optgroup", { label: "3d" }) };
     for (const example of manifest.examples) {
-      examplesBox.append(h("option", { value: example.file, text: example.title + (example.web ? "" : " (3d, studio only)") }));
+      groups[example["3d"] ? "3d" : "2d"].append(h("option", { value: example.file, text: example.title }));
     }
+    for (const group of Object.values(groups)) if (group.children.length) examplesBox.append(group);
     const stored = await firstProject();
     project.files = [];
     const seen = new Set();
     for (const file of stored.files) {
       let name = file.name;
-      for (let n = 2; seen.has(name.toLowerCase()); n++) name = file.name.replace(/\.gubl$/, ` ${n}.gubl`);
+      for (let n = 2; seen.has(name.toLowerCase()); n++) name = numbered(file.name, n);
       seen.add(name.toLowerCase());
       project.files.push(Object.assign(file, { name }));
     }
     project.current = stored.current && project.files.some((f) => f.name === stored.current) ? stored.current : project.files[0].name;
+    project.published = stored.published && typeof stored.published.id === "string" ? stored.published : null;
     selectFile(project.current, true);
     try {
       const shared = await unpack(location.hash);
@@ -2943,6 +3541,10 @@ ${safe(result.code)}
     saveProject(true);
     if (storage.get(PROJECT_KEY)) storage.remove(DRAFT_KEY);
     startAccount();
+    startPhone();
+    filesChanged();
+    const wanted = new URLSearchParams(location.search).get("c");
+    if (wanted) openCreation(wanted);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); updateCaret(true); moveTabIndicator(); });
     try {
       bridge = await loadGublan();
@@ -2960,6 +3562,7 @@ ${safe(result.code)}
     check();
     lastHint = "";
     updateHint();
+    if (viewing) run(); // a creation link plays straight away
   }
 
   moveTabIndicator();

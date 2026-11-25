@@ -19,13 +19,16 @@ from gublancore import COMMAND_SPECS, GublanRuntime, analyze_source, format_valu
 
 from . import blocks as blocks_module
 from . import account as accounts
+from . import refactor, shell
 from . import collab, config, exporter, guard, plugins, sounds, textfiles, theme, updater, version
 from .assets import logo_image, set_window_icon
 from .blocks import BlocksView
 from .dialogs import (STYLE_DEMO, CommandPalette, ConvertDialog, ExportDialog, GameStyleDialog, McpDialog,
-                      SettingsDialog, SpriteEditor, TranslateDialog, WelcomePage, ask, confirm, message)
+                      FindInFilesDialog, PublishDialog, SettingsDialog, SpriteEditor, TranslateDialog, WelcomePage, ask, confirm,
+                      message)
 from .editor import CodeEditor
 from .presence import StudioPresence
+from .scene3d import SceneEditor
 from .panels import (AssetsPanel, FilesPanel, HelpPanel, OutlinePanel, OutputPanel, ProblemsPanel,
                      VariablesPanel, reveal)
 from .templates import TEMPLATES, template
@@ -175,11 +178,12 @@ class GublanStudio:
     def parseblocksource(source):
         return blocks_module.parseblocksource(source)
 
-    def __init__(self, root, paths=()):
+    def __init__(self, root, paths=(), run=False):
         self.root = root
         self.settings = config.load()
         self.docs = []
         self.current = None
+        self.closed_paths = []  # for reopen closed tab, newest last
         self.runtime = GublanRuntime()
         self.console_runtime = None
         self.queue = queue.Queue()
@@ -224,6 +228,14 @@ class GublanStudio:
         self._bind_shortcuts()
         self.apply_settings(self.settings, save=False)
         self._restore(paths)
+        self.instance = None
+        try:
+            self.instance = shell.InstanceServer(
+                lambda found, start: self.queue.put(("call", lambda: self.open_from_outside(found, start))))
+        except OSError:
+            pass  # no local port: this studio just won't receive files from explorer
+        if run and paths:
+            self.when_shown(lambda: self.open_from_outside(paths, True))
         self.root.after(40, self._poll)
         self.root.after(1200, self._after_update)
         self.root.after(5000, self._check_for_updates)
@@ -482,10 +494,15 @@ class GublanStudio:
                  "enabled": doc is not None},
                 {"label": "export as another language...", "command": self.open_translate,
                  "shortcut": "ctrl+shift+l", "enabled": doc is not None},
+                {"label": "copy playground link", "command": self.copy_playground_link, "enabled": doc is not None},
+                *([{"label": "publish to gublan.xyz...", "command": self.open_publish, "enabled": doc is not None}]
+                  if accounts.configured() else []),
                 {"label": "show in explorer", "command": lambda: doc and doc.path and reveal(doc.path),
                  "enabled": bool(doc and doc.path)},
                 "-",
                 {"label": "close tab", "command": self.close_current, "shortcut": "ctrl+w", "enabled": doc is not None},
+                {"label": "reopen closed tab", "command": self.reopen_closed, "shortcut": "ctrl+shift+t",
+                 "enabled": bool(self.closed_paths)},
                 ("exit", self.exit, "alt+f4"),
             ],
             "edit": [
@@ -499,6 +516,9 @@ class GublanStudio:
                 "-",
                 ("find", lambda: self._edit("find"), "ctrl+f"),
                 ("replace", lambda: self._edit("replace"), "ctrl+h"),
+                ("find in files...", self.find_in_files, "ctrl+shift+f"),
+                {"label": "rename everywhere in this file...", "command": self.rename_symbol, "shortcut": "f2",
+                 "enabled": doc is not None},
                 ("go to line...", self.goto_line_prompt, "ctrl+g"),
                 ("go to definition", lambda: self._edit("definition"), "f12"),
                 "-",
@@ -546,6 +566,8 @@ class GublanStudio:
             "run": [
                 ("run" if not self.running() else "continue", self.run_or_continue, "f5"),
                 {"label": "stop", "command": self.stop, "shortcut": "shift+f5", "enabled": self.running()},
+                {"label": "restart", "command": self.restart_run, "shortcut": "ctrl+shift+f5",
+                 "enabled": doc is not None},
                 {"label": "pause", "command": self.pause, "shortcut": "f6",
                  "enabled": self.running() and not self.paused},
                 ("step (one line at a time)", self.step, "f10"),
@@ -564,6 +586,7 @@ class GublanStudio:
                 ("connect an ai helper (mcp)...", self.open_mcp, ""),
                 ("code together (live session)", self._live_menu()),
                 ("sprite painter...", lambda: self.sprite_editor(None), ""),
+                ("3d scene editor...", self.open_scene_editor, "ctrl+shift+d"),
                 ("find any action...", self.command_palette, "ctrl+shift+p"),
                 "-",
                 ("game window and popups...", self.open_game_style, ""),
@@ -586,6 +609,8 @@ class GublanStudio:
                     "discord_presence", not self.settings.get("discord_presence", True)),
                  "checked": bool(self.settings.get("discord_presence", True))},
                 *([("account (sync settings)", self._account_menu())] if accounts.configured() else []),
+                *([{"label": "open .gubl files from explorer", "command": self.toggle_explorer,
+                    "checked": shell.registered()}] if sys.platform == "win32" else []),
                 ("settings...", self.open_settings, "ctrl+,"),
             ],
             "help": [
@@ -676,7 +701,9 @@ class GublanStudio:
             "ctrl+shift+m": lambda: self.show_bottom_panel("problems"),
             "ctrl+shift+v": lambda: self.show_bottom_panel("variables"),
             "ctrl+shift+b": self.open_export, "ctrl+shift+c": self.open_converter,
-            "ctrl+shift+l": self.open_translate,
+            "ctrl+shift+l": self.open_translate, "ctrl+shift+d": self.open_scene_editor,
+            "ctrl+shift+t": self.reopen_closed, "ctrl+shift+f": self.find_in_files, "f2": self.rename_symbol,
+            "ctrl+shift+f5": self.restart_run,
         }
         self.root.bind_class("GublanKeys", "<KeyPress>", self._on_key, add="+")
         self.root.bind("<KeyPress>", self._on_key, add="+")
@@ -931,6 +958,7 @@ class GublanStudio:
              "enabled": bool(others)},
             "-",
             {"label": "copy path", "command": lambda: self._copy(doc.path), "enabled": bool(doc.path)},
+            ("copy playground link", lambda: self.copy_playground_link(doc), ""),
             {"label": "show in explorer", "command": lambda: reveal(doc.path), "enabled": bool(doc.path)},
             {"label": "rename...", "command": lambda: self.rename(doc), "enabled": bool(doc.path)},
         ], event.x_root, event.y_root)
@@ -1007,6 +1035,9 @@ class GublanStudio:
                 return False
         if self.run_doc is doc and self.running():
             self.stop()
+        if doc.path:
+            closed = [path for path in self.closed_paths if os.path.normcase(path) != os.path.normcase(doc.path)]
+            self.closed_paths = (closed + [doc.path])[-20:]
         index = self.docs.index(doc)
         self.docs.remove(doc)
         sounds.play("close")
@@ -1021,6 +1052,101 @@ class GublanStudio:
             else:
                 self._show_empty()
         return True
+
+    def reopen_closed(self):
+        while self.closed_paths:
+            path = self.closed_paths.pop()
+            if os.path.isfile(path) and not any(d.path and os.path.normcase(d.path) == os.path.normcase(path)
+                                                for d in self.docs):
+                self.open_path(path)
+                return
+        self.flash("no closed tabs to bring back")
+
+    def restart_run(self):
+        """stop the program (if it's running) and start it again from the top."""
+        if not self.running():
+            self.start_run()
+            return
+        self.stop()
+        started = time.time()
+
+        def again():
+            if self.running() and time.time() - started < 3:
+                self.root.after(60, again)
+            elif not self.running():
+                self.start_run()
+            else:
+                self.flash("the program didn't stop in time. press f5 when it has")
+
+        self.root.after(60, again)
+
+    def find_in_files(self):
+        folder = self.project_folder()
+        if not folder or not os.path.isdir(folder):
+            message(self.root, "find in files", "open a folder (file > open folder) or save your program first, "
+                                                "so there are files to look in.")
+            return
+        initial = ""
+        doc = self.current
+        if doc is not None:
+            try:
+                initial = doc.editor.text.get("sel.first", "sel.last")
+            except tk.TclError:
+                initial = doc.editor.word_at("insert")[0] or ""
+            initial = initial if "\n" not in initial else ""
+        window = getattr(self, "find_window", None)
+        try:
+            if window is not None and window.winfo_exists():
+                window.destroy()
+        except tk.TclError:
+            pass
+
+        def open_at(path, line, column):
+            found = self.open_path(path)
+            if found is not None:
+                self.select(found)
+                found.editor.goto_line(line, column)
+                found.editor.focus_editor()
+
+        self.find_window = FindInFilesDialog(self.root, folder, open_at, initial=initial)
+        self.find_window.show(width=px(760), height=px(520), modal=False)
+
+    def rename_symbol(self):
+        """f2: rename the variable, function or object under the cursor everywhere in this program."""
+        doc = self.current
+        if doc is None:
+            return
+        if doc.view == "blocks":
+            self.set_view("code")
+        old, _start = doc.editor.word_at("insert")
+        if not old:
+            self.flash("put the cursor on a name first, then press f2")
+            return
+        if old in refactor.COMMAND_SPECS or old in refactor.KEYWORDS:
+            self.flash(f"'{old}' is part of gublan. put the cursor on one of your own names")
+            return
+        new = ask(self.root, "rename", f"rename '{old}' everywhere in {doc.name} to", old, mono=True)
+        if new is None:
+            return
+        new = new.strip()
+        if not new or new == old:
+            return
+        problem = refactor.check_new_name(new)
+        if problem:
+            message(self.root, "rename", problem, kind="error")
+            return
+        source = doc.editor.get()
+        renamed, changed = refactor.rename(source, old, new)
+        if not changed:
+            self.flash(f"'{old}' isn't used as a name here")
+            return
+        if re.search(r"(?<![\w.])" + re.escape(new) + r"(?!\w)", source):
+            if not confirm(self.root, "rename", f"'{new}' is already used in {doc.name}. rename anyway? the two "
+                                                "would become one.", yes="rename anyway"):
+                return
+        doc.editor.replace_all_text(renamed)
+        doc.editor.focus_editor()
+        self.flash(f"renamed '{old}' to '{new}' on {refactor_lines(changed)}. ctrl+z undoes it")
 
     def _show_empty(self):
         self.update_title()
@@ -1473,6 +1599,26 @@ class GublanStudio:
         editor = SpriteEditor(self.root, assets, saved, path)
         editor.show(width=px(860), height=px(640))
 
+    def open_scene_editor(self):
+        """place 3d shapes with the mouse. the editor writes every change into the program's own lines."""
+        doc = self.current
+        if doc is None:
+            message(self.root, "3d scene editor", "open or make a program first. the scene editor changes its code.")
+            return
+        window = getattr(self, "scene_window", None)
+        try:
+            if window is not None and window.winfo_exists():
+                if window.code is doc.editor:
+                    window.deiconify()
+                    window.lift()
+                    window.focus_force()
+                    return
+                window.destroy()
+        except tk.TclError:
+            pass
+        self.scene_window = SceneEditor(self.root, doc.editor, run=self.run_or_continue)
+        self.scene_window.show(width=px(1180), height=px(740), modal=False)
+
     def when_shown(self, callback, tries=0):
         """run callback once the main window is visible (straight away if it already is)."""
         try:
@@ -1575,6 +1721,47 @@ class GublanStudio:
         dialog.bind("<Destroy>", lambda e: config.save(self.settings) if e.widget is dialog else None,
                     add="+")
         dialog.show(width=px(940), height=px(680), modal=False)
+
+    # ----- sharing on gublan.xyz ---------------------------------------------------------------------------
+    def _program_text(self, doc):
+        if doc.view == "blocks" and doc.blocks is not None:
+            doc.blocks.push(now=True)
+        return doc.editor.get()
+
+    def copy_playground_link(self, doc=None):
+        """a gublan.xyz/playground link with the whole program inside it (and the files it includes or reads),
+        like the playground's share button. no account needed."""
+        doc = doc or self.current
+        if doc is None:
+            self.flash("open a program first")
+            return
+        text = self._program_text(doc)
+        if not text.strip():
+            self.flash("this program is empty. write some gublan first")
+            return
+        files = accounts.program_files(doc.path, text) if doc.path else [(doc.name if doc.name.lower().endswith(
+            ".gubl") else "program.gubl", text)]
+        link = accounts.share_link(files, files[0][0])
+        self.root.clipboard_clear()
+        self.root.clipboard_append(link)
+        extra = f", with {len(files)} files" if len(files) > 1 else ""
+        self.toast(f"playground link copied{extra}")
+        if len(link) > 8000:
+            self.flash("that's a long link. some chat apps cut long links short: publish to gublan.xyz for a short one",
+                       seconds=8)
+
+    def open_publish(self):
+        doc = self.current
+        if doc is None:
+            message(self.root, "publish to gublan.xyz", "open a program first")
+            return
+        if not self._program_text(doc).strip():
+            self.flash("this program is empty. write some gublan first")
+            return
+        if self.account_busy == "signing in":
+            self.flash("finish signing in with discord in your browser first")
+            return
+        PublishDialog(self.root, self, doc).show(width=px(620), modal=False)
 
     def open_mcp(self):
         doc = self.current
@@ -2779,6 +2966,41 @@ class GublanStudio:
         return True
 
     # ----- session -------------------------------------------------------------------------------------
+    def open_from_outside(self, paths, run=False):
+        """files from explorer or a second launch: open them here, come to the front, and maybe run the last one."""
+        doc = None
+        for path in paths:
+            doc = self.open_path(path) or doc
+        try:
+            if self.root.state() == "iconic":
+                self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(150, lambda: self.root.attributes("-topmost", False))
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+        if run and doc is not None:
+            self.select(doc)
+            if self.running():
+                self.stop()
+                self.root.after(300, self.start_run)
+            else:
+                self.start_run()
+
+    def toggle_explorer(self):
+        """.gubl files in windows explorer: double-click opens them here, right click > run with gublan."""
+        try:
+            if shell.registered():
+                shell.unregister()
+                self.flash(".gubl files no longer open in gublan studio")
+            else:
+                shell.register()
+                self.toast(".gubl files open in gublan studio now. right click one for run with gublan")
+        except OSError as err:
+            message(self.root, "explorer", "couldn't change how windows opens .gubl files.", kind="error",
+                    details=str(err))
+
     def _restore(self, paths):
         opened = False
         if self.settings.get("folder") and os.path.isdir(self.settings["folder"]):
@@ -2984,6 +3206,8 @@ class GublanStudio:
             if relaunch:
                 return False
         self.presence.close()
+        if self.instance is not None:
+            self.instance.close()
         guard.clear_recovery()
         guard.mark_closed()
         guard.uninstall()
@@ -2991,6 +3215,16 @@ class GublanStudio:
             after_exit()
         self.root.destroy()
         return True
+
+
+def refactor_lines(numbers):
+    """[3, 5, 9] -> 'lines 3, 5 and 9'"""
+    shown = [str(number) for number in numbers[:8]]
+    if len(numbers) > 8:
+        return f"{len(numbers)} lines"
+    if len(shown) == 1:
+        return "line " + shown[0]
+    return "lines " + ", ".join(shown[:-1]) + " and " + shown[-1]
 
 
 def main(argv=None):

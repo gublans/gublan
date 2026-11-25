@@ -1,0 +1,22 @@
+// notes and files: keep a diary and a score table in text files next to the program
+if not fileexists("diary.txt")
+    writefile diary.txt my gublan diary
+end
+appendfile diary.txt {weekday()} at {hour()}:{pad(minute(), 2, "0")}: opened the program again
+
+print the diary so far:
+for line in readlines("diary.txt")
+    print - {line}
+end
+
+// a little table of scores, kept as csv so a spreadsheet can open it too
+rows = [["name", "score"], ["ada", 120], ["lin", 95]]
+writefile scores.csv {tocsv(rows)}
+table = fromcsv(readfile("scores.csv"))
+print the best score is {table[1][1]} by {table[1][0]}
+
+makefolder levels
+writefile levels/one.txt ####
+copyfile levels/one.txt levels/two.txt
+print the levels folder has: {join(listfiles("levels"), ", ")}
+print diary.txt is {filesize("diary.txt")} bytes

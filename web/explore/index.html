@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>explore: games made with gublan</title>
+<meta name="description" content="play games and programs people made with gublan, then remix them in your browser.">
+<meta name="theme-color" content="#1b1d19">
+<link rel="icon" href="../logo.png">
+<link rel="stylesheet" href="../home.css">
+<link rel="stylesheet" href="explore.css">
+</head>
+<body>
+<a class="skip" href="#main">skip to content</a>
+
+<header class="nav scrolled" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="../" aria-label="gublan home">
+      <img src="../logo.png" alt="" width="32" height="32">
+      <span>gublan</span>
+    </a>
+    <nav class="tabs" aria-label="gublan website">
+      <a href="../" data-tab="top">home</a>
+      <a href="../#download" data-tab="download">download</a>
+      <a href="./" aria-current="true">explore</a>
+      <a href="../playground/" class="tab-play">playground</a>
+      <button type="button" class="who" id="who" hidden></button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap explore">
+  <div class="explore-head">
+    <div>
+      <p class="eyebrow"><span class="tag">explore</span> made with gublan</p>
+      <h1>play what people made.</h1>
+      <p class="lead">games and programs published from the playground and gublan studio. play any of them in your
+        browser, then remix one to see how it works and make it your own.</p>
+    </div>
+    <a class="btn primary" href="../playground/">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+      make your own
+    </a>
+  </div>
+
+  <div class="filters" role="search">
+    <label class="search">
+      <span class="sr">search</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3.5 3.5"/></svg>
+      <input id="search" type="search" placeholder="search by name, maker or what it does" spellcheck="false" autocomplete="off">
+    </label>
+    <div class="chips" role="group" aria-label="show">
+      <button type="button" data-filter="all" aria-pressed="true">everything</button>
+      <button type="button" data-filter="2d" aria-pressed="false">2d</button>
+      <button type="button" data-filter="3d" aria-pressed="false">3d</button>
+      <button type="button" data-filter="mine" aria-pressed="false" hidden>mine</button>
+    </div>
+  </div>
+
+  <p class="status" id="status" aria-live="polite">loading…</p>
+  <ul class="grid" id="grid"></ul>
+  <div class="more"><button type="button" class="btn" id="more" hidden>show more</button></div>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <a class="brand small" href="../"><img src="../logo.png" alt="" width="24" height="24"><span>gublan</span></a>
+    <nav class="foot-links" aria-label="more">
+      <a href="../playground/">playground</a>
+      <a href="../#download">download</a>
+      <a href="https://github.com/gublans/gublan/blob/main/docs/COMMANDS.md">language reference</a>
+      <a href="https://github.com/gublans/gublan">github</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="../account.js"></script>
+<script src="explore.js"></script>
+</body>
+</html>

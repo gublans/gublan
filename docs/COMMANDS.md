@@ -261,10 +261,44 @@ own error, and `assert` throws one when a condition is false.
 | `after("name", seconds)` | false until that many seconds after the first time you ask, then true |
 | `scrollx()` | how far the view is scrolled to the right (see scroll) |
 | `scrolly()` | how far the view is scrolled down (see scroll) |
+| `year()` | this year, like 2026 |
+| `month()` | this month as a number, 1 to 12 |
+| `day()` | the day of the month, 1 to 31 |
+| `hour()` | the hour of the day, 0 to 23 |
+| `minute()` | the minute of the hour, 0 to 59 |
+| `second()` | the second of the minute, 0 to 59 |
+| `weekday()` | the day of the week as a word, like monday |
+| `timetext(seconds)` | a number of seconds as a clock, like 1:05 (or 1:02:03 for hours) |
+| `left(text, n)` | the first n letters of some text |
+| `right(text, n)` | the last n letters of some text |
+| `matches(text, pattern)` | true when the text fits a pattern, where * is any letters and ? is one |
+| `normalize(vector)` | the same direction with a length of 1 |
+| `dot(a, b)` | the dot product of two vectors (how much they point the same way) |
+| `cross(a, b)` | a vec3 at right angles to two vec3 values |
+| `percent(part, whole)` | how many percent part is of whole: percent(1, 4) is 25 |
+| `sample(list, n)` | n different random items from a list |
+| `findindex(list, function)` | the position of the first item the function says yes to, or -1 |
+| `clicked(object)` | true on the frame an object is clicked with the left mouse button |
+| `hovering(object)` | true while the mouse is over an object |
+| `distance(a, b)` | how far apart the middles of two objects are |
+| `screenpos(object)` | where a 3d shape is on the screen as a vec2, or none when it is behind you |
+| `camerapos()` | where the 3d camera is, as a vec3 |
+| `camerayaw()` | how far the 3d camera is turned left or right, in degrees |
+| `camerapitch()` | how far the 3d camera is tipped up or down, in degrees |
+| `readfile(path)` | all the text in a file |
+| `readlines(path)` | the lines of a text file as a list |
+| `fileexists(path)` | true when there is a file (or folder) there |
+| `isfolder(path)` | true when the path is a folder |
+| `listfiles(folder)` | the names of the files and folders in a folder (the program's folder when empty) |
+| `filesize(path)` | how big a file is, in bytes |
+| `filename(path)` | the last part of a path: filename("maps/one.txt") is one.txt |
+| `extension(path)` | the ending of a file name without the dot: extension("a.png") is png |
+| `fromcsv(text)` | a list of rows (each a list of values) from comma separated text |
+| `tocsv(rows)` | comma separated text from a list of rows |
 
 ## every command
 
-`print` `set` `add` `sub` `mul` `div` `calc` `random` `time` `const` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `until` `match` `case` `try` `catch` `throw` `break` `continue` `wait` `kill` `function` `call` `return` `local` `include` `use` `test` `assert` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `mode` `window` `title` `background` `color` `paint` `clear` `frame` `fps` `textsize` `scroll` `shake` `box` `circle` `line` `text` `image` `sprite` `vec2` `ellipse` `polygon` `particles` `cube` `sphere` `spin` `camera` `vec3` `button` `ui` `textbox` `slider` `checkbox` `focus` `move` `place` `resize` `hide` `show` `animate` `touching` `tween` `opacity` `layer` `fixed` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `beep` `get` `save` `load` `forget` `presence`
+`print` `set` `add` `sub` `mul` `div` `calc` `random` `seed` `swap` `time` `const` `if` `elseif` `else` `then` `end` `loop` `forever` `while` `for` `until` `match` `case` `try` `catch` `throw` `break` `continue` `wait` `kill` `function` `call` `return` `local` `include` `use` `test` `assert` `list` `append` `item` `length` `map` `put` `lookup` `has` `delete` `insert` `remove` `shuffle` `sort` `pop` `mode` `window` `title` `background` `color` `paint` `clear` `screenshot` `frame` `fps` `textsize` `scroll` `shake` `box` `circle` `line` `text` `image` `sprite` `vec2` `ellipse` `polygon` `particles` `cube` `sphere` `block` `cylinder` `cone` `plane` `spin` `turn` `camera` `lookat` `walk` `light` `vec3` `button` `ui` `textbox` `slider` `checkbox` `focus` `move` `place` `resize` `hide` `show` `animate` `touching` `tween` `opacity` `layer` `fixed` `velocity` `gravity` `key` `keypressed` `mouse` `mousebutton` `input` `popup` `cursor` `sound` `music` `stopmusic` `stopsounds` `volume` `beep` `get` `save` `load` `forget` `writefile` `appendfile` `readfile` `deletefile` `makefolder` `copyfile` `renamefile` `presence`
 
 ## basics: printing, variables and maths
 
@@ -369,6 +403,30 @@ random <variable> <min> <max>
 
 ```gublan
 random roll 1 6
+```
+
+### `seed`
+
+make random numbers come out the same every run, which helps when testing a game.
+
+```text
+seed <number>
+```
+
+```gublan
+seed 42
+```
+
+### `swap`
+
+swap the values of two variables.
+
+```text
+swap <variable-a> <variable-b>
+```
+
+```gublan
+swap a b
 ```
 
 ### `time`
@@ -1004,6 +1062,18 @@ list scores 30 10 20
 sort scores reverse
 ```
 
+### `pop`
+
+take an item out of a list and keep it in a variable. without a position it takes the last one.
+
+```text
+pop <list> <variable> [position]
+```
+
+```gublan
+pop cards card
+```
+
 ## the window and colours
 
 ### `mode`
@@ -1092,6 +1162,18 @@ clear
 
 ```gublan
 clear
+```
+
+### `screenshot`
+
+save a picture of the game window as a .png file next to your program.
+
+```text
+screenshot <path>
+```
+
+```gublan
+screenshot shots/level1.png
 ```
 
 ### `frame`
@@ -1286,14 +1368,16 @@ color gold
 particles 200 150 30
 ```
 
-## 3d
+## 3d shapes, the camera and the light
+
+3d shapes are placed by their middle. x goes right, y goes up and minus z goes away from you, so a camera at 0 0 0 sees a shape at 0 0 -8. every shape takes a colour at the end, like `block wall 0 0 -8 4 2 0.5 sand`. in gublan studio, tools > 3d scene editor lets you place and drag shapes with the mouse, and writes these lines for you.
 
 ### `cube`
 
 make a 3d cube.
 
 ```text
-cube <name> <x> <y> <z> <size>
+cube <name> <x> <y> <z> <size> [color]
 ```
 
 ```gublan
@@ -1305,16 +1389,64 @@ cube crate 0 0 -6 1
 make a 3d sphere.
 
 ```text
-sphere <name> <x> <y> <z> <radius>
+sphere <name> <x> <y> <z> <radius> [color]
 ```
 
 ```gublan
 sphere moon 2 0 -7 0.5
 ```
 
+### `block`
+
+make a 3d box of any size, like a wall, a floor or a brick. x, y and z are its middle.
+
+```text
+block <name> <x> <y> <z> <width> <height> <depth> [color]
+```
+
+```gublan
+block wall 0 0 -8 4 2 0.5 sand
+```
+
+### `cylinder`
+
+make a 3d cylinder standing up, like a pillar, a tree trunk or a coin.
+
+```text
+cylinder <name> <x> <y> <z> <radius> <height> [color]
+```
+
+```gublan
+cylinder pillar -2 0 -8 0.4 3 gray
+```
+
+### `cone`
+
+make a 3d cone pointing up, like a tree top or a party hat.
+
+```text
+cone <name> <x> <y> <z> <radius> <height> [color]
+```
+
+```gublan
+cone treetop 2 1 -8 1 2 forest
+```
+
+### `plane`
+
+make a flat 3d floor (or ceiling) that lies level.
+
+```text
+plane <name> <x> <y> <z> <width> <depth> [color]
+```
+
+```gublan
+plane ground 0 -1 -8 20 20 moss
+```
+
 ### `spin`
 
-rotate a cube, sphere, sprite or image (degrees).
+rotate a 3d shape, sprite or image (degrees).
 
 ```text
 spin <object> <angle>
@@ -1324,6 +1456,18 @@ spin <object> <angle>
 mode 3d
 cube crate 0 0 -5 1
 spin crate 45
+```
+
+### `turn`
+
+tilt and turn a 3d shape (degrees). y turns it left and right, x tips it forwards and z rolls it.
+
+```text
+turn <object> <x-angle> <y-angle> [z-angle]
+```
+
+```gublan
+turn crate 0 45 0
 ```
 
 ### `camera`
@@ -1337,6 +1481,43 @@ camera <vec3>
 
 ```gublan
 camera 0 1 0
+```
+
+### `lookat`
+
+turn the 3d camera to face a spot or a shape.
+
+```text
+lookat <x> <y> <z>
+lookat <object>
+```
+
+```gublan
+lookat 0 0 -8
+```
+
+### `walk`
+
+move the 3d camera the way it is facing (for first person games). use minus numbers to go back.
+
+```text
+walk <forward> [right] [up]
+```
+
+```gublan
+walk 0.1
+```
+
+### `light`
+
+change which way the 3d light shines from, and how bright it is (1 is normal).
+
+```text
+light <x> <y> <z> [brightness]
+```
+
+```gublan
+light 1 2 1 1.2
 ```
 
 ### `vec3`
@@ -1609,6 +1790,30 @@ text hud 10 10 score 0
 fixed hud
 ```
 
+### `velocity`
+
+keep an object moving by itself, in pixels (or 3d units) a second. 0 0 stops it.
+
+```text
+velocity <object> <x-speed> <y-speed> [z-speed]
+```
+
+```gublan
+velocity ball 120 -200
+```
+
+### `gravity`
+
+pull every object that has a velocity downwards. 600 feels like a platformer, 0 turns it off.
+
+```text
+gravity <amount>
+```
+
+```gublan
+gravity 600
+```
+
 ## keyboard, mouse and questions
 
 ### `key`
@@ -1829,6 +2034,94 @@ forget all
 
 ```gublan
 forget best
+```
+
+## files: reading and writing text files
+
+files are read from and written to your program's folder (and the folders inside it), so a program can keep notes, logs, levels or a table of scores. paths look like `notes.txt` or `levels/one.txt`, and gublan won't go outside the program's folder. `readfile("notes.txt")`, `readlines()`, `fileexists()`, `listfiles()`, `fromcsv()` and `tocsv()` work inside expressions.
+
+### `writefile`
+
+make a text file, or replace what is in it. files are kept next to your program.
+
+```text
+writefile <path> <text...>
+```
+
+```gublan
+writefile notes.txt hello there
+```
+
+### `appendfile`
+
+add a line to the end of a text file.
+
+```text
+appendfile <path> <text...>
+```
+
+```gublan
+appendfile log.txt the game started
+```
+
+### `readfile`
+
+read a whole text file into a variable. use lines() on it to go through it line by line.
+
+```text
+readfile <path> <variable>
+```
+
+```gublan
+readfile notes.txt text
+```
+
+### `deletefile`
+
+delete a file, or a folder that is empty.
+
+```text
+deletefile <path>
+```
+
+```gublan
+deletefile old.txt
+```
+
+### `makefolder`
+
+make a folder (and the folders it is inside).
+
+```text
+makefolder <path>
+```
+
+```gublan
+makefolder levels
+```
+
+### `copyfile`
+
+copy a file.
+
+```text
+copyfile <from> <to>
+```
+
+```gublan
+copyfile notes.txt backup.txt
+```
+
+### `renamefile`
+
+rename a file, or move it into a folder.
+
+```text
+renamefile <from> <to>
+```
+
+```gublan
+renamefile draft.txt final.txt
 ```
 
 ## your discord status

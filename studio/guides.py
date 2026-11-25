@@ -193,7 +193,66 @@ files, paint new sprites and insert the code for you."""),
     end
 
 negative z is in front of the camera. camera x y z moves it. keyboard and mouse checks, text,
-buttons, textboxes, sliders and checkboxes all work in 3d too, drawn flat over the scene."""),
+buttons, textboxes, sliders and checkboxes all work in 3d too, drawn flat over the scene.
+
+there are more shapes than cubes and spheres. each one is placed by its middle and takes a colour at the end:
+
+    mode 3d
+    plane ground 0 -1 -8 20 20 moss
+    block wall 0 0 -10 4 2 0.5 sand
+    cylinder pillar -2 0 -8 0.4 3 gray
+    cone treetop 2 1 -8 1 2 forest
+    turn wall 0 30
+    lookat wall
+    light 1 2 1 1.2
+
+walk 0.1 moves the camera the way it faces, for first person games. lookat turns it towards a spot or a
+shape, and camerapos(), camerayaw() and camerapitch() say where it is. velocity and gravity keep shapes
+moving by themselves. tools > 3d scene editor places shapes with the mouse."""),
+
+    ("the 3d scene editor", """tools > 3d scene editor (ctrl+shift+d) lets you build a 3d scene with the mouse, then keep
+going in code. the code is the only copy of the scene: every shape you add, drag, size, turn or colour
+in the editor is written straight into your program, and the program runs the same with or without it.
+
+pick a shape next to add to put it where you are looking. the select, move, size and turn tools (or 1
+to 4) change the chosen shape, and the arrow keys nudge it. the right mouse button looks around, the
+middle button (or shift and the right button) slides, the wheel zooms, and w, a, s, d, q and e fly.
+snap keeps numbers tidy. the parts list picks a shape by name, and the boxes next to the view type
+exact numbers and colours.
+
+set game camera here puts the program's camera where the editor is looking. ctrl+z undoes a change in
+the editor and in the code. shapes made inside loops or functions are drawn too, but only plain lines at
+the top of the program can be changed in the editor."""),
+
+    ("files", """files let a program keep notes, logs, levels and tables of scores in text files next to it.
+paths look like notes.txt or levels/one.txt, and a program can't reach outside its own folder.
+
+    writefile notes.txt the first line
+    appendfile notes.txt another line
+    for line in readlines("notes.txt")
+        print - {line}
+    end
+    if fileexists("notes.txt")
+        print notes.txt is {filesize("notes.txt")} bytes
+    end
+
+readfile notes.txt text reads a whole file into a variable, and readfile("notes.txt") works inside
+{braces}. listfiles("levels") lists a folder. fromcsv() and tocsv() turn comma separated text into
+rows and back, so a spreadsheet can open your tables. deletefile, makefolder, copyfile and renamefile
+tidy things up. in the playground, files live in your browser and show in the files tab."""),
+
+    ("publishing and sharing", """file > publish to gublan.xyz puts your program on the website, with a name and a few words
+about it. anyone with the link can play it in their browser, see the code and remix it, and it shows
+up on gublan.xyz/explore. you sign in with discord first. after that, update it sends your changes to
+the same link, and take it down removes it. data files and included programs go up with it.
+
+file > copy playground link (also on a tab's right-click menu) copies a link with the whole program
+inside it, nothing uploaded. long programs make long links, so publish those instead."""),
+
+    ("from explorer", """tools > open .gubl files from explorer makes double-clicking a .gubl file open it in gublan
+studio, and adds run with gublan to its right-click menu, which runs it straight away. the installer
+can do this for you too. files opened while the studio is already open go into a new tab there
+instead of a second window."""),
 
     ("sound", """sound plays a sound effect. music loops a song until stopmusic.
 
@@ -386,5 +445,8 @@ ctrl+space ideas       ctrl+/ comment       ctrl+d duplicate line
 alt+up/down move line  ctrl+shift+k delete line   ctrl+enter new line below
 ctrl+shift+p every action          ctrl+b blocks          ctrl+= / ctrl+- zoom
 ctrl+shift+c convert code          ctrl+shift+l export as another language
-f12 or ctrl+click go to a function"""),
+f12 or ctrl+click go to a function
+ctrl+shift+f find in files         f2 rename everywhere in this file
+ctrl+shift+t reopen closed tab     ctrl+shift+f5 restart
+ctrl+shift+d 3d scene editor"""),
 ]

@@ -18,6 +18,11 @@ JavaScript, and Lua.
 - **A beginner-friendly language:** short commands, helpful errors, live explanations, and guided examples.
 - **Code and blocks:** edit in code, blocks, or a split view; both views represent the same program.
 - **Make games:** build 2D and 3D projects with keyboard and mouse input, sound, images, shapes, and animation.
+- **Build 3D scenes with the mouse:** the 3D scene editor places, drags, sizes, turns, and colours shapes, and
+  writes ordinary Gublan lines into your program as you go, so the code and the scene always match.
+- **Read and write files:** keep notes, logs, levels, and CSV tables in text files next to your program.
+- **Publish to gublan.xyz:** put a program on the website with one click, so anyone can play it, read the code,
+  and remix it in their browser.
 - **Learn and debug:** use breakpoints, step-through execution, variable watches, command hints, and a live
   problem checker.
 - **Buttons, textboxes, sliders, and checkboxes:** build menus and forms that work in both 2D and 3D games.
@@ -35,6 +40,70 @@ JavaScript, and Lua.
 - **Save between runs:** `save` and `load` keep high scores and settings after a program closes.
 - **Discord status:** show what you're making on Discord. You can change the wording, pictures and
   button, or turn it off. Programs can set their own status with `presence`.
+
+## What's new in 1.0.9
+
+**The 3D scene editor**
+
+- **Tools > 3D scene editor** (`Ctrl+Shift+D`) shows your program's 3D shapes in a view you can fly around.
+  Add a block, cube, sphere, cylinder, cone, or plane, then move, size, turn, and colour it with the mouse, the
+  arrow keys, or exact numbers. **Snap** keeps the numbers tidy.
+- The program's code is the only copy of the scene. Every change is written straight into the matching line, so
+  `Ctrl+Z` works in both places and the program runs the same way with or without the editor.
+- **Set game camera here** writes a `camera` line that puts the game's camera where you are looking.
+
+**More 3D**
+
+- New shapes: `block`, `cylinder`, `cone`, and `plane`. Every shape can take a colour at the end of its line.
+- `turn` tilts and turns shapes, `lookat` points the camera at a spot or a shape, `walk` moves the camera the way it
+  faces for first-person games, and `light` changes where the light comes from and how bright it is.
+- `velocity` and `gravity` keep objects moving by themselves, in 2D and 3D.
+- New functions: `camerapos()`, `camerayaw()`, `camerapitch()`, `screenpos()`, `distance()`, `normalize()`,
+  `dot()`, and `cross()`.
+
+**Files**
+
+- `writefile`, `appendfile`, `readfile`, `deletefile`, `makefolder`, `copyfile`, and `renamefile` work with text
+  files in your program's folder. Programs can't reach outside that folder.
+- `readfile()`, `readlines()`, `fileexists()`, `isfolder()`, `listfiles()`, `filesize()`, `filename()`, and
+  `extension()` work inside expressions. `fromcsv()` and `tocsv()` turn tables into CSV text and back.
+
+**More useful commands and functions**
+
+- `seed` makes random numbers repeat, `swap` swaps two variables, `pop` takes an item out of a list, and
+  `screenshot` saves a picture of the game window.
+- Dates and times: `year()`, `month()`, `day()`, `hour()`, `minute()`, `second()`, `weekday()`, and `timetext()`.
+- Text and lists: `left()`, `right()`, `matches()`, `percent()`, `sample()`, and `findindex()`.
+- `clicked()` and `hovering()` make any shape work like a button.
+
+**Publishing and sharing**
+
+- **File > Publish to gublan.xyz** puts a program on the website with a name and a description. Anyone with the
+  link can play it, read the code, and remix it, and it is listed on [gublan.xyz/explore](https://gublan.xyz/explore/).
+  Data files and included programs go up with it. You can update it later or take it down.
+- **File > Copy playground link** (also on each tab's right-click menu) copies a link that has the whole program
+  in it, the same kind the playground's **Share** button makes.
+
+**Windows**
+
+- Double-click a `.gubl` file to open it in Gublan Studio, or right-click it and choose **Run with Gublan**. Turn
+  this on in the installer or with **Tools > Open .gubl files from Explorer**. Files opened while the studio is
+  already running open in a new tab instead of a second window.
+
+**Studio**
+
+- **Find in files** (`Ctrl+Shift+F`) searches every program and text file in the project folder.
+- **Rename** (`F2`) renames a variable, function, or object everywhere in the program, without touching the same
+  word inside text. One `Ctrl+Z` undoes it.
+- **Reopen closed tab** (`Ctrl+Shift+T`) and **Restart** (`Ctrl+Shift+F5`).
+- Replacing the whole program (from the block view, a conversion, or a rename) is now one undo step.
+
+**The playground**
+
+- 3D programs and files now run in the browser. Files are kept in your browser and listed in the **files** tab.
+- Much better on phones: the code, game, and output views switch with a bar at the bottom, a row of symbol keys
+  sits above the keyboard, and games get an on-screen pad for the arrow keys and buttons.
+- **Publish** shares a program on gublan.xyz, and the new **explore** page lists what people have made.
 
 ## What's new in 1.0.7
 
@@ -190,9 +259,11 @@ install. Write a program or open an example, then press **Run** (or `Ctrl+Enter`
 type. **Share** copies a link that contains your program (or your whole project), and the **JavaScript** tab
 shows what your program turns into. Press `Ctrl+Shift+P` to search every action, and `Ctrl+,` for settings.
 
-The playground runs 2D games, text programs, keyboard and mouse input, buttons, text boxes, `input`, and
-`save`/`load` (kept in your browser). 3D scenes, files, and pictures or sounds from your computer need Gublan
-Studio.
+The playground runs 2D and 3D games, text programs, keyboard and mouse input, buttons, text boxes, `input`,
+`save`/`load`, and files (both kept in your browser). On a phone, the code, game, and output views switch with
+the bar at the bottom, and games get an on-screen pad. **Publish** puts a program on
+[gublan.xyz/explore](https://gublan.xyz/explore/) with a short link. Pictures or sounds from your computer and the
+3D scene editor need Gublan Studio.
 
 ### Gublan accounts
 
@@ -206,6 +277,10 @@ Accounts run on [Supabase](https://supabase.com). The project URL and publishabl
 and `web/build_site.py` copies them into the website's `account.js`. Both are public on purpose. Row-level security
 on the `user_data` table keeps each person's row private. Never put a `service_role`/secret key or the Discord
 client secret in this repository.
+
+Publishing needs a `creations` table. Run [docs/supabase_creations.sql](docs/supabase_creations.sql) once in the
+Supabase **SQL Editor** (running it again is safe). Anyone can read published creations, but only the person who
+published one can change or delete it, and each person can publish up to 100.
 
 It uses the same checker and translator as Gublan Studio's JavaScript export, running in the browser through
 [Pyodide](https://pyodide.org), so it always matches the current language. The website lives in `web/`: the home
@@ -305,6 +380,11 @@ print label
 | `Ctrl+Shift+C` | Convert code |
 | `Ctrl+Shift+L` | Export as another language |
 | `Ctrl+Shift+B` | Export a program |
+| `Ctrl+Shift+D` | Open the 3D scene editor |
+| `Ctrl+Shift+F` | Find in files |
+| `F2` | Rename everywhere in this file |
+| `Ctrl+Shift+T` | Reopen a closed tab |
+| `Ctrl+Shift+F5` | Restart the program |
 
 ## Command line
 
@@ -404,8 +484,8 @@ py -m unittest discover -s tests
 | `gublanmcp.py` | MCP server for AI helpers |
 | `modules/` | Built-in modules for `use` |
 | `gublanpresence.py` | Discord status (rich presence) module used by the studio and by programs |
-| `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`), plugins (`plugins.py`), crash protection and recovery (`guard.py`), and file reading (`textfiles.py`) |
+| `gublanide.py`, `studio/` | Gublan Studio editor, including live sessions (`collab.py`), plugins (`plugins.py`), crash protection and recovery (`guard.py`), file reading (`textfiles.py`), the 3D scene editor (`scene3d.py`), find in files and rename (`refactor.py`), accounts and publishing (`account.py`), and Explorer integration (`shell.py`) |
 | `gublancli.py` | Command-line interface |
-| `web/` | The website: home page (`web/home/`) and online playground (`web/playground/`), published to GitHub Pages by `.github/workflows/pages.yml` |
+| `web/` | The website: home page (`web/home/`), published creations (`web/explore/`), and online playground (`web/playground/`), published to GitHub Pages by `.github/workflows/pages.yml` |
 | `GublanStudio.spec`, `GublanStudio.iss`, `build.ps1` | App build, Windows installer, and release build script |
-| `docs/`, `examples/`, `tests/` | Reference, sample programs, and tests |
+| `docs/`, `examples/`, `tests/` | Reference (including the Supabase setup SQL), sample programs, and tests |

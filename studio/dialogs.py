@@ -1,10 +1,12 @@
 """square, lowercase dialogs: messages, questions, settings, converter, export, palette and sprites."""
 
 import os
+import re
 import struct
 import subprocess
 import threading
 import tkinter as tk
+import webbrowser
 import zlib
 from tkinter import filedialog, ttk
 
@@ -1770,6 +1772,339 @@ class ExportDialog(Dialog):
         if self.output_path:
             from .panels import reveal
             reveal(self.output_path)
+
+
+# ----- publish to gublan.xyz --------------------------------------------------------------------------------------
+class PublishDialog(Dialog):
+    """put the open program on gublan.xyz/explore, where anyone can play it in their browser and see its code.
+
+    the network part runs through app._account_work (a background thread), so the dialog never freezes the studio.
+    """
+
+    ASSET = re.compile(r"\.(png|gif|jpe?g|bmp|wav|ogg|mp3)\b", re.I)
+
+    def __init__(self, master, app, doc):
+        from . import account as accounts
+        self.accounts = accounts
+        super().__init__(master, "publish to gublan.xyz")
+        self.app = app
+        self.path = doc.path
+        self.files = accounts.program_files(doc.path, doc.editor.get())
+        self.main = self.files[0][0]
+        self.saved = app.account.published(doc.path)
+        self.working = False
+        user = app.account.user()
+        if not user:
+            self._signed_out()
+            return
+        top = tk.Frame(self.body, bg=PANEL)
+        top.pack(fill="x", pady=(0, px(12)))
+        tk.Label(top, text=lower(f"signed in as {user['name']}"), bg=PANEL, fg=DIM, font=ui_font(9)).pack(side="left")
+        tk.Label(top, text="anyone can play what you publish and look at its code.", bg=PANEL, fg=DIM,
+                 font=ui_font(9)).pack(side="right")
+
+        form = tk.Frame(self.body, bg=PANEL)
+        form.pack(fill="x")
+        form.columnconfigure(1, weight=1)
+        tk.Label(form, text="name", bg=PANEL, fg=MUTED, font=ui_font(10)).grid(row=0, column=0, sticky="w")
+        default = os.path.splitext(self.main)[0].replace("_", " ")
+        self.title_var = tk.StringVar(value=(self.saved or {}).get("title") or default)
+        self.title_entry = flat_entry(form, self.title_var, width=44)
+        self.title_entry.grid(row=0, column=1, sticky="ew", padx=(px(12), 0), pady=(0, px(8)))
+        tk.Label(form, text="about", bg=PANEL, fg=MUTED, font=ui_font(10)).grid(row=1, column=0, sticky="nw")
+        holder = tk.Frame(form, bg=EDITOR_BG, highlightthickness=1, highlightbackground=BORDER)
+        holder.grid(row=1, column=1, sticky="ew", padx=(px(12), 0))
+        self.about = tk.Text(holder, height=4, bg=EDITOR_BG, fg=TEXT, insertbackground=TEXT, relief="flat",
+                             borderwidth=0, highlightthickness=0, font=ui_font(10), wrap="word", padx=px(8),
+                             pady=px(6), selectbackground=SELECT, selectforeground=SELECT_TEXT)
+        self.about.pack(fill="x")
+        self.about.insert("1.0", (self.saved or {}).get("about") or "")
+        self.about.bind("<Tab>", lambda _e: (self.about.tk_focusNext().focus_set(), "break")[1])
+
+        names = ", ".join(name + (" (runs first)" if index == 0 else "") for index, (name, _text) in
+                          enumerate(self.files))
+        size = sum(len(text) for _name, text in self.files)
+        notes = [f"goes up: {names}. {size:,} characters."]
+        if any(self.ASSET.search(text) for name, text in self.files if not accounts.is_data_file(name)):
+            notes.append("pictures and sounds stay on your computer: the website can't use them yet.")
+        if size > accounts.MAX_PUBLISH:
+            notes.append(f"that's too big to publish: creations can be up to {accounts.MAX_PUBLISH:,} characters.")
+        tk.Label(self.body, text=lower(" ".join(notes)), bg=PANEL, fg=DIM, font=ui_font(9), justify="left",
+                 anchor="w", wraplength=px(500)).pack(fill="x", pady=(px(12), 0))
+        self.status = tk.Label(self.body, text="", bg=PANEL, fg=MUTED, font=ui_font(9), justify="left", anchor="w",
+                               wraplength=px(500))
+        self.status.pack(fill="x", pady=(px(8), 0))
+        self.link = tk.Label(self.body, text="", bg=PANEL, fg=MOSS_LIGHT, font=ui_font(9, "underline"),
+                             cursor="hand2", anchor="w")
+        self.link.bind("<Button-1>", lambda _e: self.saved and webbrowser.open(self.accounts.creation_link(
+            self.saved["id"])))
+        self.too_big = size > accounts.MAX_PUBLISH
+        self._buttons()
+        self.title_entry.bind("<Return>", lambda _e: self.publish(False))
+        self.after(50, self.title_entry.focus_set)
+
+    def _signed_out(self):
+        tk.Label(self.body, text="sign in with discord to publish. what you publish shows up on gublan.xyz/explore, "
+                                 "where anyone can play it in their browser, see its code and remix it.",
+                 bg=PANEL, fg=TEXT, font=ui_font(10), justify="left", wraplength=px(440)).pack(anchor="w")
+        tk.Label(self.body, text="a link to just this program doesn't need an account: file > copy playground link.",
+                 bg=PANEL, fg=DIM, font=ui_font(9), justify="left", wraplength=px(440)).pack(anchor="w",
+                                                                                         pady=(px(10), 0))
+        self.add_button("sign in with discord", self._sign_in, kind="accent")
+        self.add_button("close", self.cancel, kind="ghost")
+
+    def _sign_in(self):
+        self.close(None)
+        self.app.account_sign_in()
+
+    def _buttons(self):
+        for child in self.buttons.winfo_children():
+            child.destroy()
+        self.actions = []
+        if self.saved:
+            self.actions.append(self.add_button("update it", lambda: self.publish(False), kind="accent",
+                                                icon_name="save"))
+            self.actions.append(self.add_button("publish as a new one", lambda: self.publish(True)))
+            self.actions.append(self.add_button("copy link", self.copy_link, icon_name="copy"))
+            self.actions.append(self.add_button("take it down", self.take_down, kind="danger"))
+            self.link.configure(text=self.accounts.creation_link(self.saved["id"]))
+            self.link.pack(fill="x", pady=(px(4), 0))
+        else:
+            self.actions.append(self.add_button("publish", lambda: self.publish(False), kind="accent",
+                                                icon_name="save"))
+            self.link.pack_forget()
+        self.add_button("close", self.cancel, kind="ghost")
+        if self.too_big:
+            for button in self.actions[:2]:
+                button.set_enabled(False)
+        self.after_idle(self._fit)
+
+    def _fit(self):
+        """grow or shrink to fit after the link or the buttons change."""
+        try:
+            if not self.winfo_viewable():
+                return
+            self.update_idletasks()
+            width = max(self.winfo_width(), self.winfo_reqwidth())
+            self.geometry(f"{width}x{self.winfo_reqheight()}+{self.winfo_x()}+{self.winfo_y()}")
+        except tk.TclError:
+            pass
+
+    def _busy(self, text):
+        self.working = bool(text)
+        self.status.configure(text=lower(text), fg=MUTED)
+        for button in self.actions:
+            button.set_enabled(not text and not (self.too_big and button in self.actions[:2]))
+
+    def _alive(self):
+        try:
+            return bool(self.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def publish(self, as_new):
+        if self.working or self.too_big:
+            return
+        if self.app.account_busy:
+            self.status.configure(text="your account is busy syncing. try again in a moment.", fg=NUMBER)
+            return
+        title = self.title_var.get().strip()
+        if not title:
+            self.status.configure(text="give it a name first", fg=ERROR)
+            self.title_entry.focus_set()
+            return
+        about = self.about.get("1.0", "end").strip()
+        creation_id = None if as_new or not self.saved else self.saved["id"]
+        self._busy("updating..." if creation_id else "publishing...")
+
+        def work():
+            return self.app.account.publish(self.path, title, about, self.files, self.main, creation_id)
+
+        def done(saved, error):
+            if not self._alive():
+                if error is None:
+                    self.app.toast("published")
+                return
+            self._busy("")
+            if error is not None:
+                why = str(error)
+                if re.search(r"relation|does not exist|schema cache|\(404\)", why, re.I):
+                    why = "publishing isn't switched on for gublan.xyz yet."
+                self.status.configure(text=lower(f"couldn't publish: {why}"), fg=ERROR)
+                return
+            self.saved = {"id": saved["id"], "title": saved.get("title", title), "about": saved.get("about", "")}
+            if not self.path:
+                self.status.configure(text="published. save this program to update it from here later.",
+                                      fg=MOSS_LIGHT)
+            else:
+                self.status.configure(text="updated. the link is copied." if creation_id else
+                                      "published! the link is copied.", fg=MOSS_LIGHT)
+            self._buttons()
+            self.copy_link(quiet=True)
+
+        self.app._account_work("syncing", work, done)
+
+    def copy_link(self, quiet=False):
+        if not self.saved:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self.accounts.creation_link(self.saved["id"]))
+        if not quiet:
+            self.status.configure(text="link copied", fg=MOSS_LIGHT)
+
+    def take_down(self):
+        if self.working or not self.saved:
+            return
+        if not confirm(self, "take it down", f"take \"{self.saved.get('title', 'this')}\" off gublan.xyz? its link "
+                                             "stops working. the program stays on your computer.",
+                       yes="take it down", danger=True):
+            return
+        creation_id = self.saved["id"]
+        self._busy("taking it down...")
+
+        def done(_result, error):
+            if not self._alive():
+                return
+            self._busy("")
+            if error is not None:
+                self.status.configure(text=lower(f"couldn't take it down: {error}"), fg=ERROR)
+                return
+            self.saved = None
+            self.status.configure(text="it's off gublan.xyz now.", fg=MUTED)
+            self._buttons()
+
+        self.app._account_work("syncing", lambda: self.app.account.unpublish(self.path, creation_id), done)
+
+
+# ----- find in files ---------------------------------------------------------------------------------------------
+class FindInFilesDialog(Dialog):
+    """search every .gubl and text file in the project folder. double-click (or enter on) a result to open it there."""
+
+    def __init__(self, master, folder, open_at, initial=""):
+        super().__init__(master, "find in files", resizable=True)
+        self.folder = folder
+        self.open_at = open_at  # open_at(path, line, column)
+        self.results = []
+        self.search_job = None
+        top = tk.Frame(self.body, bg=PANEL)
+        top.pack(fill="x")
+        top.columnconfigure(0, weight=1)
+        self.needle = tk.StringVar(value=initial)
+        self.entry = flat_entry(top, self.needle, width=40, mono=True)
+        self.entry.grid(row=0, column=0, sticky="ew")
+        self.match_case = tk.BooleanVar(value=False)
+        self.whole_word = tk.BooleanVar(value=False)
+        Toggle(top, "match case", self.match_case, command=self.search, bg=PANEL).grid(row=0, column=1,
+                                                                                       padx=(px(14), 0))
+        Toggle(top, "whole word", self.whole_word, command=self.search, bg=PANEL).grid(row=0, column=2,
+                                                                                       padx=(px(14), 0))
+        self.summary = tk.Label(self.body, text="type something to find", bg=PANEL, fg=DIM, font=ui_font(9), anchor="w")
+        self.summary.pack(fill="x", pady=(px(10), px(6)))
+        frame = tk.Frame(self.body, bg=EDITOR_BG, highlightthickness=1, highlightbackground=BORDER)
+        frame.pack(fill="both", expand=True)
+        self.list = tk.Text(frame, bg=EDITOR_BG, fg=TEXT, relief="flat", borderwidth=0, highlightthickness=0,
+                            font=mono_font(10), wrap="none", padx=px(8), pady=px(6), cursor="arrow",
+                            selectbackground=SELECT, inactiveselectbackground=SELECT, height=16)
+        bar = scrollbar(frame, "vertical", self.list.yview)
+        self.list.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        self.list.pack(fill="both", expand=True)
+        self.list.tag_configure("file", foreground=MOSS_LIGHT, font=ui_font(10, "bold"), spacing1=px(6))
+        self.list.tag_configure("where", foreground=DIM)
+        self.list.tag_configure("hit", foreground=NUMBER)
+        self.list.tag_configure("chosen", background=SELECT, foreground=SELECT_TEXT)
+        self.list.configure(state="disabled")
+        self.list.bind("<Double-Button-1>", lambda event: self._open(self.list.index(f"@{event.x},{event.y}")))
+        self.list.bind("<Button-1>", lambda event: self._choose(self.list.index(f"@{event.x},{event.y}")))
+        self.line_of = {}  # text widget line -> result index
+        self.chosen = None
+        self.needle.trace_add("write", lambda *_: self._search_soon())
+        self.entry.bind("<Return>", lambda _e: self._open_chosen())
+        self.entry.bind("<Down>", lambda _e: self._move(1))
+        self.entry.bind("<Up>", lambda _e: self._move(-1))
+        self.add_button("open", self._open_chosen, kind="accent")
+        self.add_button("close", self.cancel, kind="ghost")
+        tk.Label(self.buttons, text=lower(f"in {folder}"), bg=PANEL, fg=DIM, font=ui_font(8)).pack(side="left")
+        self.after(50, self.entry.focus_set)
+        if initial:
+            self.after(60, self.search)
+
+    def _search_soon(self):
+        if self.search_job is not None:
+            self.after_cancel(self.search_job)
+        self.search_job = self.after(220, self.search)
+
+    def search(self):
+        from .refactor import find_in_files
+        self.search_job = None
+        needle = self.needle.get()
+        self.results = find_in_files(self.folder, needle, self.match_case.get(), self.whole_word.get()) \
+            if needle.strip() else []
+        self.list.configure(state="normal")
+        self.list.delete("1.0", "end")
+        self.line_of = {}
+        last = None
+        last_line = None
+        start = "1.0"
+        for index, (path, number, column, text) in enumerate(self.results):
+            if path != last:
+                self.list.insert("end", os.path.relpath(path, self.folder) + "\n", "file")
+                last = path
+            cut = len(text) - len(text.lstrip())
+            if (path, number) != last_line:  # one row per line, with every match on it lit up
+                last_line = (path, number)
+                row = int(self.list.index("end-1c").split(".")[0])
+                self.line_of[row] = index
+                self.list.insert("end", f"{number:>5}  ", "where")
+                start = self.list.index("end-1c")
+                self.list.insert("end", text.strip()[:200] + "\n")
+            hit = column - cut
+            if 0 <= hit < 200:
+                self.list.tag_add("hit", f"{start}+{hit}c", f"{start}+{min(200, hit + len(needle))}c")
+        self.list.configure(state="disabled")
+        files = len({path for path, *_rest in self.results})
+        if not needle.strip():
+            self.summary.configure(text="type something to find")
+        elif not self.results:
+            self.summary.configure(text="nothing found")
+        else:
+            more = "+" if len(self.results) >= 2000 else ""
+            self.summary.configure(text=f"{plural(len(self.results), 'match', 'matches')}{more} in "
+                                        f"{plural(files, 'file')}")
+        self.chosen = None
+        if self.results:
+            self._choose_result(0)
+
+    def _choose(self, index):
+        row = int(str(index).split(".")[0])
+        if row in self.line_of:
+            self._choose_result(self.line_of[row])
+
+    def _choose_result(self, result):
+        self.chosen = result
+        self.list.tag_remove("chosen", "1.0", "end")
+        for row, found in self.line_of.items():
+            if found == result:
+                self.list.tag_add("chosen", f"{row}.0", f"{row}.end")
+                self.list.see(f"{row}.0")
+                break
+
+    def _move(self, step):
+        firsts = [found for _row, found in sorted(self.line_of.items())]  # arrow keys walk rows, not matches
+        if firsts:
+            where = firsts.index(self.chosen) if self.chosen in firsts else 0
+            self._choose_result(firsts[max(0, min(len(firsts) - 1, where + step))])
+        return "break"
+
+    def _open(self, index):
+        self._choose(index)
+        self._open_chosen()
+
+    def _open_chosen(self):
+        if self.chosen is None or self.chosen >= len(self.results):
+            return
+        path, number, column, _text = self.results[self.chosen]
+        self.open_at(path, number, column)
 
 
 # ----- command palette ---------------------------------------------------------------------------------------

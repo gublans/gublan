@@ -8,8 +8,10 @@ the studio can still pause, step and inspect every line.
 import array
 import ast
 import colorsys
+import csv
 import difflib
 import http.client
+import io
 import ipaddress
 import json
 import math
@@ -26,7 +28,7 @@ from urllib.parse import urlsplit
 import pygame
 from pygame.locals import DOUBLEBUF, OPENGL
 from OpenGL.GL import (
-    glBegin, glBindTexture, glBlendFunc, glClear, glClearColor, glColor3f, glColor4f,
+    glBegin, glBindTexture, glReadBuffer, glReadPixels, glBlendFunc, glClear, glClearColor, glColor3f, glColor4f,
     glColorMaterial, glDeleteTextures, glDisable, glEnable, glEnd, glGenTextures,
     glLightfv, glLoadIdentity, glMatrixMode, glNormal3f, glOrtho, glPopAttrib,
     glPopMatrix, glPushAttrib, glPushMatrix, glRotatef, glTexCoord2f, glTexImage2D,
@@ -34,7 +36,7 @@ from OpenGL.GL import (
     GL_AMBIENT, GL_AMBIENT_AND_DIFFUSE, GL_BLEND, GL_COLOR_BUFFER_BIT, GL_COLOR_MATERIAL,
     GL_DEPTH_BUFFER_BIT, GL_DEPTH_TEST, GL_DIFFUSE, GL_ENABLE_BIT, GL_FRONT_AND_BACK,
     GL_LIGHT0, GL_LIGHTING, GL_MODELVIEW, GL_NEAREST, GL_NORMALIZE, GL_ONE_MINUS_SRC_ALPHA,
-    GL_POSITION, GL_PROJECTION, GL_QUADS, GL_RGBA, GL_SRC_ALPHA, GL_TEXTURE_2D,
+    GL_FRONT, GL_POLYGON, GL_POSITION, GL_PROJECTION, GL_QUADS, GL_RGB, GL_RGBA, GL_SRC_ALPHA, GL_TEXTURE_2D,
     GL_TEXTURE_BIT, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER, GL_UNSIGNED_BYTE,
 )
 from OpenGL.GLU import gluDeleteQuadric, gluNewQuadric, gluPerspective, gluSphere
@@ -77,6 +79,9 @@ COMMAND_SPECS = {
              "work out a math expression and store the answer.", "calc area width * height"),
     "random": ("basics", "random <variable> <min> <max>", 4,
                "pick a random number between min and max.", "random roll 1 6"),
+    "seed": ("basics", "seed <number>", 2,
+             "make random numbers come out the same every run, which helps when testing a game.", "seed 42"),
+    "swap": ("basics", "swap <variable-a> <variable-b>", 3, "swap the values of two variables.", "swap a b"),
     "time": ("basics", "time <variable>", 2, "store the seconds since the program started.", "time now"),
     "const": ("basics", "const <name> = <value>", 4,
               "make a value that can't be changed later, like the speed of the game.", "const speed = 4"),
@@ -161,6 +166,9 @@ COMMAND_SPECS = {
     "shuffle": ("lists and maps", "shuffle <list>", 2, "mix a list into a random order.", "shuffle fruit"),
     "sort": ("lists and maps", "sort <list> [reverse]", 2,
              "put a list in order, smallest first. add reverse for biggest first.", "sort scores reverse"),
+    "pop": ("lists and maps", "pop <list> <variable> [position]", 3,
+            "take an item out of a list and keep it in a variable. without a position it takes the last one.",
+            "pop cards card"),
     # display
     "mode": ("display", "mode 2d|3d", 2, "open the 2d or 3d game window.", "mode 2d"),
     "window": ("display", "window <width> <height> [title...]", 3,
@@ -171,6 +179,9 @@ COMMAND_SPECS = {
               "choose the color for shapes you make next.", "color green"),
     "paint": ("display", "paint <object|all> <color>", 3, "recolor an existing object.", "paint player red"),
     "clear": ("display", "clear", 1, "redraw the window now.", "clear"),
+    "screenshot": ("display", "screenshot <path>", 2,
+                   "save a picture of the game window as a .png file next to your program.",
+                   "screenshot shots/level1.png"),
     "frame": ("display", "frame", 1,
               "draw the window and wait for the next frame. dt holds the seconds since the last frame.",
               "frame"),
@@ -203,12 +214,34 @@ COMMAND_SPECS = {
                   "throw out a burst of little squares in the current color. they fly apart and fade away.",
                   "particles 200 150 30"),
     # 3d
-    "cube": ("3d", "cube <name> <x> <y> <z> <size>", 6, "make a 3d cube.", "cube crate 0 0 -6 1"),
-    "sphere": ("3d", "sphere <name> <x> <y> <z> <radius>", 6, "make a 3d sphere.", "sphere moon 2 0 -7 0.5"),
-    "spin": ("3d", "spin <object> <angle>", 3, "rotate a cube, sphere, sprite or image (degrees).",
+    "cube": ("3d", "cube <name> <x> <y> <z> <size> [color]", 6, "make a 3d cube.", "cube crate 0 0 -6 1"),
+    "sphere": ("3d", "sphere <name> <x> <y> <z> <radius> [color]", 6, "make a 3d sphere.",
+               "sphere moon 2 0 -7 0.5"),
+    "block": ("3d", "block <name> <x> <y> <z> <width> <height> <depth> [color]", 8,
+              "make a 3d box of any size, like a wall, a floor or a brick. x, y and z are its middle.",
+              "block wall 0 0 -8 4 2 0.5 sand"),
+    "cylinder": ("3d", "cylinder <name> <x> <y> <z> <radius> <height> [color]", 7,
+                 "make a 3d cylinder standing up, like a pillar, a tree trunk or a coin.",
+                 "cylinder pillar -2 0 -8 0.4 3 gray"),
+    "cone": ("3d", "cone <name> <x> <y> <z> <radius> <height> [color]", 7,
+             "make a 3d cone pointing up, like a tree top or a party hat.", "cone treetop 2 1 -8 1 2 forest"),
+    "plane": ("3d", "plane <name> <x> <y> <z> <width> <depth> [color]", 7,
+              "make a flat 3d floor (or ceiling) that lies level.", "plane ground 0 -1 -8 20 20 moss"),
+    "spin": ("3d", "spin <object> <angle>", 3, "rotate a 3d shape, sprite or image (degrees).",
              "spin crate 45"),
+    "turn": ("3d", "turn <object> <x-angle> <y-angle> [z-angle]", 4,
+             "tilt and turn a 3d shape (degrees). y turns it left and right, x tips it forwards and z rolls it.",
+             "turn crate 0 45 0"),
     "camera": ("3d", "camera <x> <y> <z> [yaw] [pitch] | camera <vec3>", 2,
                "move and turn the 3d camera.", "camera 0 1 0"),
+    "lookat": ("3d", "lookat <x> <y> <z> | lookat <object>", 2, "turn the 3d camera to face a spot or a shape.",
+               "lookat 0 0 -8"),
+    "walk": ("3d", "walk <forward> [right] [up]", 2,
+             "move the 3d camera the way it is facing (for first person games). use minus numbers to go back.",
+             "walk 0.1"),
+    "light": ("3d", "light <x> <y> <z> [brightness]", 4,
+              "change which way the 3d light shines from, and how bright it is (1 is normal).",
+              "light 1 2 1 1.2"),
     "vec3": ("3d", "vec3 <name> <x> <y> <z>", 5, "make an x/y/z value for 3d positions.", "vec3 spot 0 0 -6"),
     # ui: works in 2d, and drawn on top of the scene in 3d
     "button": ("ui", "button <variable> <x> <y> <width> <height> <label...>", 7,
@@ -248,6 +281,12 @@ COMMAND_SPECS = {
     "fixed": ("objects", "fixed <object>", 2,
               "keep an object in the same place on the screen when the view scrolls, like a score.",
               "fixed hud"),
+    "velocity": ("objects", "velocity <object> <x-speed> <y-speed> [z-speed]", 4,
+                 "keep an object moving by itself, in pixels (or 3d units) a second. 0 0 stops it.",
+                 "velocity ball 120 -200"),
+    "gravity": ("objects", "gravity <amount>", 2,
+                "pull every object that has a velocity downwards. 600 feels like a platformer, 0 turns it off.",
+                "gravity 600"),
     # input
     "key": ("input", "key <variable> <key-name>", 3, "set a variable to 1 while a key is held.",
             "key left left"),
@@ -282,6 +321,22 @@ COMMAND_SPECS = {
              "or 0.", "load best highscore 0"),
     "forget": ("saving", "forget <name> | forget all", 2, "delete one saved value, or every saved value.",
                "forget best"),
+    # files
+    "writefile": ("files", "writefile <path> <text...>", 3,
+                  "make a text file, or replace what is in it. files are kept next to your program.",
+                  "writefile notes.txt hello there"),
+    "appendfile": ("files", "appendfile <path> <text...>", 3, "add a line to the end of a text file.",
+                   "appendfile log.txt the game started"),
+    "readfile": ("files", "readfile <path> <variable>", 3,
+                 "read a whole text file into a variable. use lines() on it to go through it line by line.",
+                 "readfile notes.txt text"),
+    "deletefile": ("files", "deletefile <path>", 2, "delete a file, or a folder that is empty.",
+                   "deletefile old.txt"),
+    "makefolder": ("files", "makefolder <path>", 2, "make a folder (and the folders it is inside).",
+                   "makefolder levels"),
+    "copyfile": ("files", "copyfile <from> <to>", 3, "copy a file.", "copyfile notes.txt backup.txt"),
+    "renamefile": ("files", "renamefile <from> <to>", 3, "rename a file, or move it into a folder.",
+                   "renamefile draft.txt final.txt"),
     # discord
     "presence": ("discord", "presence details|state|image|smallimage|button|party|timer|countdown|app|clear "
                             "[values...]", 2,
@@ -291,7 +346,7 @@ COMMAND_SPECS = {
 
 CATEGORY_ORDER = (
     "basics", "control", "functions", "testing", "lists and maps", "display", "2d", "3d", "ui",
-    "objects", "input", "sound", "web", "saving", "discord", "plugins",
+    "objects", "input", "sound", "web", "saving", "files", "discord", "plugins",
 )
 
 GUBLANCOMMANDS = set(COMMAND_SPECS)
@@ -484,6 +539,46 @@ EXPRESSION_FUNCTIONS = {
     # the view
     "scrollx": "scrollx() how far the view is scrolled to the right (see scroll)",
     "scrolly": "scrolly() how far the view is scrolled down (see scroll)",
+    # dates and times
+    "year": "year() this year, like 2026",
+    "month": "month() this month as a number, 1 to 12",
+    "day": "day() the day of the month, 1 to 31",
+    "hour": "hour() the hour of the day, 0 to 23",
+    "minute": "minute() the minute of the hour, 0 to 59",
+    "second": "second() the second of the minute, 0 to 59",
+    "weekday": "weekday() the day of the week as a word, like monday",
+    "timetext": "timetext(seconds) a number of seconds as a clock, like 1:05 (or 1:02:03 for hours)",
+    # more text
+    "left": "left(text, n) the first n letters of some text",
+    "right": "right(text, n) the last n letters of some text",
+    "matches": "matches(text, pattern) true when the text fits a pattern, where * is any letters and ? is one",
+    # vectors and numbers
+    "normalize": "normalize(vector) the same direction with a length of 1",
+    "dot": "dot(a, b) the dot product of two vectors (how much they point the same way)",
+    "cross": "cross(a, b) a vec3 at right angles to two vec3 values",
+    "percent": "percent(part, whole) how many percent part is of whole: percent(1, 4) is 25",
+    # more lists
+    "sample": "sample(list, n) n different random items from a list",
+    "findindex": "findindex(list, function) the position of the first item the function says yes to, or -1",
+    # objects on the screen
+    "clicked": "clicked(object) true on the frame an object is clicked with the left mouse button",
+    "hovering": "hovering(object) true while the mouse is over an object",
+    "distance": "distance(a, b) how far apart the middles of two objects are",
+    "screenpos": "screenpos(object) where a 3d shape is on the screen as a vec2, or none when it is behind you",
+    "camerapos": "camerapos() where the 3d camera is, as a vec3",
+    "camerayaw": "camerayaw() how far the 3d camera is turned left or right, in degrees",
+    "camerapitch": "camerapitch() how far the 3d camera is tipped up or down, in degrees",
+    # files
+    "readfile": "readfile(path) all the text in a file",
+    "readlines": "readlines(path) the lines of a text file as a list",
+    "fileexists": "fileexists(path) true when there is a file (or folder) there",
+    "isfolder": "isfolder(path) true when the path is a folder",
+    "listfiles": "listfiles(folder) the names of the files and folders in a folder (the program's folder when empty)",
+    "filesize": "filesize(path) how big a file is, in bytes",
+    "filename": "filename(path) the last part of a path: filename(\"maps/one.txt\") is one.txt",
+    "extension": "extension(path) the ending of a file name without the dot: extension(\"a.png\") is png",
+    "fromcsv": "fromcsv(text) a list of rows (each a list of values) from comma separated text",
+    "tocsv": "tocsv(rows) comma separated text from a list of rows",
 }
 
 EASINGS = ("linear", "in", "out", "inout", "smooth", "bounce", "elastic", "back")
@@ -1209,6 +1304,68 @@ def _presence_problem(tokens):
     return None
 
 
+# how many words each 1.0.9 command can have (counting the command), and how to write it
+_SHAPE_SIZES = {"cube": 6, "sphere": 6, "block": 8, "cylinder": 7, "cone": 7, "plane": 7}
+_NAME_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?")
+
+
+def _bad_file_path(token):
+    path = str(token)
+    if path.startswith("{") or isinstance(token, QuotedText) and "{" in path:
+        return False
+    cleaned = path.replace("\\", "/")
+    return cleaned.startswith("/") or ":" in cleaned or ".." in cleaned.split("/")
+
+
+def _check_109(command, parts):
+    """the checker's rules for the commands added in 1.0.9 (3d shapes, files and the rest)."""
+    count = len(parts)
+    usage = COMMAND_USAGE.get(command, command)
+    if count < COMMAND_MIN_ARGS.get(command, 0):
+        return None  # "missing arguments" was already said
+    if command in _SHAPE_SIZES:
+        base = _SHAPE_SIZES[command]
+        if count not in (base, base + 1, base + 3):
+            return f"use: {usage}"
+        return None
+    if command == "turn" and count not in (4, 5):
+        return f"use: {usage}"
+    if command == "lookat" and count not in (2, 4):
+        return f"use: {usage}"
+    if command == "walk" and not 2 <= count <= 4:
+        return f"use: {usage}"
+    if command == "light" and count not in (4, 5):
+        return f"use: {usage}"
+    if command in ("seed", "gravity", "screenshot", "deletefile", "makefolder") and count != 2:
+        return f"use: {usage}"
+    if command == "velocity" and count not in (4, 5):
+        return f"use: {usage}"
+    if command == "swap":
+        if count != 3:
+            return f"use: {usage}"
+        for token in parts[1:]:
+            if not re.fullmatch(r"[A-Za-z_]\w*", str(token)):
+                return f"'{token}' is not a valid variable name. names start with a letter"
+    if command == "pop":
+        if count not in (3, 4):
+            return f"use: {usage}"
+        if not _NAME_RE.fullmatch(str(parts[2])):
+            return f"'{parts[2]}' is not a valid variable name. names start with a letter"
+    if command == "readfile":
+        if count != 3:
+            return f"use: {usage}"
+        if not _NAME_RE.fullmatch(str(parts[2])):
+            return f"'{parts[2]}' is not a valid variable name. names start with a letter"
+    if command in ("copyfile", "renamefile") and count != 3:
+        return f"use: {usage}"
+    if command in ("writefile", "appendfile", "readfile", "deletefile", "makefolder", "copyfile", "renamefile",
+                   "screenshot"):
+        paths = parts[1:3] if command in ("copyfile", "renamefile") else parts[1:2]
+        if any(_bad_file_path(token) for token in paths):
+            return "file paths stay inside your program's folder, like notes.txt or saves/one.txt"
+    return None
+
+
 def analyze_source(source, warnings=False):
     """check a script without running it. returns a list of {line, severity, message}."""
     diagnostics = []
@@ -1321,8 +1478,9 @@ def analyze_source(source, warnings=False):
             report(lineno, "the only supported form is: ui button <label>")
         if command == "camera" and len(parts) not in (2, 4, 6):
             report(lineno, "use camera <x> <y> <z> [yaw] [pitch] or camera <vec3-variable>")
-        if command == "sphere" and len(parts) != 6:
-            report(lineno, "use: sphere <name> <x> <y> <z> <radius>")
+        problem = _check_109(command, parts)
+        if problem:
+            report(lineno, problem)
         if command == "vec2" and len(parts) != 4:
             report(lineno, "use: vec2 <name> <x> <y>")
         if command == "vec3" and len(parts) != 5:
@@ -1641,7 +1799,758 @@ MAX_SAVED_VALUE = 256 * 1024
 MAX_SAVED_NAMES = 1000
 
 
-class GublanRuntime:
+# ----- 3d shapes (shared by the game window, gublan studio's scene editor and the other runtimes) ----------------
+SHAPES_3D = ("cube", "sphere", "block", "cylinder", "cone", "plane")
+# the words after a shape's name that are its size, in order
+SHAPE_SIZE_FIELDS = {"cube": ("size",), "sphere": ("radius",), "block": ("w", "h", "d"), "cylinder": ("r", "h"),
+                     "cone": ("r", "h"), "plane": ("w", "d")}
+_ROUND_SIDES = 24
+
+
+def shape_extents(obj):
+    """half of a 3d shape's size along x, y and z, before it is turned."""
+    kind = obj["type"]
+    if kind == "cube":
+        half = abs(float(obj["size"])) / 2
+        return half, half, half
+    if kind == "sphere":
+        radius = abs(float(obj["radius"]))
+        return radius, radius, radius
+    if kind in ("cylinder", "cone"):
+        radius = abs(float(obj["r"]))
+        return radius, abs(float(obj["h"])) / 2, radius
+    if kind == "plane":
+        return abs(float(obj["w"])) / 2, 0.0, abs(float(obj["d"])) / 2
+    return abs(float(obj["w"])) / 2, abs(float(obj["h"])) / 2, abs(float(obj["d"])) / 2
+
+
+def _rotation(axis, degrees):
+    x, y, z = axis
+    length = math.sqrt(x * x + y * y + z * z) or 1.0
+    x, y, z = x / length, y / length, z / length
+    angle = math.radians(degrees)
+    c, s, t = math.cos(angle), math.sin(angle), 1 - math.cos(angle)
+    return ((t * x * x + c, t * x * y - s * z, t * x * z + s * y),
+            (t * x * y + s * z, t * y * y + c, t * y * z - s * x),
+            (t * x * z - s * y, t * y * z + s * x, t * z * z + c))
+
+
+def _matrix_times(a, b):
+    return tuple(tuple(sum(a[row][k] * b[k][column] for k in range(3)) for column in range(3)) for row in range(3))
+
+
+def shape_matrix(obj):
+    """how a 3d shape is turned, as a 3x3 matrix (the same turn opengl and webgl give it).
+
+    a cube that was only ever spun keeps the old turn about (1, 1, 0). anything that was turned turns about
+    y (its angle), then x, then z."""
+    if obj["type"] == "cube" and "rx" not in obj:
+        return _rotation((1, 1, 0), float(obj.get("angle", 0)))
+    matrix = _rotation((0, 1, 0), float(obj.get("angle", 0)))
+    if obj.get("rx"):
+        matrix = _matrix_times(matrix, _rotation((1, 0, 0), float(obj["rx"])))
+    if obj.get("rz"):
+        matrix = _matrix_times(matrix, _rotation((0, 0, 1), float(obj["rz"])))
+    return matrix
+
+
+def shape_mesh(kind, sizes, sides=_ROUND_SIDES):
+    """the faces of a 3d shape around its middle: a list of (normal, [corner, ...]), each corner (x, y, z)."""
+    faces = []
+
+    def box(hx, hy, hz):
+        return [
+            ((0, 0, 1), [(-hx, -hy, hz), (hx, -hy, hz), (hx, hy, hz), (-hx, hy, hz)]),
+            ((0, 0, -1), [(hx, -hy, -hz), (-hx, -hy, -hz), (-hx, hy, -hz), (hx, hy, -hz)]),
+            ((0, 1, 0), [(-hx, hy, hz), (hx, hy, hz), (hx, hy, -hz), (-hx, hy, -hz)]),
+            ((0, -1, 0), [(-hx, -hy, -hz), (hx, -hy, -hz), (hx, -hy, hz), (-hx, -hy, hz)]),
+            ((1, 0, 0), [(hx, -hy, hz), (hx, -hy, -hz), (hx, hy, -hz), (hx, hy, hz)]),
+            ((-1, 0, 0), [(-hx, -hy, -hz), (-hx, -hy, hz), (-hx, hy, hz), (-hx, hy, -hz)]),
+        ]
+
+    if kind == "cube":
+        half = sizes[0] / 2
+        return box(half, half, half)
+    if kind == "block":
+        return box(sizes[0] / 2, sizes[1] / 2, sizes[2] / 2)
+    if kind == "plane":
+        hx, hz = sizes[0] / 2, sizes[1] / 2
+        # one face: gl draws both of its sides, and a second face in the same place would flicker
+        return [((0, 1, 0), [(-hx, 0, hz), (hx, 0, hz), (hx, 0, -hz), (-hx, 0, -hz)])]
+    if kind == "sphere":
+        radius = sizes[0]
+        rings, segments = max(4, sides // 3), sides
+        for ring in range(rings):
+            top, bottom = math.pi * ring / rings, math.pi * (ring + 1) / rings
+            for segment in range(segments):
+                left, right = 2 * math.pi * segment / segments, 2 * math.pi * (segment + 1) / segments
+                corners = []
+                for latitude, longitude in ((bottom, left), (bottom, right), (top, right), (top, left)):
+                    corners.append((radius * math.sin(latitude) * math.sin(longitude), radius * math.cos(latitude),
+                                    radius * math.sin(latitude) * math.cos(longitude)))
+                middle_lat, middle_lon = (top + bottom) / 2, (left + right) / 2
+                normal = (math.sin(middle_lat) * math.sin(middle_lon), math.cos(middle_lat),
+                          math.sin(middle_lat) * math.cos(middle_lon))
+                faces.append((normal, corners))
+        return faces
+    radius, height = sizes[0], sizes[1]
+    half = height / 2
+    ring = [(radius * math.sin(2 * math.pi * i / sides), radius * math.cos(2 * math.pi * i / sides))
+            for i in range(sides)]
+    slope = math.hypot(radius, height) or 1.0
+    for i in range(sides):
+        (x1, z1), (x2, z2) = ring[i], ring[(i + 1) % sides]
+        middle = 2 * math.pi * (i + 0.5) / sides
+        if kind == "cylinder":
+            faces.append(((math.sin(middle), 0, math.cos(middle)),
+                          [(x1, -half, z1), (x2, -half, z2), (x2, half, z2), (x1, half, z1)]))
+        else:
+            faces.append(((math.sin(middle) * height / slope, radius / slope, math.cos(middle) * height / slope),
+                          [(x1, -half, z1), (x2, -half, z2), (0, half, 0)]))
+    faces.append(((0, -1, 0), [(x, -half, z) for x, z in reversed(ring)]))
+    if kind == "cylinder":
+        faces.append(((0, 1, 0), [(x, half, z) for x, z in ring]))
+    return faces
+
+
+def shape_sizes(obj):
+    return tuple(abs(float(obj[field])) for field in SHAPE_SIZE_FIELDS[obj["type"]])
+
+
+def view_point(camera, turn, point):
+    """a world point as the 3d camera sees it (x right, y up, z towards you, so in front is minus z)."""
+    yaw, pitch = (math.radians(value) for value in turn)
+    dx, dy, dz = point[0] - camera[0], point[1] - camera[1], point[2] - camera[2]
+    x = dx * math.cos(yaw) + dz * math.sin(yaw)
+    z = -dx * math.sin(yaw) + dz * math.cos(yaw)
+    y = dy * math.cos(pitch) - z * math.sin(pitch)
+    z = dy * math.sin(pitch) + z * math.cos(pitch)
+    return x, y, z
+
+
+def project_point(camera, turn, point, width, height, fov=45.0):
+    """where a world point lands in a width x height window, or None when it is behind the camera."""
+    x, y, z = view_point(camera, turn, point)
+    if z > -0.1:
+        return None
+    focal = 1 / math.tan(math.radians(fov) / 2)
+    aspect = width / height if height else 1.0
+    return ((focal / aspect * x / -z + 1) / 2 * width, (1 - focal * y / -z) / 2 * height)
+
+
+def look_angles(source, target):
+    """the camera yaw and pitch (degrees) that look from source towards target."""
+    dx, dy, dz = target[0] - source[0], target[1] - source[1], target[2] - source[2]
+    return math.degrees(math.atan2(dx, -dz)), math.degrees(math.atan2(-dy, math.hypot(dx, dz)))
+
+
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_FILE_LIMIT = 10 * 1024 * 1024
+
+
+class _Features109:
+    """what gublan 1.0.9 adds to the runtime: more 3d shapes, files, movement and a lot of new functions."""
+
+    # ----- 3d shapes -----------------------------------------------------------------------------------------
+    def _shape_color(self, parts, first):
+        if len(parts) <= first:
+            return self.activecolor
+        color = self._color_from(parts[first:])
+        if isinstance(color, str) and not is_color(color):
+            raise ValueError(f"'{color}' is not a colour. use a name like moss, #ff8800 or three numbers")
+        return color
+
+    def _shape_numbers(self, parts, what, count):
+        values = [self._num(part, f"{what} {label}") for part, label in
+                  zip(parts[2:2 + count], ("x", "y", "z", "size", "size", "size"))]
+        if any(value <= 0 for value in values[3:]):
+            raise ValueError(f"{what} sizes must be greater than zero")
+        return values
+
+    def _make_shape(self, statement, kind):
+        parts = statement.parts
+        fields = SHAPE_SIZE_FIELDS[kind]
+        count = 3 + len(fields)
+        if len(parts) not in (count + 2, count + 3, count + 5):
+            raise ValueError(f"use: {COMMAND_USAGE[kind]}")
+        values = self._shape_numbers(parts, kind, count)
+        shape = {"type": kind, "x": values[0], "y": values[1], "z": values[2], "angle": 0, "rx": 0, "rz": 0,
+                 "color": self._shape_color(parts, count + 2)}
+        shape.update(zip(fields, values[3:]))
+        self.objects[self._name(parts[1])] = shape
+
+    def _c_block(self, statement):
+        self._make_shape(statement, "block")
+
+    def _c_cylinder(self, statement):
+        self._make_shape(statement, "cylinder")
+
+    def _c_cone(self, statement):
+        self._make_shape(statement, "cone")
+
+    def _c_plane(self, statement):
+        self._make_shape(statement, "plane")
+
+    def _c_turn(self, statement):
+        parts = statement.parts
+        obj = self._object(parts[1], SHAPES_3D, "turn")
+        obj["rx"] = self._num(parts[2], "x angle")
+        obj["angle"] = self._num(parts[3], "y angle")
+        obj["rz"] = self._num(parts[4], "z angle") if len(parts) > 4 else 0
+
+    def _c_lookat(self, statement):
+        parts = statement.parts
+        if len(parts) == 2:
+            target = self.val(parts[1]) if not self._is_object(parts[1]) else None
+            if isinstance(target, Vector3):
+                point = (target.x, target.y, target.z)
+            else:
+                obj = self._object(parts[1], SHAPES_3D, "look at")
+                point = (obj["x"], obj["y"], obj["z"])
+        elif len(parts) == 4:
+            point = tuple(self._num(part, "lookat coordinate") for part in parts[1:4])
+        else:
+            raise ValueError(f"use: {COMMAND_USAGE['lookat']}")
+        camera = (self.camera.x, self.camera.y, self.camera.z)
+        if all(abs(a - b) < 1e-9 for a, b in zip(camera, point)):
+            return
+        self.camera_turn = look_angles(camera, point)
+
+    def _is_object(self, token):
+        name = self._name(token)
+        return isinstance(self.objects.get(name), dict)
+
+    def _c_walk(self, statement):
+        parts = statement.parts
+        forward = self._num(parts[1], "walk distance")
+        right = self._num(parts[2], "walk sideways") if len(parts) > 2 else 0
+        up = self._num(parts[3], "walk up") if len(parts) > 3 else 0
+        yaw = math.radians(self.camera_turn[0])
+        self.camera = Vector3(self.camera.x + math.sin(yaw) * forward + math.cos(yaw) * right,
+                              self.camera.y + up,
+                              self.camera.z - math.cos(yaw) * forward + math.sin(yaw) * right)
+
+    def _c_light(self, statement):
+        parts = statement.parts
+        x, y, z = (self._num(part, "light direction") for part in parts[1:4])
+        brightness = self._num(parts[4], "brightness") if len(parts) > 4 else 1
+        if not x and not y and not z:
+            raise ValueError("the light needs a direction, like light 1 2 1")
+        if not 0 <= brightness <= 4:
+            raise ValueError("light brightness goes from 0 to 4 (1 is normal)")
+        self.light = (x, y, z, brightness)
+
+    def _mesh(self, obj):
+        key = (obj["type"],) + shape_sizes(obj)
+        mesh = self._mesh_cache.get(key)
+        if mesh is None:
+            if len(self._mesh_cache) > 400:
+                self._mesh_cache.clear()
+            mesh = shape_mesh(obj["type"], key[1:])
+            self._mesh_cache[key] = mesh
+        return mesh
+
+    def _render_shape_gl(self, obj):
+        glPushMatrix()
+        glTranslatef(obj["x"] - self.camera.x, obj["y"] - self.camera.y, obj["z"] - self.camera.z)
+        red, green, blue = color_value(obj["color"])
+        glColor3f(red / 255.0, green / 255.0, blue / 255.0)
+        kind = obj["type"]
+        if kind == "cube" and "rx" not in obj:
+            glRotatef(obj["angle"], 1, 1, 0)
+        else:
+            if obj.get("angle"):
+                glRotatef(obj["angle"], 0, 1, 0)
+            if obj.get("rx"):
+                glRotatef(obj["rx"], 1, 0, 0)
+            if obj.get("rz"):
+                glRotatef(obj["rz"], 0, 0, 1)
+        if kind == "sphere":
+            quadric = gluNewQuadric()
+            gluSphere(quadric, obj["radius"], 24, 16)
+            gluDeleteQuadric(quadric)
+        else:
+            for normal, corners in self._mesh(obj):
+                glBegin(GL_POLYGON)
+                glNormal3f(*normal)
+                for corner in corners:
+                    glVertex3fv(corner)
+                glEnd()
+        glPopMatrix()
+
+    def _shape_box(self, obj):
+        """the smallest level box around a turned 3d shape: (low x, low y, low z, high x, high y, high z)."""
+        hx, hy, hz = shape_extents(obj)
+        if obj["type"] == "sphere":
+            ex, ey, ez = hx, hy, hz
+        else:
+            matrix = shape_matrix(obj)
+            ex, ey, ez = (abs(row[0]) * hx + abs(row[1]) * hy + abs(row[2]) * hz for row in matrix)
+        x, y, z = float(obj["x"]), float(obj["y"]), float(obj["z"])
+        return x - ex, y - ey, z - ez, x + ex, y + ey, z + ez
+
+    def _touching_3d(self, first, second):
+        if first["type"] == "sphere" and second["type"] == "sphere":
+            gap = sum((float(first[axis]) - float(second[axis])) ** 2 for axis in "xyz")
+            return gap <= (abs(float(first["radius"])) + abs(float(second["radius"]))) ** 2
+        if second["type"] == "sphere":
+            first, second = second, first
+        if first["type"] == "sphere":
+            box = self._shape_box(second)
+            centre = [float(first[axis]) for axis in "xyz"]
+            gap = sum((value - max(box[i], min(box[i + 3], value))) ** 2 for i, value in enumerate(centre))
+            return gap <= abs(float(first["radius"])) ** 2
+        a, b = self._shape_box(first), self._shape_box(second)
+        return all(a[i] <= b[i + 3] and b[i] <= a[i + 3] for i in range(3))
+
+    def _project(self, point):
+        width, height = self.screen.get_size() if self.screen else self.window_size
+        return project_point((self.camera.x, self.camera.y, self.camera.z), self.camera_turn, point, width, height)
+
+    def _screen_box(self, obj):
+        low_x, low_y, low_z, high_x, high_y, high_z = self._shape_box(obj)
+        points = [self._project((x, y, z)) for x in (low_x, high_x) for y in (low_y, high_y) for z in (low_z, high_z)]
+        points = [point for point in points if point is not None]
+        if not points:
+            return None
+        return (min(p[0] for p in points), min(p[1] for p in points),
+                max(p[0] for p in points), max(p[1] for p in points))
+
+    def _point_on(self, obj, mx, my):
+        if obj.get("hidden"):
+            return False
+        if obj["type"] in SHAPES_3D:
+            box = self._screen_box(obj)
+            return box is not None and box[0] <= mx <= box[2] and box[1] <= my <= box[3]
+        if obj["type"] not in self._UI_KINDS and not obj.get("fixed"):
+            mx, my = mx + self.scroll[0], my + self.scroll[1]
+        try:
+            shape = self._collision_shape(obj)
+        except ValueError as err:
+            raise ValueError("clicked() and hovering() work on shapes, text, pictures and buttons") from err
+        if shape[0] == "circle":
+            _, cx, cy, radius = shape
+            return (mx - cx) ** 2 + (my - cy) ** 2 <= radius ** 2
+        _, x, y, w, h = shape
+        return x <= mx <= x + w and y <= my <= y + h
+
+    def _centre(self, value):
+        if isinstance(value, (Vector2, Vector3)):
+            return self._components(value)
+        obj = self._object(value, action="measure")
+        if obj["type"] in SHAPES_3D:
+            return float(obj["x"]), float(obj["y"]), float(obj["z"])
+        if obj["type"] == "line":
+            return (obj["x"] + obj["x2"]) / 2, (obj["y"] + obj["y2"]) / 2
+        shape = self._collision_shape(obj)
+        if shape[0] == "circle":
+            return shape[1], shape[2]
+        _, x, y, w, h = shape
+        return x + w / 2, y + h / 2
+
+    # ----- moving by itself ------------------------------------------------------------------------------------
+    def _c_velocity(self, statement):
+        parts = statement.parts
+        obj = self._object(parts[1], action="give a velocity to")
+        if "x" not in obj or "y" not in obj:
+            raise ValueError(f"a {obj['type']} can't move by itself")
+        vx, vy = self._num(parts[2], "x speed"), self._num(parts[3], "y speed")
+        vz = self._num(parts[4], "z speed") if len(parts) > 4 else 0
+        if vz and obj["type"] not in SHAPES_3D:
+            raise ValueError("only 3d shapes can move along z")
+        obj["vx"], obj["vy"], obj["vz"] = vx, vy, vz
+
+    def _c_gravity(self, statement):
+        self.gravity = self._num(statement.parts[1], "gravity")
+
+    def _tick_motion(self, step):
+        if step <= 0:
+            return
+        for obj in list(self.objects.values()):
+            if not isinstance(obj, dict) or "vx" not in obj:
+                continue
+            three = obj["type"] in SHAPES_3D
+            if self.gravity:
+                obj["vy"] += (-self.gravity if three else self.gravity) * step
+            dx, dy = obj["vx"] * step, obj["vy"] * step
+            obj["x"] += dx
+            obj["y"] += dy
+            if obj["type"] == "line":
+                obj["x2"] += dx
+                obj["y2"] += dy
+            if three and obj.get("vz"):
+                obj["z"] += obj["vz"] * step
+
+    # ----- small helpers ---------------------------------------------------------------------------------------
+    def _c_seed(self, statement):
+        value = self.val(statement.parts[1])
+        random.seed(format_value(value) if not isinstance(value, (int, float)) or isinstance(value, bool)
+                    else value)
+
+    def _c_swap(self, statement):
+        first, second = (str(part) for part in statement.parts[1:3])
+        for name in (first, second):
+            if name not in self.vars:
+                raise ValueError(f"'{name}' has no value yet, so it can't be swapped")
+            if name in self.constants:
+                raise ValueError(f"'{name}' is a constant (made with const), so it can't be changed")
+        self.vars[first], self.vars[second] = self.vars[second], self.vars[first]
+
+    def _c_pop(self, statement):
+        parts = statement.parts
+        items = self.vars.get(str(parts[1]))
+        if not isinstance(items, list):
+            raise ValueError(f"'{parts[1]}' is not a list")
+        if not items:
+            raise ValueError(f"'{parts[1]}' is empty, so there is nothing to take")
+        if len(parts) > 3:
+            position = self.val(parts[3])
+            if isinstance(position, bool) or not isinstance(position, int):
+                raise ValueError("list positions must be whole numbers")
+            if not -len(items) <= position < len(items):
+                raise ValueError(f"position {position} is past the end (length {len(items)})")
+            value = items.pop(position)
+        else:
+            value = items.pop()
+        self._set_target(str(parts[2]), value)
+
+    def _c_screenshot(self, statement):
+        if not self.screen:
+            raise ValueError("add 'mode 2d' or 'mode 3d' before you take a screenshot")
+        path = self._file_path(self._name(statement.parts[1]), "screenshot")
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if self.mode == "3d":
+            width, height = self.screen.get_size()
+            glReadBuffer(GL_FRONT)
+            data = glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE)
+            picture = pygame.transform.flip(pygame.image.frombuffer(bytes(data), (width, height), "RGB"), False, True)
+        else:
+            picture = self.screen
+        try:
+            pygame.image.save(picture, path)
+        except (OSError, pygame.error) as err:
+            raise ValueError(f"could not save the screenshot: {str(err).lower()}") from err
+
+    # ----- files -----------------------------------------------------------------------------------------------
+    def _file_path(self, relative, what="file"):
+        relative = format_value(relative).strip() if not isinstance(relative, str) else relative.strip()
+        if not relative:
+            raise ValueError(f"give the {what} a name, like notes.txt")
+        cleaned = relative.replace("\\", "/")
+        if cleaned.startswith("/") or ":" in cleaned or ".." in cleaned.split("/"):
+            raise ValueError("file paths stay inside your program's folder, like notes.txt or saves/one.txt")
+        pieces = [piece for piece in cleaned.split("/") if piece not in ("", ".")]
+        path = os.path.abspath(os.path.join(self.base_dir, *pieces)) if pieces else self.base_dir
+        try:
+            inside = os.path.commonpath([path, self.base_dir]) == self.base_dir
+        except ValueError:
+            inside = False
+        if not inside:
+            raise ValueError("file paths stay inside your program's folder, like notes.txt or saves/one.txt")
+        return path
+
+    def _read_text(self, relative):
+        path = self._file_path(relative)
+        if os.path.isdir(path):
+            raise ValueError(f"'{relative}' is a folder, not a file")
+        if not os.path.isfile(path):
+            path = self._fetched(relative) or path
+        if not os.path.isfile(path):
+            raise ValueError(f"file '{relative}' was not found")
+        if os.path.getsize(path) > _FILE_LIMIT:
+            raise ValueError(f"file '{relative}' is too big to read (the most is 10 mb)")
+        try:
+            with open(path, "r", encoding="utf-8-sig", errors="replace", newline=None) as handle:
+                return handle.read()
+        except OSError as err:
+            raise ValueError(f"could not read '{relative}': {err.strerror or err}".lower()) from err
+
+    def _write_text(self, relative, text, append=False):
+        path = self._file_path(relative)
+        if os.path.isdir(path):
+            raise ValueError(f"'{relative}' is a folder, not a file")
+        if len(text) > _FILE_LIMIT:
+            raise ValueError("that is too much to write at once (the most is 10 mb)")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if append and os.path.isfile(path) and os.path.getsize(path):
+                with open(path, "rb") as handle:
+                    handle.seek(-1, os.SEEK_END)
+                    if handle.read(1) not in (b"\n", b"\r"):
+                        text = "\n" + text
+            with open(path, "a" if append else "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+        except OSError as err:
+            raise ValueError(f"could not write '{relative}': {err.strerror or err}".lower()) from err
+
+    def _file_text(self, tokens):
+        if len(tokens) == 1:
+            token = tokens[0]
+            raw = str(token)
+            whole = not isinstance(token, QuotedText) and (
+                raw in self.vars or (raw.startswith("{") and raw.endswith("}") and raw.count("{") == 1))
+            if whole:
+                value = self.vars[raw] if raw in self.vars else self.val(token)
+                if isinstance(value, list):
+                    return "\n".join(format_value(item) for item in value)
+        return self._text(tokens)
+
+    def _c_writefile(self, statement):
+        parts = statement.parts
+        self._write_text(self._name(parts[1]), self._file_text(parts[2:]))
+
+    def _c_appendfile(self, statement):
+        parts = statement.parts
+        self._write_text(self._name(parts[1]), self._file_text(parts[2:]) + "\n", append=True)
+
+    def _c_readfile(self, statement):
+        parts = statement.parts
+        self._set_target(str(parts[2]), self._read_text(self._name(parts[1])))
+
+    def _c_deletefile(self, statement):
+        relative = self._name(statement.parts[1])
+        path = self._file_path(relative)
+        if path == self.base_dir:
+            raise ValueError("gublan won't delete your program's own folder")
+        try:
+            if os.path.isdir(path):
+                if os.listdir(path):
+                    raise ValueError(f"folder '{relative}' is not empty. delete the files in it first")
+                os.rmdir(path)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as err:
+            raise ValueError(f"could not delete '{relative}': {err.strerror or err}".lower()) from err
+
+    def _c_makefolder(self, statement):
+        relative = self._name(statement.parts[1])
+        path = self._file_path(relative, "folder")
+        if os.path.isfile(path):
+            raise ValueError(f"'{relative}' is already a file")
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as err:
+            raise ValueError(f"could not make '{relative}': {err.strerror or err}".lower()) from err
+
+    def _move_file(self, statement, keep):
+        source_name, target_name = self._name(statement.parts[1]), self._name(statement.parts[2])
+        source, target = self._file_path(source_name), self._file_path(target_name)
+        if not os.path.isfile(source):
+            raise ValueError(f"file '{source_name}' was not found")
+        if os.path.isdir(target):
+            target = os.path.join(target, os.path.basename(source))
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if keep:
+                if os.path.getsize(source) > _FILE_LIMIT * 10:
+                    raise ValueError(f"file '{source_name}' is too big to copy")
+                with open(source, "rb") as reading, open(target, "wb") as writing:
+                    writing.write(reading.read())
+            else:
+                os.replace(source, target)
+        except OSError as err:
+            raise ValueError(f"could not {'copy' if keep else 'rename'} '{source_name}': "
+                             f"{err.strerror or err}".lower()) from err
+
+    def _c_copyfile(self, statement):
+        self._move_file(statement, keep=True)
+
+    def _c_renamefile(self, statement):
+        self._move_file(statement, keep=False)
+
+    # ----- the functions added in 1.0.9 --------------------------------------------------------------------------
+    def _builtin_109(self, name, args, number, need):
+        def whole(value, label="count"):
+            value = number(value, label)
+            if value != int(value):
+                raise ValueError(f"{name}() needs a whole number for its {label}")
+            return int(value)
+
+        def text(value):
+            return value if isinstance(value, str) else format_value(value)
+
+        def vector(value):
+            if isinstance(value, (Vector2, Vector3)):
+                return list(self._components(value)), type(value)
+            if isinstance(value, list) and len(value) in (2, 3) and all(
+                    not isinstance(item, bool) and isinstance(item, (int, float)) for item in value):
+                return [float(item) for item in value], list
+            raise ValueError(f"{name}() needs a vec2, a vec3 or a list of numbers, got '{format_value(value)}'")
+
+        def rebuilt(values, kind):
+            if kind is list:
+                return [int(v) if v == int(v) else v for v in values]
+            return kind(*values)
+
+        if name in ("year", "month", "day", "hour", "minute", "second", "weekday"):
+            need(0)
+            now = time.localtime()
+            if name == "weekday":
+                return _WEEKDAYS[now.tm_wday]
+            return {"year": now.tm_year, "month": now.tm_mon, "day": now.tm_mday, "hour": now.tm_hour,
+                    "minute": now.tm_min, "second": now.tm_sec}[name]
+        if name == "timetext":
+            need(1)
+            seconds = number(args[0], "seconds")
+            sign = "-" if seconds < 0 else ""
+            seconds = int(math.floor(abs(seconds)))
+            hours, rest = divmod(seconds, 3600)
+            minutes, seconds = divmod(rest, 60)
+            if hours:
+                return f"{sign}{hours}:{minutes:02d}:{seconds:02d}"
+            return f"{sign}{minutes}:{seconds:02d}"
+        if name in ("left", "right"):
+            need(2)
+            value, count = text(args[0]), whole(args[1])
+            if count <= 0:
+                return ""
+            return value[:count] if name == "left" else value[-count:]
+        if name == "matches":
+            need(2)
+            pattern = "".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in text(args[1]))
+            return re.fullmatch(pattern, text(args[0]), re.IGNORECASE | re.DOTALL) is not None
+        if name == "normalize":
+            need(1)
+            values, kind = vector(args[0])
+            length = math.sqrt(sum(v * v for v in values))
+            return rebuilt([v / length for v in values] if length else values, kind)
+        if name == "dot":
+            need(2)
+            first, second = vector(args[0])[0], vector(args[1])[0]
+            if len(first) != len(second):
+                raise ValueError("dot() needs two vectors of the same size")
+            total = sum(a * b for a, b in zip(first, second))
+            return int(total) if total == int(total) else total
+        if name == "cross":
+            need(2)
+            first, second = vector(args[0])[0], vector(args[1])[0]
+            ax, ay, az = first + [0.0] * (3 - len(first))
+            bx, by, bz = second + [0.0] * (3 - len(second))
+            return Vector3(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx)
+        if name == "percent":
+            need(2)
+            part, all_of = number(args[0], "part"), number(args[1], "whole")
+            if not all_of:
+                return 0
+            value = part / all_of * 100
+            return int(value) if value == int(value) else value
+        if name == "sample":
+            need(2)
+            items = list(args[0]) if isinstance(args[0], (list, str)) else None
+            if items is None:
+                raise ValueError(f"sample() needs a list, got '{format_value(args[0])}'")
+            count = whole(args[1])
+            return random.sample(items, max(0, min(count, len(items))))
+        if name == "findindex":
+            need(2)
+            if not isinstance(args[0], (list, str)):
+                raise ValueError(f"findindex() needs a list, got '{format_value(args[0])}'")
+            for index, item in enumerate(args[0]):
+                if self._truthy(self._call_value(args[1], [item])):
+                    return index
+            return -1
+        if name in ("clicked", "hovering"):
+            need(1)
+            self._require_screen("check the mouse")
+            obj = self._object(text(args[0]), action="check the mouse on")
+            if name == "hovering":
+                self.pumpevents()
+                return self._point_on(obj, *pygame.mouse.get_pos())
+            if self._frames_drawn == 0:
+                self.pumpevents()
+                for click in list(self._clicks):
+                    if self._point_on(obj, *click):
+                        self._clicks.remove(click)
+                        return True
+                return False
+            return any(self._point_on(obj, *click) for click in self._frame_clicks)
+        if name == "distance":
+            need(2)
+            first = self._centre(args[0] if isinstance(args[0], (Vector2, Vector3)) else text(args[0]))
+            second = self._centre(args[1] if isinstance(args[1], (Vector2, Vector3)) else text(args[1]))
+            size = min(len(first), len(second))
+            value = math.sqrt(sum((a - b) ** 2 for a, b in zip(first[:size], second[:size])))
+            return int(value) if value == int(value) else value
+        if name == "screenpos":
+            need(1)
+            obj = self._object(text(args[0]), action="find")
+            if obj["type"] in SHAPES_3D:
+                point = self._project((float(obj["x"]), float(obj["y"]), float(obj["z"])))
+                return None if point is None else Vector2(round(point[0], 2), round(point[1], 2))
+            x, y = self._centre(text(args[0]))[:2]
+            if obj["type"] not in self._UI_KINDS and not obj.get("fixed"):
+                x, y = x - self.scroll[0], y - self.scroll[1]
+            return Vector2(x, y)
+        if name == "camerapos":
+            need(0)
+            return self.camera
+        if name in ("camerayaw", "camerapitch"):
+            need(0)
+            value = self.camera_turn[0 if name == "camerayaw" else 1]
+            return int(value) if value == int(value) else round(value, 6)
+        if name == "readfile":
+            need(1)
+            return self._read_text(text(args[0]))
+        if name == "readlines":
+            need(1)
+            return self._read_text(text(args[0])).splitlines()
+        if name in ("fileexists", "isfolder", "filesize", "listfiles"):
+            if name == "listfiles":
+                if len(args) > 1:
+                    raise ValueError("listfiles() needs one folder, or nothing for the program's folder")
+                path = self._file_path(text(args[0]), "folder") if args and text(args[0]).strip() else self.base_dir
+                if not os.path.isdir(path):
+                    raise ValueError(f"'{text(args[0]) if args else '.'}' is not a folder")
+                return sorted(os.listdir(path), key=str.lower)
+            need(1)
+            path = self._file_path(text(args[0]))
+            if name == "fileexists":
+                return os.path.exists(path)
+            if name == "isfolder":
+                return os.path.isdir(path)
+            if not os.path.isfile(path):
+                raise ValueError(f"file '{text(args[0])}' was not found")
+            return os.path.getsize(path)
+        if name == "filename":
+            need(1)
+            return text(args[0]).replace("\\", "/").rstrip("/").split("/")[-1]
+        if name == "extension":
+            need(1)
+            base = text(args[0]).replace("\\", "/").split("/")[-1]
+            return base.rsplit(".", 1)[1] if "." in base.strip(".") else ""
+        if name == "fromcsv":
+            need(1)
+            rows = []
+            for row in csv.reader(io.StringIO(text(args[0]))):
+                rows.append([_csv_value(cell) for cell in row])
+            return rows
+        if name == "tocsv":
+            need(1)
+            rows = args[0]
+            if not isinstance(rows, list):
+                raise ValueError(f"tocsv() needs a list of rows, got '{format_value(rows)}'")
+            if rows and not all(isinstance(row, list) for row in rows):
+                rows = [rows]
+            out = io.StringIO()
+            writer = csv.writer(out, lineterminator="\n")
+            for row in rows:
+                writer.writerow([format_value(cell) for cell in row])
+            return out.getvalue().rstrip("\n")
+        return _MISSING
+
+
+def _csv_value(cell):
+    cleaned = cell.strip()
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)", cleaned):
+        return int(cleaned)
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]*)[.][0-9]+", cleaned):
+        return float(cleaned)
+    return cell
+
+
+class GublanRuntime(_Features109):
     def __init__(self, onlog=None, ondebug=None, shouldstop=None, waitstep=None, base_dir=None,
                  onerror=None, hold_window=False, oninput=None, onpopup=None, onpresence=None, save_name=None,
                  fetchfile=None, style=None):
@@ -1732,6 +2641,13 @@ class GublanRuntime:
         self._tweens = []
         self._effects_time = time.perf_counter()
         self._alpha_layer = None
+        self.gravity = 0.0
+        self.light = None
+        self._clicks = []
+        self._frame_clicks = []
+        self._frames_drawn = 0
+        self._mesh_cache = {}
+        self._gl_turned = False
 
     # ----- values ----------------------------------------------------------
     def val(self, token):
@@ -2115,9 +3031,12 @@ class GublanRuntime:
             return len(base)
         if isinstance(base, str) and field == "length":
             return len(base)
+        if isinstance(base, str) and (base in self.objects or ("button:" + base) in self.objects):
+            # a variable that holds an object's name: for rock in rocks ... rock.y
+            return self._object_field(base, field)
         raise ValueError(f"'{format_value(base)}' has no '{field}'")
 
-    _FIELD_ALIASES = {"width": "w", "height": "h", "radius": "r", "rotation": "angle"}
+    _FIELD_ALIASES = {"width": "w", "height": "h", "radius": "r", "rotation": "angle", "depth": "d"}
 
     def _object_field(self, name, field):
         obj = self.objects.get(name) or self.objects.get("button:" + name)
@@ -2138,10 +3057,16 @@ class GublanRuntime:
             return width if field == "w" else height
         if obj["type"] == "sphere" and field == "r":
             return obj["radius"]
-        if obj["type"] == "cube" and field in ("w", "h"):
+        if obj["type"] == "cube" and field in ("w", "h", "d"):
             return obj["size"]
         if obj["type"] == "circle" and field in ("w", "h"):
             return obj["r"] * 2
+        if obj["type"] in ("cylinder", "cone") and field in ("w", "d"):
+            return obj["r"] * 2
+        if field in ("vx", "vy", "vz") and "x" in obj:
+            return obj.get(field, 0)
+        if field in ("rx", "rz") and obj["type"] in SHAPES_3D:
+            return obj.get(field, 0)
         if field in obj and field not in ("surface", "source", "texture"):
             return obj[field]
         raise ValueError(f"object '{name}' has no '{field}'")
@@ -2983,7 +3908,7 @@ class GublanRuntime:
             need(0)
             value = self.scroll[0 if name == "scrollx" else 1]
             return int(value) if value == int(value) else value
-        return _MISSING
+        return self._builtin_109(name, args, number, need)
 
     def _color_channels(self, value):
         if isinstance(value, (list, tuple)) and len(value) in (3, 4):
@@ -3634,6 +4559,9 @@ class GublanRuntime:
                 continue
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 self._mouse_presses.add(getattr(event, "button", 1))
+                if getattr(event, "button", 1) == 1:
+                    self._clicks.append(tuple(getattr(event, "pos", None) or pygame.mouse.get_pos()))
+                    del self._clicks[:-16]
             elif event.type == pygame.MOUSEMOTION and self._dragging is not None:
                 self._drag_slider(getattr(event, "pos", None) or pygame.mouse.get_pos())
             # buttons and the other ui work the same in 2d and 3d (in 3d they are drawn on top of the scene)
@@ -3969,37 +4897,25 @@ class GublanRuntime:
             self._gl_clear = self.background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         yaw, pitch = self.camera_turn
-        if yaw or pitch:
-            glLoadIdentity()
+        turned = bool(yaw or pitch or self.light is not None)
+        if turned or self._gl_turned:
+            glLoadIdentity()  # forget last frame's turn (the view goes back to straight ahead)
+        self._gl_turned = turned
+        if self.light is not None:
+            # the light keeps its direction in the world while the camera turns
+            x, y, z, brightness = self.light
+            glRotatef(pitch, 1, 0, 0)
+            glRotatef(yaw, 0, 1, 0)
+            glLightfv(GL_LIGHT0, GL_POSITION, (x, y, z, 0.0))
+            glLightfv(GL_LIGHT0, GL_DIFFUSE, (0.85 * brightness, 0.85 * brightness, 0.85 * brightness, 1.0))
+            glLightfv(GL_LIGHT0, GL_AMBIENT, (0.32 * min(brightness, 1.5),) * 3 + (1.0,))
+        elif yaw or pitch:
             glRotatef(pitch, 1, 0, 0)
             glRotatef(yaw, 0, 1, 0)
         for obj in self.objects.values():
-            if not isinstance(obj, dict) or obj["type"] not in ("cube", "sphere") or obj.get("hidden"):
+            if not isinstance(obj, dict) or obj["type"] not in SHAPES_3D or obj.get("hidden"):
                 continue
-            glPushMatrix()
-            glTranslatef(
-                obj["x"] - self.camera.x,
-                obj["y"] - self.camera.y,
-                obj["z"] - self.camera.z,
-            )
-            red, green, blue = color_value(obj["color"])
-            glColor3f(red / 255.0, green / 255.0, blue / 255.0)
-            if obj["type"] == "cube":
-                glRotatef(obj["angle"], 1, 1, 0)
-                half = obj["size"] / 2.0
-                glBegin(GL_QUADS)
-                for normal, face in self._cube_faces(half):
-                    glNormal3f(*normal)
-                    for vertex in face:
-                        glVertex3fv(vertex)
-                glEnd()
-            else:
-                if obj.get("angle"):
-                    glRotatef(obj["angle"], 0, 1, 0)
-                quadric = gluNewQuadric()
-                gluSphere(quadric, obj["radius"], 24, 16)
-                gluDeleteQuadric(quadric)
-            glPopMatrix()
+            self._render_shape_gl(obj)
         self._render_overlay()
         self._render_3d_text()
 
@@ -4033,6 +4949,8 @@ class GublanRuntime:
         if kind == "text" and "_label" in obj:
             width, height = obj["_label"].get_size()
             return ("rect", float(obj["x"]), float(obj["y"]), width, height)
+        if kind in SHAPES_3D:
+            raise ValueError("3d shapes can only touch other 3d shapes")
         raise ValueError("touching supports boxes, circles, cubes, spheres, buttons and sprites")
 
     def _objects_touching(self, first, second):
@@ -4043,6 +4961,8 @@ class GublanRuntime:
         second_obj = self.objects.get(second) or self.objects["button:" + second]
         if first_obj.get("hidden") or second_obj.get("hidden"):
             return False
+        if first_obj["type"] in SHAPES_3D and second_obj["type"] in SHAPES_3D:
+            return self._touching_3d(first_obj, second_obj)
         first_shape = self._collision_shape(first_obj)
         second_shape = self._collision_shape(second_obj)
         if first_shape[0] == "circle" and second_shape[0] == "circle":
@@ -4442,7 +5362,9 @@ class GublanRuntime:
                 if isinstance(base, dict):
                     base[field] = value
                     return
-                raise ValueError(f"'{name}' has no parts to set")
+                if not (isinstance(base, str) and (base in self.objects or ("button:" + base) in self.objects)):
+                    raise ValueError(f"'{name}' has no parts to set")
+                name = base  # the variable holds an object's name
             obj = self._object(name)
             field = self._FIELD_ALIASES.get(field, field)
             if field == "visible":
@@ -4467,6 +5389,27 @@ class GublanRuntime:
                 return
             if field == "checked" and obj["type"] == "checkbox":
                 obj["checked"] = self._truthy(value)
+                return
+            if field in ("vx", "vy", "vz") and "x" in obj:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"{name}.{field} must be a number")
+                if field == "vz" and value and obj["type"] not in SHAPES_3D:
+                    raise ValueError("only 3d shapes can move along z")
+                for key in ("vx", "vy", "vz"):
+                    obj.setdefault(key, 0)
+                obj[field] = value
+                return
+            if obj["type"] in ("block", "cylinder", "cone", "plane") and field in ("w", "h", "d", "r"):
+                if field not in obj:
+                    raise ValueError(f"a {obj['type']} has no '{field}'")
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                    raise ValueError("sizes must be numbers greater than zero")
+                obj[field] = value
+                return
+            if field in ("rx", "rz") and obj["type"] in SHAPES_3D:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"{name}.{field} must be a number")
+                obj[field] = value
                 return
             if field in ("w", "h", "r", "size") or (field == "r" and obj["type"] == "sphere"):
                 current = {f: self._object_field(name, f) for f in ("w", "h") if obj["type"] in ("sprite", "image", "box", "button")}
@@ -4516,6 +5459,12 @@ class GublanRuntime:
             obj["size"] = width
         elif kind == "sphere":
             obj["radius"] = width
+        elif kind == "block":
+            obj["w"], obj["h"] = width, height
+        elif kind in ("cylinder", "cone"):
+            obj["r"], obj["h"] = width, height
+        elif kind == "plane":
+            obj["w"], obj["d"] = width, height
         elif kind == "text":
             obj["size"] = width
         elif kind in ("sprite", "image"):
@@ -5061,6 +6010,8 @@ class GublanRuntime:
             self.render()
         else:
             self._tick_effects()
+        self._frame_clicks, self._clicks = self._clicks, []
+        self._frames_drawn += 1
         target = 1.0 / max(1, self.target_fps)
         deadline = self._last_frame + target
         now = time.perf_counter()
@@ -5141,7 +6092,7 @@ class GublanRuntime:
 
     _TWEEN_FIELDS = {"x": "x", "y": "y", "z": "z", "w": "w", "width": "w", "h": "h", "height": "h", "r": "r",
                      "radius": "r", "angle": "angle", "rotation": "angle", "opacity": "alpha", "alpha": "alpha",
-                     "size": "size"}
+                     "size": "size", "d": "d", "depth": "d", "rx": "rx", "rz": "rz"}
 
     def _c_tween(self, statement):
         parts = statement.parts
@@ -5205,6 +6156,7 @@ class GublanRuntime:
         now = time.perf_counter()
         step = min(0.1, max(0.0, now - self._effects_time))
         self._effects_time = now
+        self._tick_motion(step)
         if self._tweens:
             for tween in list(self._tweens):
                 obj, key, start, target, duration, elapsed, easing = tween
@@ -5264,17 +6216,19 @@ class GublanRuntime:
 
     def _c_cube(self, statement):
         parts = statement.parts
+        if len(parts) not in (6, 7, 9):
+            raise ValueError("use: cube <name> <x> <y> <z> <size> [color]")
         self.objects[self._name(parts[1])] = {
             "type": "cube",
             "x": self._num(parts[2], "cube x"), "y": self._num(parts[3], "cube y"),
             "z": self._num(parts[4], "cube z"), "size": self._num(parts[5], "cube size"),
-            "angle": 0, "color": self.activecolor,
+            "angle": 0, "color": self._shape_color(parts, 6),
         }
 
     def _c_sphere(self, statement):
         parts = statement.parts
-        if len(parts) != 6:
-            raise ValueError("use: sphere <name> <x> <y> <z> <radius>")
+        if len(parts) not in (6, 7, 9):
+            raise ValueError("use: sphere <name> <x> <y> <z> <radius> [color]")
         x, y, z, radius = (self.val(part) for part in parts[2:6])
         if any(type(value) not in (int, float) or not math.isfinite(value) for value in (x, y, z, radius)):
             raise ValueError("sphere position and radius must be finite numbers")
@@ -5282,7 +6236,7 @@ class GublanRuntime:
             raise ValueError("sphere radius must be a positive number")
         self.objects[self._name(parts[1])] = {
             "type": "sphere", "x": x, "y": y, "z": z, "radius": radius, "angle": 0,
-            "color": self.activecolor,
+            "color": self._shape_color(parts, 6),
         }
 
     def _c_camera(self, statement):
@@ -5358,7 +6312,7 @@ class GublanRuntime:
         }
 
     def _c_spin(self, statement):
-        obj = self._object(statement.parts[1], ("cube", "sphere", "sprite", "image"), "spin")
+        obj = self._object(statement.parts[1], SHAPES_3D + ("sprite", "image"), "spin")
         obj["angle"] = self._num(statement.parts[2], "angle")
 
     def _c_button(self, statement):
@@ -5385,13 +6339,13 @@ class GublanRuntime:
 
     def _c_move(self, statement):
         parts = statement.parts
-        obj = self._object(parts[1], ("box", "circle", "cube", "sphere", "text", "image", "sprite", "line",
-                                      "button", "textbox", "slider", "checkbox", "ellipse", "polygon"), "move")
+        obj = self._object(parts[1], SHAPES_3D + ("box", "circle", "text", "image", "sprite", "line", "button",
+                                                  "textbox", "slider", "checkbox", "ellipse", "polygon"), "move")
         if len(parts) == 3:
             offset = self.val(parts[2])
             if isinstance(offset, Vector2):
                 dx, dy, dz = offset.x, offset.y, 0
-            elif isinstance(offset, Vector3) and obj["type"] in ("cube", "sphere"):
+            elif isinstance(offset, Vector3) and obj["type"] in SHAPES_3D:
                 dx, dy, dz = offset.x, offset.y, offset.z
             else:
                 raise ValueError("use a vec2 for 2D objects or a vec3 for 3D objects")
@@ -5400,7 +6354,7 @@ class GublanRuntime:
             dz = self.val(parts[4]) if len(parts) > 4 else 0
             if any(isinstance(v, bool) or type(v) not in (int, float) for v in (dx, dy, dz)):
                 raise ValueError("move needs numeric x and y amounts")
-            if dz and obj["type"] not in ("cube", "sphere"):
+            if dz and obj["type"] not in SHAPES_3D:
                 raise ValueError("only 3d objects can move along z")
         obj["x"] += dx
         obj["y"] += dy
@@ -5441,7 +6395,7 @@ class GublanRuntime:
         obj = self.objects.get(self._name(parts[1]))
         if not isinstance(obj, dict):
             raise ValueError(f"object '{self._name(parts[1])}' does not exist yet")
-        if obj["type"] in ("cube", "sphere"):
+        if obj["type"] in SHAPES_3D:
             if self.mode != "3d" or len(parts) != 6:
                 raise ValueError("animate a 3d shape with: animate <object> <x> <y> <z> <seconds>")
             target_position = tuple(self.val(part) for part in parts[2:5])

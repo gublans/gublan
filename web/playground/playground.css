@@ -418,6 +418,7 @@ body.resizing iframe { pointer-events: none; }
   animation: status-in calc(.3s * var(--speed)) var(--ease);
 }
 .stage-note[hidden] { display: none; }
+.stage-note a { pointer-events: auto; color: var(--accent-light); }
 .stage-tools {
   position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; gap: 6px;
   opacity: 0; transform: translateY(-4px); transition: opacity .2s, transform .2s var(--ease);
@@ -633,26 +634,178 @@ body.resizing iframe { pointer-events: none; }
 .palette li.chosen { background: var(--select); }
 .palette li mark { background: none; color: var(--accent-light); font-weight: 600; }
 
-/* ----- phones and narrow windows: stack the panes ----- */
+/* ----- data files in the project (.txt, .csv, .json): a small square before the name ----- */
+.file-tab.data::before { content: ""; width: 6px; height: 6px; flex: none; background: var(--syn-number); opacity: .8; }
+.file-tab.data .name { font-style: italic; }
+.hintbar .hint-about { color: var(--muted); }
+
+/* ----- files the programs saved ----- */
+.count.quiet { background: var(--panel-alt); color: var(--muted); }
+.saved-files { padding: 4px 0 14px; font-size: 13px; }
+.saved-files h3 { margin: 12px 14px 4px; font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--accent-light); }
+.saved-files .empty { margin: 0; padding: 10px 14px; color: var(--muted); }
+.saved-file {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 14px;
+  border-left: 2px solid transparent; transition: background-color .15s, border-color .15s;
+}
+.saved-file:hover { background: var(--hover); border-left-color: var(--accent); }
+.saved-name { display: grid; min-width: 0; }
+.saved-name code { font: 12.5px var(--mono); overflow-wrap: anywhere; }
+.saved-name small { color: var(--dim); font-size: 11.5px; }
+.saved-buttons { display: flex; gap: 6px; flex: none; }
+.saved-buttons button, .saved-foot button { height: 26px; padding: 0 9px; font-size: 12px; }
+.saved-foot { padding: 12px 14px 0; }
+.saved-files button.danger, .modal button.danger { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, var(--border)); }
+.saved-files button.danger:hover, .modal button.danger:hover { background: color-mix(in srgb, var(--error) 14%, var(--panel-alt)); }
+
+/* ----- publishing ----- */
+.modal-back {
+  position: fixed; inset: 0; z-index: 44; display: grid; place-items: center; padding: 16px;
+  background: rgba(0, 0, 0, .45); animation: fade-in calc(.2s * var(--speed)) ease both;
+}
+.modal-back.leaving { animation: fade-out calc(.18s * var(--speed)) ease both; }
+.modal {
+  width: min(540px, 100%); max-height: 100%; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+  animation: modal-in calc(.25s * var(--speed)) var(--ease) both;
+}
+@keyframes modal-in { from { opacity: 0; transform: translateY(12px) scale(.985); } }
+.modal-body { display: grid; gap: 14px; padding: 18px 20px 22px; overflow: auto; }
+.modal-body p { margin: 0; line-height: 1.6; }
+.modal .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.modal .about { font-size: 12.5px; color: var(--dim); }
+.modal .about.bad { color: var(--error); }
+.field { display: grid; gap: 6px; }
+.field > span { font-size: 12px; color: var(--muted); letter-spacing: .03em; }
+.field input, .field textarea, .field select {
+  width: 100%; max-width: none; padding: 8px 10px; border: 1px solid var(--border); background: var(--editor-bg);
+  color: var(--text); font: inherit;
+}
+.field input { height: 38px; }
+.field textarea { resize: vertical; min-height: 70px; line-height: 1.5; }
+
+/* ----- playing a published creation ----- */
+.creation {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px;
+  padding: 16px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  animation: drop-in calc(.35s * var(--speed)) var(--ease) both;
+}
+.creation-text { min-width: 0; }
+.creation h1 { margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.creation p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+#creation-about { max-width: 72ch; color: var(--text); white-space: pre-wrap; }
+.creation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+body.player .layout { grid-template-columns: minmax(0, 1fr) !important; }
+body.player .editor-pane, body.player #split-x, body.player .views [data-view="code"] { display: none; }
+
+/* ----- the game's keys as buttons over it (touch screens) ----- */
+.pad {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 16px; padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); pointer-events: none;
+  animation: fade-in calc(.3s * var(--speed)) ease both;
+}
+.pad-side { display: flex; align-items: flex-end; gap: 16px; }
+.pad-side.right { justify-content: flex-end; }
+.pad-cross { display: grid; grid-template-columns: repeat(3, 54px); grid-template-rows: repeat(2, 54px); gap: 6px; }
+.pad-cross .up { grid-area: 1 / 2; }
+.pad-cross .left { grid-area: 2 / 1; }
+.pad-cross .down { grid-area: 2 / 2; }
+.pad-cross .right { grid-area: 2 / 3; }
+.pad-buttons { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: 8px; max-width: 220px; }
+.pad-key {
+  pointer-events: auto; width: 54px; height: 54px; padding: 0; justify-content: center;
+  font: 600 15px var(--sans); color: #fff; background: rgba(18, 18, 18, .42); border: 1px solid rgba(255, 255, 255, .3);
+  backdrop-filter: blur(4px); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.pad-buttons .pad-key { width: auto; min-width: 64px; padding: 0 14px; }
+.pad-key:hover:not(:disabled) { background: rgba(18, 18, 18, .42); }
+.pad-key.down { background: color-mix(in srgb, var(--accent) 80%, transparent); border-color: var(--accent-light); transform: scale(.94); }
+
+/* ----- symbols over the phone keyboard ----- */
+.keybar {
+  display: none; flex: none; gap: 4px; padding: 6px 8px; overflow-x: auto; scrollbar-width: none;
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+.keybar::-webkit-scrollbar { display: none; }
+.keybar button { flex: none; min-width: 40px; height: 40px; padding: 0 10px; justify-content: center; font: 16px var(--mono); touch-action: manipulation; }
+.keybar button.word { font: 13px var(--sans); }
+body.touch .keybar { display: flex; }
+
+/* ----- code, game and output along the bottom of a phone ----- */
+.views { display: none; flex: none; background: var(--panel); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+.views button {
+  position: relative; flex: 1; flex-direction: column; justify-content: center; gap: 2px; height: 56px; padding: 0;
+  border: 0; background: none; color: var(--muted); font-size: 12px;
+}
+.views button:hover:not(:disabled) { background: none; }
+.views button svg { width: 20px; height: 20px; fill: none; }
+.views button svg circle { fill: currentColor; }
+.views button[aria-pressed="true"] { color: var(--text); box-shadow: inset 0 2px 0 var(--accent-light); }
+.views .count { position: absolute; top: 6px; left: calc(50% + 8px); }
+
+/* ----- phones and narrow windows: one pane at a time ----- */
 @media (max-width: 820px) {
-  html, body { height: auto; }
-  .layout { display: flex; flex-direction: column; }
-  .splitter { display: none; }
-  .editor-pane { height: 60vh; }
-  .stage { flex: none; height: 62vw; min-height: 240px; }
-  .panel { flex: none; height: 40vh; }
-  .bar { padding: 8px 16px; }
-  .actions { gap: 6px; }
-  .actions button, .download { padding: 0 10px; }
+  html, body { height: var(--app-height, 100dvh); overflow: hidden; }
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  .bar { flex-wrap: nowrap; padding: 8px 12px; gap: 10px; }
+  .site { flex: none; }
+  .brand span { display: none; }
+  .actions { flex: 1; min-width: 0; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+  .actions::-webkit-scrollbar { display: none; }
+  .actions > * { flex: none; }
+  /* right aligned, but still scrollable when it overflows (flex-end would push the first buttons out of reach) */
+  .actions { justify-content: flex-start; }
+  .actions > :first-child { margin-left: auto; }
+  #open-settings { display: none; } /* settings stay in the … menu */
+  .actions button, .download { padding: 0 10px; height: 36px; }
+  .actions button.icon { width: 36px; padding: 0; }
   .actions button span, .download span { display: none; }
   .actions button.primary span { display: inline; }
-  .actions button.account { width: 32px; padding: 0; justify-content: center; }
+  .actions button.account { width: 36px; padding: 0; justify-content: center; }
   .actions button.account .face { display: inline-grid; }
-  select { max-width: 120px; }
+  body:not(.running) #stop, .download { display: none; }
+  select { height: 36px; }
+  /* the examples menu shrinks to an icon; tapping it still opens the phone's own list */
+  .picker { position: relative; flex: none; }
+  .picker::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--text);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z'/%3E%3C/svg%3E") center / 15px no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z'/%3E%3C/svg%3E") center / 15px no-repeat;
+  }
+  .picker select { width: 36px; max-width: none; padding: 0; color: transparent; text-indent: -999px; appearance: none; -webkit-appearance: none; }
+  .picker select option, .picker select optgroup { color: var(--text); background: var(--panel); text-indent: 0; }
+  .layout { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .splitter { display: none; }
+  .pane { flex: 1 1 auto; min-height: 0; }
+  body[data-view="code"] .run-pane, body[data-view="game"] .editor-pane, body[data-view="output"] .editor-pane { display: none; }
+  body[data-view="game"] .run-pane .tabs, body[data-view="game"] .run-pane .panel { display: none !important; }
+  body[data-view="game"] .stage { flex: 1 1 auto; }
+  body[data-view="output"] .stage { flex: 0 0 36%; min-height: 120px; }
+  body[data-view="output"] .panel:not([hidden]) { flex: 1 1 auto; }
   .stage-tools { opacity: 1; transform: none; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; height: 40px; }
+  .file-tab { height: 40px; }
+  .file-tab .close { opacity: 1; width: 24px; height: 24px; }
+  .add-file { width: 40px; }
+  .file-tabs .status { display: none; }
+  .foot { display: none; }
+  .views { display: flex; }
+  body.keyboard .bar, body.keyboard .views, body.keyboard .creation, body.keyboard .hintbar { display: none; }
+  .creation { padding: 12px 14px; gap: 10px; }
+  .creation h1 { font-size: 17px; }
+  .creation-actions button { height: 36px; }
   .setting { grid-template-columns: 1fr; gap: 4px; }
   .keys li { grid-template-columns: 1fr; gap: 2px; }
-  .file-tabs .status { display: none; }
+  .drawer { width: 100vw; padding-bottom: env(safe-area-inset-bottom); }
+  .modal-back { padding: 0; place-items: end stretch; }
+  .modal { width: 100%; max-height: 92%; border-width: 1px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .toasts { bottom: calc(72px + env(safe-area-inset-bottom)); width: calc(100vw - 32px); }
+  .toast { text-align: center; }
+  .palette { top: 8px; }
+  /* phones zoom in on text fields smaller than this */
+  input, select, textarea { font-size: 16px; }
+  .saved-file { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

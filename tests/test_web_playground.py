@@ -64,9 +64,19 @@ class PlaygroundSiteTests(unittest.TestCase):
         self.assertEqual(self.manifest["version"], VERSION)
 
     def test_3d_examples_are_marked(self):
-        marked = {example["file"]: example["web"] for example in self.manifest["examples"]}
-        self.assertFalse(marked["examples/shapes_3d.gubl"])
-        self.assertTrue(marked["examples/hello.gubl"])
+        # 3d runs in the browser since 1.0.9: the flag only sorts the examples picker
+        marked = {example["file"]: example["3d"] for example in self.manifest["examples"]}
+        self.assertTrue(marked["examples/shapes_3d.gubl"])
+        self.assertTrue(marked["examples/dodge_3d.gubl"])
+        self.assertFalse(marked["examples/hello.gubl"])
+
+    def test_explore_page_is_built(self):
+        for name in ("index.html", "explore.css", "explore.js"):
+            self.assertTrue(os.path.isfile(os.path.join(self.root, "explore", name)), name)
+        with open(os.path.join(self.root, "explore", "index.html"), encoding="utf-8") as handle:
+            page = handle.read()
+        self.assertIn('<script src="../account.js"></script>', page)
+        self.assertIn('href="../home.css"', page)
 
     def test_bridge_works_without_pygame_or_opengl(self):
         # a fresh python with only the site's files, like pyodide: bridge.py must stand in for pygame and opengl

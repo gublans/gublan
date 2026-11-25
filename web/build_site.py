@@ -6,7 +6,8 @@
 
 the site has two parts:
     /             the home page (web/home/): intro, downloads and live github numbers
-    /playground/  the online playground (web/playground/)
+    /playground/  the online playground (web/playground/). ?c=<id> plays a published creation
+    /explore/     the creations people published (web/explore/)
     /account.js   sign in with discord, used by both (web/account.js)
 
 the playground is copied together with the real gublan files it needs (the checker, the javascript translator,
@@ -25,12 +26,15 @@ WEB = os.path.join(ROOT, "web")
 PLAYGROUND = "playground"  # the playground's folder on the site: gublan.xyz/playground/
 
 HOME_FILES = ["index.html", "home.css", "home.js"]
+EXPLORE_FILES = ["index.html", "explore.css", "explore.js"]
 PAGE_FILES = ["index.html", "playground.css", "playground.js", "bridge.py"]
 PYTHON_FILES = ["gublancore.py", "gublantranslate.py", "studio/__init__.py", "studio/version.py"]
 OTHER_FILES = ["runtimes/gublan_runtime.js", "logo.png", "logo.ico"]
 
 # examples offered in the picker, in this order (anything else in examples/ is added after them)
-FIRST_EXAMPLES = ["hello.gubl", "examples/responsive_2d.gubl", "examples/maps_and_vectors.gubl"]
+FIRST_EXAMPLES = ["hello.gubl", "examples/responsive_2d.gubl", "examples/bouncy_balls.gubl",
+                  "examples/maps_and_vectors.gubl", "examples/notes_and_files.gubl", "examples/shapes_3d.gubl",
+                  "examples/garden_3d.gubl", "examples/dodge_3d.gubl"]
 
 
 def _copy(relative, out, target=None):
@@ -125,6 +129,12 @@ def _home(out, version):
     _copy("logo.ico", out)
 
 
+def _explore(out):
+    """gublan.xyz/explore: what people published. it shares the home page's stylesheet."""
+    for name in EXPLORE_FILES:
+        _copy(os.path.join("web", "explore", name), out, os.path.join("explore", name))
+
+
 def _account(out):
     """account.js, shared by the home page and the playground, with the supabase project filled in from the studio
     (studio/account.py), so the website and the app use one set of accounts. the url and the publishable key are
@@ -160,8 +170,7 @@ def _playground(out, version):
     examples = []
     for path in ordered:
         _copy(path, out, os.path.join("examples", os.path.basename(path)))
-        examples.append({"file": "examples/" + os.path.basename(path), "title": _title(path),
-                         "web": not _uses_3d(path)})
+        examples.append({"file": "examples/" + os.path.basename(path), "title": _title(path), "3d": _uses_3d(path)})
 
     themes, accents, game = _looks()
     manifest = {
@@ -185,6 +194,7 @@ def build(out):
     os.makedirs(out)
     version = _version()
     _home(out, version)
+    _explore(out)
     _account(out)
     manifest = _playground(out, version)
     # github pages would otherwise run jekyll, which hides files and folders that start with an underscore
@@ -194,5 +204,5 @@ def build(out):
 
 if __name__ == "__main__":
     folder, info = build(sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "_site"))
-    print(f"built gublan.xyz ({info['version']}) in {folder}: the home page and /{PLAYGROUND}/ "
+    print(f"built gublan.xyz ({info['version']}) in {folder}: the home page, /explore/ and /{PLAYGROUND}/ "
           f"with {len(info['examples'])} examples")
